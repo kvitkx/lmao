@@ -1,375 +1,407 @@
-# lmao — UI design handoff
+# lmao — UI design
 
-Strict, utilitarian, engineering-style interface in the spirit of teenage engineering. Pure black theme. Stack: Flask templates + Tailwind CSS v4 (browser build, no build step) + Alpine.js.
+The interface of a local engineering tool: strict, utilitarian, pure black. Structure comes from hairlines, not fills. Colour carries state and nothing else. Every screen is a dense, left-aligned column of text, numbers and small square markers.
 
-## Source of truth
+Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpine.js. This document describes the target state of the interface; features that need new backend support are marked **(backend)**.
 
-- Variables collection `tokens` has `WEB` code syntax (`var(--color-*)`)
-- Light theme: **not designed yet**. Tokens are the only thing that must change when it is added. Icons use `currentColor` for this reason. Print already uses a light variant of the tokens (see "Export and print"); a light theme can start from those values.
+## 1. Principles
 
-| Figma frame | Node | Alpine state | setup | archive |
-|---|---|---|---|---|
-| 01 start | `11:2` | `view='idle'` | open | open |
-| 02 running | `11:120` | `view='running'` | **closed** (auto on run start) | open |
-| 03 results | `17:108` | `view='results'`, `resultsView='model'` | open | open |
-| 04 results | `17:308` | same | closed | open |
-| 05 results | `17:447` | same | open | closed |
-| 06 results (focus) | `17:625` | same | closed | closed |
-| 07 per question | `34:238` | `resultsView='question'` | open | open |
+1. **Zero radius, zero shadows, zero gradients.** `_theme.html` removes those theme keys, so `rounded-*` and `shadow-*` produce nothing.
+2. **Hairlines over fills.** Structure is built from 1px lines (`border-line`). The only elevation device is `bg-surface`: side panels, answer boxes, code boxes, the load notice and the chart quadrant.
+3. **Colour is rationed.** Neutrals, plus `link` for "in progress" and `warn` for errors. Scores are plain numbers. Bars, charts and matrices are monochrome: no green/yellow/red scales.
+4. **Squares, not circles.** Markers, dots, rank badges and chart points are square.
+5. **Text is left-aligned, at least 13px.** The topbar status and the first screen are the only centred blocks, and the text inside them stays left-aligned.
+6. **Numbers are first-class content.** Large numerals (`text-display font-thin`) for key figures; `tabular-nums` only where digits change live or stand in columns. Never on body text: in Inter it also widens the hyphen, which breaks names like `ministral-3:3b`.
+7. **Honest feedback.** Every wait has a visible reason: a breathing dot, a counter, a timer. The UI never claims what the backend does not report (for example VRAM state).
+8. **Model output is text.** Nothing from a model or from a connection is ever rendered as HTML. Everything goes through `x-text`.
+9. **Short names in the UI, full names in `title`.** Model names are shortened (`shortNames()`); the full name stays in tooltips, the archive and exports.
 
-The frames predate several additions (first screen checklist, topbar status, phase progress, chart, summary figures, Markdown answers). See "Additions without a Figma frame".
+## 2. Tokens
 
-| Component | Node |
-|---|---|
-| button/primary, button/secondary | `4:2`, `4:4` |
-| field/input, field/select | `4:6`, `4:10` |
-| checkbox-row | `4:24` |
-| archive-item | `4:34` |
-| nav-toggle | `4:51` |
-| status-row | `4:68` |
-| activity-dot | `33:221` |
-| view-tab | `33:228` |
+### Colour
 
-## Rules of the system
-
-1. Zero border-radius, zero shadows, zero gradients. `_theme.html` removes those theme keys, so `rounded-*` / `shadow-*` produce nothing.
-2. Body text is Inter Light 300 at 13px. Inter Thin 100 is used only for large score numerals.
-   `tabular-nums` only where digits change live (topbar status, phase counters, row timers) or stand in columns (matrix, except the name column). Not on the body: in Inter it also widens the hyphen, which breaks names like `ministral-3:3b`.
-3. Structure comes from 1px hairlines (`border-line`), not fills. The only elevation device is `bg-surface` (panels, answer boxes, load notice, chart quadrant).
-4. Color is rationed: neutrals + `link` (running state, dot) + `warn` (errors only). Scores are plain numbers, no green/yellow/red scale; bars and charts are monochrome.
-5. Text is always left-aligned. Min text size 13px. The topbar status and the first screen are the only centred blocks; the text inside them is still left-aligned. The chart and score scale are axes, not text blocks.
-
-## Setup
-
-`templates/_theme.html` is a head partial: fonts, `@tailwindcss/browser@4.3.2`, theme tokens, Alpine `3.14.9`. Include it in `base.html` inside `<head>`.
-
-Notes:
-- `--spacing: 1px`, so `p-22` = 22px, `gap-15` = 15px, `w-320` = 320px, `h-66` = 66px. Tailwind doc examples such as `p-4` become 4px.
-- Tailwind's browser build compiles in the client: expect a short unstyled flash and runtime cost. Fine for a local tool; use `x-cloak` for Alpine blocks.
-- Theme `@theme` must live in an inline `<style type="text/tailwindcss">`; the browser build does not load an external theme file.
-- `static/favicon.svg` is a square icon (frame with a filled strip, the nav-toggle motif). Its colours are hardcoded: it renders outside the page and cannot see CSS variables. This is the only exception to "tokens only".
-
-## Tokens
-
-| Figma | CSS var | Utilities | Value |
+| Token | CSS variable | Utilities | Value |
 |---|---|---|---|
-| color/bg | `--color-bg` | `bg-bg`, `text-bg` | `#000000` |
-| color/surface | `--color-surface` | `bg-surface` | `#0f0e12` |
-| color/line | `--color-line` | `border-line`, `bg-line` | `#2a292e` |
-| color/fg | `--color-fg` | `text-fg`, `bg-fg`, `border-fg` | `#f6f8f7` |
-| color/fg-muted | `--color-fg-muted` | `text-fg-muted`, `border-fg-muted`, `bg-fg-muted` | `#b2b2b2` |
-| color/link | `--color-link` | `text-link`, `bg-link` | `#3b9ae1` |
-| color/warn | `--color-warn` | `text-warn`, `border-warn`, `bg-warn` | `#f0a800` |
+| bg | `--color-bg` | `bg-bg`, `text-bg` | `#000000` |
+| surface | `--color-surface` | `bg-surface` | `#0f0e12` |
+| line | `--color-line` | `border-line`, `bg-line` | `#2a292e` |
+| fg | `--color-fg` | `text-fg`, `bg-fg`, `border-fg` | `#f6f8f7` |
+| fg-muted | `--color-fg-muted` | `text-fg-muted`, `border-fg-muted`, `bg-fg-muted` | `#b2b2b2` |
+| link | `--color-link` | `text-link`, `bg-link` | `#3b9ae1` |
+| warn | `--color-warn` | `text-warn`, `border-warn`, `bg-warn` | `#f0a800` |
 
-| Figma text style | Utilities |
-|---|---|
-| text/caption | `text-caption font-light` (13/1.5) |
-| text/subheading | `text-subheading font-light` (19/1.15) |
-| text/heading-sm | `text-heading-sm font-light` (24/1.15) |
-| text/heading | `text-heading font-light` (26/1.15) |
-| text/display | `text-display font-light` (40/1.11) |
-| text/numeral | `text-display font-thin` (40, weight 100) |
-| text/code | `font-mono text-caption font-light` |
+Meaning: `link` = something is running now. `warn` = an error, or something that needs attention (a hidden error in a collapsed range, a failed connection). Nothing else uses these two.
 
-Spacing values used in the design: 15, 22, 33, 66 plus small gaps 4, 6, 8, 10, 12.
+A light theme is not designed. Tokens are the only thing that has to change when it arrives; icons use `currentColor`. The print variant (section 9) is a ready starting point.
 
-## Layout
+### Typography
+
+Inter 100 and 300, IBM Plex Mono 300. Body text is Inter Light at 13px. Inter Thin is used only for large numerals. Bold is shown by colour (`text-fg`), because only 100 and 300 are loaded.
+
+| Style | Utilities | Size / line height |
+|---|---|---|
+| caption (body) | `text-caption font-light` | 13 / 1.5 |
+| subheading | `text-subheading font-light` | 19 / 1.15 |
+| heading-sm | `text-heading-sm font-light` | 24 / 1.15 |
+| heading | `text-heading font-light` | 26 / 1.15 |
+| display | `text-display font-light` | 40 / 1.11 |
+| numeral | `text-display font-thin` | 40, weight 100 |
+| code | `font-mono text-caption font-light` | 13 / 1.5 |
+
+Mono is used for code, request previews and technical labels (endpoints, parameter names).
+
+### Spacing
+
+`--spacing: 1px`, so `p-22` is 22px and `w-320` is 320px. Tailwind's documentation examples shrink accordingly (`p-4` is 4px).
+
+Scale: 15, 22, 33, 66 for structure. 4, 6, 8, 10, 12 for small gaps.
+
+### Motion
+
+- `breathe`: 2s ease-in-out, opacity 1 to 0.25. Used only by the activity dot.
+- Panels animate their width in 200ms ease-out.
+- Progress fills animate `width` in 200ms.
+- Everything respects `prefers-reduced-motion` (`motion-reduce:` variants): the result is a hard cut.
+
+### Technical notes
+
+- `@theme` must live in an inline `<style type="text/tailwindcss">`; the browser build does not load an external theme file.
+- The browser build compiles on the client: expect a short unstyled flash. Alpine blocks use `x-cloak`.
+- `static/favicon.svg` has hardcoded colours because it renders outside the page. It is the only exception to "tokens only".
+- Tailwind, Alpine and the fonts load from pinned CDN URLs. Offline machines get an unstyled page. Planned: vendor them with pinned versions and hashes.
+
+## 3. Layout
 
 ```
 <body class="h-screen flex flex-col overflow-hidden">
-  topbar            h-66 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-22 px-22 border-b border-line
+  topbar          h-66 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-22 px-22 border-b border-line
   <div class="flex flex-1 min-h-0">
-    aside#setup     shrink-0 overflow-hidden bg-surface, w-320 border-r | w-0
-      inner         w-319 h-full p-22 overflow-y-auto
-    main            flex-1 min-w-0 p-33 overflow-y-auto
-    aside#archive   shrink-0 flex justify-end overflow-hidden bg-surface, w-280 border-l | w-0
-      inner         w-279 shrink-0 h-full p-22 overflow-y-auto
+    aside#setup   shrink-0 overflow-hidden bg-surface; w-320 border-r | w-0
+      inner       w-319 h-full p-22 overflow-y-auto
+    main          flex-1 min-w-0 p-33 overflow-y-auto
+    aside#archive shrink-0 flex justify-end overflow-hidden bg-surface; w-280 border-l | w-0
+      inner       w-279 shrink-0 h-full p-22 overflow-y-auto
   </div>
-  live region       sr-only aria-live="polite"
+  live region     sr-only, aria-live="polite"
 </body>
 ```
 
-- Panels animate their width: `transition-[width] duration-200 ease-out`, `motion-reduce:transition-none` gives the hard cut. The content has a fixed width inside, so it is clipped, never re-wrapped. Closed panels are `inert` (out of the tab order and the a11y tree). The archive content is anchored to the window edge (`justify-end`): both panels close like a mirrored curtain. The strip in the nav toggle animates with the panel.
-- The toggles in the topbar (and the `[` / `]` keys) are the only panel controls.
-- Setup panel: form on top, `run evaluation` pinned to the bottom (`flex flex-col justify-between gap-22`). Any input in the form clears `formError`.
-- Center content uses `flex flex-col gap-33`. Section = label row + content with `gap-15`.
+Three panels: setup (left), work area (centre), archive (right). The side panels collapse so the centre keeps the focus.
 
-## Components
+- Panels animate their width. The content has a fixed width, so it is clipped, never re-wrapped. A closed panel is `inert`: out of the tab order and the accessibility tree.
+- The archive content is anchored to the window edge (`justify-end`), so both panels close like a mirrored curtain.
+- Panel state is not persisted across reloads.
+- Centre content is `flex flex-col gap-33`. A section is a label row plus content with `gap-15`.
 
-Every component below is a Jinja macro in `templates/_components.html` (one macro = one Figma component), unless noted.
+### Panels per screen
+
+| Screen | setup | archive |
+|---|---|---|
+| start | open | open |
+| running | closed (closes automatically when a run starts) | open |
+| results | open | open |
+| any screen, focus mode | closed | closed |
+
+Any combination is allowed; the table lists the defaults.
 
 ### Topbar
-Grid `1fr / auto / 1fr`. Left: setup toggle, wordmark button (`lmao` + subtitle, truncates), centre: status, right: archive toggle (`justify-self-end`).
 
-The wordmark is a button: back to the first screen (`goHome()`). A run in progress keeps going: `busy` depends on `run.status` only, so the form and the archive stay locked on every screen.
+Left: setup toggle and the wordmark (`lmao` plus the subtitle, which truncates). Centre: status. Right: archive toggle.
 
-Status (from existing state only):
+- The wordmark is a button that returns to the first screen. A running evaluation keeps going; the form and the archive stay locked on every screen while it runs.
+- Nav toggles: a 20px square with a strip. Open: a 7px filled strip on the panel side. Closed: a 1px line. The strip animates with the panel. The label sits beside the icon (`[icon] setup`, `archive [icon]`), so both toggles share one centre line. Hotkeys are in `aria-keyshortcuts` and in the title.
 
-| state | status |
+Status (derived from existing state only):
+
+| State | Status |
 |---|---|
-| run in progress, any screen | activity dot + `running · 02:31 · 14 / 71` (`tabular-nums`); `back to run` while another screen is shown |
+| run in progress, any screen | activity dot and `running · 38:05 · 181 / 217` in `tabular-nums`; `back to run` while another screen is shown |
 | running screen, run failed | `stopped` (warn) |
 | results | run name |
-| idle | `connecting…`, `no models found` (warn), otherwise `ollama · N models` (muted) |
+| idle, connecting | `connecting…` |
+| idle, no models | `no models found` (warn) |
+| idle, local judge | `ollama · N models` (muted) |
+| idle, remote judge | `ollama · N models · judge api.openai.com 142 ms` (muted); latency from the last connection test **(backend)** |
 
-### Nav toggle
-Macro `ui.nav_toggle(flag, controls, label, side, key)`. Icon 20x20 box with a strip: open = 7px filled strip on the panel side, closed = 1px line; the strip animates (`transition-all duration-200`). The label sits beside the icon: setup `[icon] setup`, archive `archive [icon]`, so both toggles have the same height and centre line. `aria-keyshortcuts` and a title carry the hotkey. Allow ±1px tolerance versus Figma.
+### Keyboard
 
-### Section label
-`ui.section_label(text | text_expr)`
-```html
-<div class="pb-8 border-b border-line text-fg-muted">02 candidates</div>
-```
+`[` toggles setup, `]` toggles archive, `Esc` returns to the first screen. Keys are matched by `event.code`, so they work on any keyboard layout. They are ignored inside inputs and with modifiers.
 
-### Field / select / textarea
-`ui.field(label, model, rows, placeholder)`
-```html
-<label class="flex flex-col gap-8">
-  <span class="text-fg-muted">01 judge model</span>
-  <input class="w-full bg-bg border border-line px-12 py-10 text-fg placeholder:text-fg-muted focus:border-fg outline-none">
-</label>
-```
-Select (inline in `index.html`): same box, native `<select class="appearance-none ...">` plus a 12px chevron (`stroke="currentColor"`, `text-fg-muted`) at the right.
+## 4. Components
 
-### Checkbox row
-`ui.checkbox_row`. `<label class="group ... text-fg-muted has-checked:text-fg">` with a `sr-only` native input, so keyboard and form behaviour stay native. The box (`size-14 border border-fg-muted`) uses `group-has-checked:bg-fg group-has-checked:border-fg` and `group-has-focus-visible:` for the outline; the check icon is `stroke="currentColor"` + `text-bg`. No `peer`: nested text works. An optional hint line keeps its own `text-fg-muted`. Needs `:has()` (Firefox 121+, Safari 15.4+).
+Each component is one Jinja macro in `templates/_components.html`. Arguments named `show`, `model`, `state`, `label`, `meta` and `*_expr` are Alpine expressions.
 
-### Buttons
-- Primary: `bg-fg text-bg px-22 py-13 w-full` (full width in the setup panel). Disabled: `bg-line text-fg-muted cursor-not-allowed`.
-- Secondary: `border border-fg-muted text-fg px-22 py-13`.
-- Warn button (inside a warn notice): `border border-warn px-15 py-9`, hover `bg-line`.
-- Hover: primary `hover:bg-fg-muted`, secondary `hover:border-fg`.
+### Foundations
 
-### Test case block (setup)
-Expanded: `border border-line p-15 flex flex-col gap-12` with header row (`case 01` / `collapse` / `remove`). Collapsed: `border border-line px-15 py-12 flex items-center gap-15` (`case 02`, tag, `edit`).
-Field order: tag, question, reference answer, specific criteria (display only: the payload keys are named).
+| Macro | Purpose |
+|---|---|
+| `section_label` | hairline under a muted caption: `pb-8 border-b border-line text-fg-muted` |
+| `activity_dot` | 8px square, `bg-link animate-breathe`; shown only while something runs |
+| `field` | label above an input or textarea: `bg-bg border border-line px-12 py-10`, focus `border-fg` |
+| `checkbox_row` | label is the group, native input is `sr-only`; box `size-14`, filled when checked; optional hint line |
+| `warn_notice` | `border border-warn px-15 py-12 text-warn`, `role="alert"`, optional action button; errors only |
+| `tabs` | tablist: active `bg-fg text-bg`, inactive `border-line text-fg-muted`; arrows cycle, Home/End jump |
+| `nav_toggle` | see Topbar |
+| `card_head` | title (`text-subheading`) left, metrics (muted) right, hairline below |
 
-### Test cases file (import / export)
-Two text buttons under `+ add test case`: `import` and `export` (`text-fg-muted`, `hover:text-fg`, same style as `collapse` / `remove`). `export` is disabled while no case has a question. `import` opens a hidden `<input type="file" accept=".json">`. Errors use the warn notice (`casesError`); success is announced through the live region.
+Buttons:
 
-File format, the same field names as the `/api/evaluate` payload:
+- primary: `bg-fg text-bg px-22 py-13`, full width in the setup panel; disabled `bg-line text-fg-muted`
+- secondary: `border border-fg-muted text-fg px-22 py-13`; hover `border-fg`
+- text button (`collapse`, `remove`, `import`, `edit`, `show`): muted, hover `text-fg`
+- warn button (inside a warn notice): `border border-warn px-15 py-9`; hover `bg-line`
+
+Select: the same box as a field, native `<select class="appearance-none">` with a 12px chevron.
+
+### Status row
+
+`status_row(state, label, meta)`: state (72px) | label | meta. Used on the first screen, in preflight and in the "now" list.
+
+Colours: `done`, `ready` = fg. `running` = link. `queued`, `skipped` = muted. `error` = warn.
+
+### Rank badge
+
+A 20px square with a two-digit number (`01`), `border border-fg`. The number is the model's rank by mean score and never changes when the table is re-sorted. Variants: thin border = ordinary model; filled (`bg-fg text-bg`) = recommended; thick border = best on the metric shown (best score or fastest). Badges tie rows, chart points and bars together across the page.
+
+### Matrix cell
+
+A 16px square in a models × questions grid. The state is encoded by shape and fill, in the same colours as the rest of the UI:
+
+| State | Look |
+|---|---|
+| planned | empty, hairline outline |
+| answering | filled `link` |
+| answer ready | outline `fg` |
+| grading | outline `fg` with a small `link` square inside |
+| graded | filled `fg` |
+| generation error | filled `warn` |
+| judge error | outline `warn` |
+
+The legend is always shown under the matrix. A cell has a tooltip (`ministral-3:3b · q4`, `judge error · invalid JSON`).
+
+### Value bar
+
+A thin track (`h-2 bg-line`) under a number, with a `bg-fg` fill proportional to the value. `bg-fg-muted` for muted values (questions without a reference). Empty for errors. A dashed vertical tick marks a reference line (the median) when the column has one.
+
+### Key figure
+
+Label (muted), value (`text-display font-thin`) with a unit, caption (muted). Captions are relative: `best of 10`, `#7 of 10 · best 65`, `only model`.
+
+### Answer box
+
+`bg-surface border border-line`, toolbar on the right (`raw` toggles the source, `copy` copies it), rendered Markdown below. `copy` exists only in a secure context (localhost or https). Used for answers, reference answers and the judge summary.
+
+### Markdown
+
+`parseMarkdown()` produces blocks; `ui.md` renders them with `x-text` only.
+
+- Blocks: headings (h1–h2 use `text-subheading`), paragraphs, lists (ordered lists keep their numbers), code fences (`bg-bg`, `whitespace-pre`, horizontal scroll, a language tag above), tables (hairline cells; the header needs the `|---|` row), rules.
+- Inline: `**bold**` is `text-fg`; `` `code` `` is mono with `bg-bg`.
+- Not supported, stays text: links, italics, images, HTML, nested lists (flattened).
+- A `markdown` fence around the whole text is removed; the judge summary also drops a bare fence.
+- Answers are parsed once per run (`WeakMap`); both views share the blocks.
+
+### Code box
+
+`bg-surface border border-line p-15 font-mono`, an optional header row (title left, actions right). Used for the request preview.
+
+## 5. Screens
+
+### 5.1 Start
+
+**Setup panel**, top to bottom, with `run evaluation` pinned to the bottom (`flex flex-col justify-between gap-22`). Any input clears `formError`.
+
+1. **01 judge.** A three-way tab: `local`, `ollama cloud`, `openai api`.
+   - `local`: a select of installed models.
+   - `ollama cloud`: a select of cloud models; a hint that grading runs in parallel and that prompts and answers leave the machine.
+   - `openai api`: shows the saved connection (see *Connection* below) and a model field.
+2. **02 candidates.** A scrolling list of checkbox rows (max 240px). Empty state: a warn notice with `reload`.
+3. **03 judge criteria (optional).** A textarea; applied to every question.
+4. **04 test cases.** See below.
+5. Form error (warn notice), then the primary button.
+
+**Test cases.** Expanded case: `border border-line p-15`, header `case 01 · collapse · remove`; fields: tag, question, reference answer, specific criteria. Collapsed: `case 02 · tag · edit` on one line. `+ add test case` is a secondary button. `import` and `export` sit under it as text buttons; `export` is disabled while no case has a question; errors appear in a warn notice.
+
+File format, with the same field names as the `/api/evaluate` payload:
+
 ```json
 {"version": 1, "base_rationale": "...", "test_cases": [{"tag": "", "question": "", "specific_rationale": "", "reference": ""}]}
 ```
-- Export writes `payloadCase()` for every case with a question: trimmed, empty optional fields left out. The form calls the criteria field `rationale`; `caseFields()` / `payloadCase()` map it.
-- Import checks `file.size` (256 KB) before reading, then `parseCasesFile()`: version 1, types, at most 200 cases, `case 03: the question is empty`. Unknown fields are ignored, `null` counts as missing. Content is shown only through `x-text`.
-- Import into an empty form replaces it. Otherwise the cases are added after the existing ones. Empty cases are dropped either way. Imported cases are collapsed. The general criteria of the file are used only while the field is empty.
 
-### Warn notice
-`ui.warn_notice(show, text, action, action_label)`: `border border-warn px-15 py-12 text-warn`, `role="alert"`, optional action button (`reload`, `back to setup`). Errors only.
+- Export writes every case that has a question, trimmed, with empty optional fields left out.
+- Import checks the size (256 KB) before reading, then validates the version, types and count (at most 200). Errors name the case: `case 03: the question is empty`. Unknown fields are ignored; `null` counts as missing.
+- Import into an empty form replaces it; otherwise cases are appended. Blank cases are dropped. Imported cases arrive collapsed. The general criteria of the file are used only while the field is empty.
 
-### First screen (`view='idle'`)
-Centred block, `max-w-560`: `new evaluation` (`text-heading`), one muted line, a checklist of status rows built from the form state by the `checklist` getter, and buttons.
-- Rows: `01 judge`, `02 candidates`, `03 test cases`, `04 run evaluation`.
-- States: `done`, `queued`, `error` (no models, Ollama unreachable), `ready` (everything filled), `running` (a run is in progress).
-- Buttons: `back to run` while a run is in progress, `open setup` while the panel is closed.
+**Connection (openai api) (backend).** A bordered block in the setup panel.
 
-### Run step row (status-row)
-`ui.status_row(state, label, meta, title_expr)`. Used on the running screen and the first screen.
-```html
-<div class="flex items-start gap-15 py-10 border-b border-line">
-  <div class="w-72 shrink-0 flex items-center gap-8" :class="stateClass(state)">
-    activity dot (running only) + state
-  </div>
-  <div class="flex-1 min-w-0 break-words" :class="isMuted(state) && 'text-fg-muted'">label</div>
-  <div class="max-w-320 break-words text-fg-muted tabular-nums">meta</div>
-</div>
-```
-Colours: `done`, `ready` = fg; `running` = link; `queued`, `skipped` = muted; `error` = warn.
+- Header: `connection · openai`, `cancel` on the right while editing.
+- Fields: `base url`, `api key` (shown masked with the last four characters), `model`.
+- A note: `stored on the server, never shown again`. The key is never returned to the browser after saving.
+- Actions: `test`, `save`.
+- States: *no connection* (an empty block with a single call to action), *editing*, *saved* (summary line with the host and `edit`), *error* (warn notice with the reason, for example an authentication or network failure).
 
-### Activity dot
-`ui.activity_dot(show)`. Square 8px (zero-radius system): `inline-block size-8 shrink-0 bg-link animate-breathe motion-reduce:animate-none`. Used in the running row, phase segment, topbar status and the load notice. If a round dot is wanted, add `rounded-full` and a `--radius-full` theme key.
+**Centre: the first screen.** A block of `max-w-560`: `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
 
-### Load notice (under the running row)
-Shown only after the row has been `running` for ~8 s, on the first call of a model load group. The backend does not report loading, so the text makes no claim about VRAM. In cloud mode it is relevant only to local candidate rows.
-```html
-<div class="pl-87 py-10 border-b border-line" x-show="showLoadNotice(s)" x-cloak>
-  <div class="bg-surface border border-line p-15 flex flex-col gap-8">
-    <div class="flex items-center gap-8">activity dot + the model may still be loading — this is normal</div>
-    <p class="text-fg-muted">each model is loaded once at the start of its phase and stays loaded for 10 minutes. a large model can take 10–60 s to load, so the first answer is slow. nothing is frozen.</p>
-  </div>
-</div>
-```
-`pl-87` = status column 72 + gap 15, so the box aligns with the row label. The notice has no `aria-live` of its own: it is announced once through the page live region.
+1. **checklist**: `01 judge`, `02 candidates`, `03 test cases`, `04 run evaluation`. Row states: `done`, `queued`, `error`, `ready`, `running`. The judge row says `editing connection` while the connection form is open.
+2. **route** (shown for a remote judge): three bordered boxes joined by labelled arrows: `candidates · N · local ollama` → *answers* → `lmao · blind grading` → *prompt* → `judge · api.openai.com`, and *grade* back. Under it: `this machine` on the left, `internet · tls` on the right.
+3. **preflight** (remote judge) **(backend)**: status rows run against the connection, with technical labels in mono: model list reachable (status, latency, model count), structured output supported, seed and temperature accepted, token usage reported, rate limit (`unknown · retry on 429`).
+4. **budget · estimate for this run** (remote judge): four key figures in hairline columns: `judge calls`, `tokens`, `cost`, `sent out`. The captions explain the basis: `3 refs · 9 grades · 1 summary`, `in ~18k · out ~3k`, `gpt-4.1-mini list price`, `graded blind, no names`.
+5. **request preview**: a code box titled `grading call · no model names` with `key redacted · copy as curl`. It shows the real shape of one grading request with placeholders for the question, reference and answer.
 
-### Progress
-Grid `grid-cols-[2fr_2fr_2fr_1fr] gap-33`: one segment per phase (`01 reference`, `02 answers`, `03 grading`, `04 summary`), filled from the rows, so phases fill independently (a cloud judge grades while local candidates still answer).
-- Segment = button: label row (activity dot + short name, coloured by phase state) and `side` on the right, then an `h-4 bg-line` track with an `h-4 bg-fg` fill (`transition-[width] duration-200`, off with reduced motion).
-- `side` = `finished / total`, then the phase duration once done. A single-call phase (summary) has no counter, which is why it is half width.
-- Duration = wall clock from the first start to the last done (server timestamps), so parallel calls are not added up. `fmtSpan`: `41.2 s` under a minute, `mm:ss` above.
-- `error` and `skipped` rows count as finished; errors are shown as `· N err` (warn).
-- Click scrolls to the group of rows (`scrollToPhase`).
-- The overall `progressbar` is `sr-only` (assistive tech only).
-- There is no separate `running / elapsed` header: elapsed and the step count are in the topbar, `stopped` too.
+Buttons below: `back to run` while a run is in progress; `open setup` while the panel is closed.
 
-### Phase group (running)
-Header `flex justify-between items-center pb-8 border-b border-line`: title left; once the phase is done, `side · show/hide` right. A finished phase folds into its header; a phase with errors stays open unless folded by hand (`run.expanded`).
+### 5.2 Running
 
-Inside `02 candidate answers` and `03 grading` the rows are grouped by model (`modelGroups()` in `lib.js`, `ui.model_group_head`). Reference and summary have one group (the judge) and no header.
-- Only the model that works now is open; finished and queued models are folded. A group is `running` from its first started row until its last one is finished, so it does not fold between two rows.
-- Header: activity dot (running) + short name left; `! N err` (warn), `N skipped` and `side · show/hide` right. `side` is `finished / total` while running, `ok / total · duration` when done (`13/15 · 50.3 s`). Duration = first start to last end, as for phases.
-- Errors never open a group (the screen would jump during a long run): they show as `! N err`; click the header to open it (`run.openModels`, key `phase:model`, the manual choice wins over the default).
-- A failed answer makes its grading row `skipped`; skipped rows count as finished and are shown apart, not as successes.
+The setup panel closes. Elapsed time and the step count are in the topbar.
 
-### Comparison (`02 comparison`)
-Section header row: label on the left, `table` / `chart` tabs on the right.
+**Progress.** A grid of four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each segment is a button: the label (with an activity dot while running) and `finished / total` on the right, then an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates still answer. A finished phase also shows its duration (wall clock from the first start to the last end). Errors show as `· N err` in warn. Summary is a single call: half width, no counter. Clicking a segment scrolls to its rows. An `sr-only` `progressbar` carries the overall value.
 
-**Table.** Grid generated from the question count: `model | mean | median | pass | q1…qN | c/s | t/s | time, s`. Header cells `text-fg-muted`; mean `text-heading-sm`; median and pass default text; c/s, t/s and time `text-fg-muted`. c/s is characters of the cleaned answer per second: tokenizers differ between models, so t/s does not compare across them. Cells: `err` (generation error, warn), `?` (judge error, warn), `*` (truncated), muted (question without a reference). Wide matrices scroll horizontally with a sticky model column (the cell stretches to the row height, so the score bars of scrolled columns do not show below it); `tabular-nums` on rows except the name column.
-Under every score: an `h-2 bg-line` track with a `bg-fg` bar of `score%` (`bg-fg-muted` for questions without a reference, empty for errors). Monochrome: rule 4 holds.
+**Matrix.** `models × questions`, with the judge mode noted on the right (`local judge · one model in VRAM at a time`, or the cloud variant).
 
-**Navigation.** The model name, the q headers and the score cells are buttons (native keyboard, global focus outline, no new styles):
-- model name → its card in `per model` (switches the tab);
-- q header → its card in `per question` (switches the tab);
-- score cell → its eval block in the **active** view, no tab switch (both views hold every answer). `err` / `?` / muted cells point there too; a missing result (`–`) is a disabled button.
+- Rows: the reference row (judge name in muted text, with its answered count and no graded count) and one row per candidate. The model currently working is coloured `link`.
+- Columns: model, `time` (total answering time of the model), question columns, `answered`, `graded`.
+- Footer rows: per-question `answered` and `graded` counts; a count in `warn` means an error in that column.
+- Cells use the matrix cell states (section 4). Hovering a cell shows its tooltip.
+- Legend and a one-line explanation under the grid.
 
-`jumpTo(id, view)` sets `resultsView`, waits for `$nextTick` (both views are `x-if`), scrolls with `scrollIntoView` (instant with reduced motion) and focuses the target (`tabindex="-1"`, `scroll-mt-33`). Ids come from `domId()` in `lib.js`: a slug plus a FNV-1a hash, because model names contain `:` and `/`. An answer has the same id in both views; only one view is in the DOM.
+**Long runs (more than 10 questions).** The matrix shows a window of 10 question columns.
 
-**Chart.** Mean score (y, fixed 0–100 so runs compare) against median chars/s (x, linear, ticks 1/2/5 × 10ⁿ).
-- Plot box `h-320 border-l border-b border-line` inside gutters `pt-22 pr-22 pb-55 pl-44` (y ticks left, x ticks and `chars/s` below). Everything is HTML positioned in %, labels stay 13px; the only SVG is the Pareto polyline (`vector-effect: non-scaling-stroke`, dashed `stroke-fg-muted`).
-- Quadrant "faster and better than the median": `bg-surface`, bounded by dashed median lines. The bound is relative (medians of this run): there is no absolute threshold on the client.
-- Median labels sit inside the plot next to their line (flipped near the right edge / the top), so nothing sticks out of the box.
-- Points: 8px squares, `bg-fg` = recommended, `border-fg` = others. The label is right of the point (left near the right edge); `text-fg` inside the quadrant, otherwise muted.
-- Legend: one wrapping row under the plot with four entries: recommended, model (mean score, median c/s), faster and better than the median, Pareto line.
-- Models without a mean score or c/s are listed below as "not plotted".
-- The plot has `role="img"` with a text summary; the table tab carries the same data.
+- A line above the grid: `24 questions · showing q07–q16`, with `follow current · on/off`, `‹ prev` and `next ›`.
+- Columns outside the window collapse into counters at the edges (`‹ 6`, `8 ›`) in every row. A counter turns `warn` if any hidden cell has an error; its tooltip summarises the hidden range (`5 graded · 1 judge error (q4)`).
+- `follow current` moves the window with the active question. Manual paging turns it off.
 
-### Summary (results)
-Verdict (label, short name `text-heading`, rule) → four key figures of the recommended model in hairline columns (`grid grid-cols-4 border-y border-line`; label / `text-display font-thin` value + unit / caption `best of N` or `#r of N · best X`) → `notes` and `judge` rows in a `120px / 1fr` grid with gap 33, the same columns as the eval block. Full model names in the judge text are replaced with the UI short names (`shortenNames`). No recommendation: no figures, the rest stays.
+**Now.** Under the matrix, a `now` section lists the calls in flight as status rows: state, label, timer. In cloud mode several rows can run at once.
 
-### Eval block (model card and question card)
-`ui.eval_block(head, first)`; expects the entry as `e`.
-```html
-<div :id="e.anchor" tabindex="-1" class="flex gap-33 py-22 scroll-mt-33" :class="e.error ? 'border border-warn px-22 my-15' : 'border-b border-line'">
-  <div class="w-120 shrink-0">
-    <div class="text-fg-muted">head</div>
-    <div class="text-display font-thin" :class="e.error && 'text-warn'">score or err</div>
-    <div :class="e.error ? 'text-warn' : 'text-fg-muted'">/ 100 or evaluation failed</div>
-    <div class="text-fg-muted">category</div>
-  </div>
-  <div class="flex-1 min-w-0 flex flex-col gap-12">
-    <div class="text-fg-muted">first line</div>
-    notes (muted), comment, answer box
-  </div>
-</div>
-```
-In the per-model view `head` is the question label and `first` the question. In the per-question view the left column shows the model short name and the first right line shows `rank 01 / 03` (`not ranked` for failed).
+**Load notice.** Shown only after a row has been `running` for about 8 seconds on the first call of a model load group, so it appears only where a model may still be loading. It says that loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
-### Card
-`border border-line p-22`; header `flex justify-between items-center gap-15 pb-15 border-b border-line` with title `text-subheading`, metrics `text-fg-muted` (`ui.card_head`).
+**Errors.** A failed run shows a warn notice with `back to setup`. Rows in flight when the stream breaks become `error · interrupted`. The connection is not reopened automatically, because the server replays the stream from the start.
 
-### Answers by category (model card)
-Under the card header: `answers by category · n=N`, one row per judge category (always, also 0, so cards compare), then `uncategorised` / `generation error` / `judge error` only when present. Row: `grid-cols-[180px_1fr_80px]`, label, `h-4` bar (`bg-fg`; `bg-warn` only for error rows), `count · pct%`.
+### 5.3 Results
 
-### Score scale (per-question card)
-Hairline 0–100 with a 1px tick per distinct score (`h-9`; `h-15` when several models share it, names in the tooltip). Below: `0`, `range min–max` (or `one graded answer · N`), `100`.
+**Header.** Run name (`text-heading`) and a muted line (`finished … · took … · judge … · cloud judge`). On the right: `export json csv md print`.
 
-### View tabs
-Macro `ui.tabs(state, [(value, text), …], label)`. Ids: `tab-<state>-<value>`, panel `panel-<state>`. Arrows cycle, Home / End jump (`setTab`, `cycleTab`); the focus follows the active tab.
-```html
-<div class="flex" role="tablist">
-  <button role="tab" :aria-selected="resultsView==='model'" @click="resultsView='model'"
-          class="px-15 py-9 border" :class="resultsView==='model' ? 'bg-fg text-bg border-fg' : 'border-line text-fg-muted hover:text-fg'">per model</button>
-  …
-</div>
-```
-Used for `02 comparison` (table / chart) and `03 view` (per model / per question), always in the section header row on the right (`flex justify-between items-center pb-8 border-b border-line`).
+**Two tabs:** `overview` and `answers`. Under the tabs the overview has an anchor navigation on the right: `summary · models · speed vs quality · details · questions · run`.
 
-### Answer box
-`ui.answer_box(blocks, raw)`: `bg-surface border border-line`, toolbar right (`raw` toggles the source, `copy` copies the source), then the rendered Markdown. `copy` is shown only in a secure context (`localhost` / https): the Clipboard API does not exist elsewhere. Used for answers and reference answers.
+#### Overview
 
-### Markdown
-`parseMarkdown()` in `lib.js` → blocks, rendered by `ui.md` with `x-text` only: HTML from a model is shown as text, never executed.
-- Blocks: headings (h1–h2 `text-subheading`, others caption `text-fg`), paragraphs and lists `text-fg-muted` (ordered lists keep their numbers), code fences (`bg-bg` inside the surface box, `whitespace-pre`, horizontal scroll, language tag above), tables (hairline cells; the header needs the `|---|` row), `---`.
-- Inline: **bold** = `text-fg` (only 100/300 are loaded), `code` = mono `text-fg bg-bg`.
-- Not supported (stays text): links, italics, images, HTML, nested lists (flattened).
-- A ```` ```markdown ```` wrapper is removed; the judge summary also drops a bare ```` ``` ```` wrapper (`bareFence`).
-- Answers are parsed once per run (`WeakMap` cache): both views share the blocks.
+**01 summary.**
+- The verdict: the label (`recommended` or `no recommendation`), the short model name (`text-heading`) and the rule in words.
+- Four key figures of the recommended model in a 2×2 grid beside the verdict: mean score, pass rate, speed (c/s) and median time, each with its place in the run.
+- `notes` row (muted): the judge is also a candidate, questions without a reference, low confidence.
+- `judge summary`: the judge text as Markdown, collapsed by default (`show`). Full model names in it are replaced with short names.
 
-### Archive item
-`py-15 border-b border-line`; title `text-subheading` (active: `text-fg` with a leading `size-6 bg-fg` marker; otherwise `text-fg-muted`); meta `text-fg-muted` three lines: date, `N models · N qs`, `judge: <full name>`. Disabled while a run is in progress.
-Sorted newest first on the client (`sortHistory`): time from the `…_YYYYMMDD_HHMMSS` end of the task id, `timestamp` as the fallback.
+**02 models.** One sortable table, one row per model.
 
-### Keyboard
-`[` setup, `]` archive, `Esc` first screen. `event.code`, so layout-independent (works on the Ukrainian layout); ignored in inputs and with modifiers.
+- Columns: rank badge, model, `mean` (default sort, descending), `median`, `pass`, `c/s`, `time, s`, `length`, `score/GB`, `tok/pass`, `memory GB`. Each numeric cell has a value bar. The first column is the badge, so a re-sorted table keeps the numbers of the models.
+- A click on a column header sorts by it; the active column shows the direction.
+- Definitions under the table: c/s is characters per second; time is the median answering time (lower is better); length is the average characters per answer; tok/pass is tokens spent per correct answer (lower is better); score/GB is mean score per GB on disk; memory is the loaded size as reported by Ollama **(backend)**.
+- Wide tables scroll sideways with a sticky model column; the sticky cell stretches to the row height.
+- Cell notes: `err` (generation error, warn), `?` (judge error, warn), `*` (truncated), muted (question without a reference, excluded from the scores).
 
-### Export and print
-In the results header, right of the run title: `export json csv md print` (`text-fg-muted`, `hover:text-fg`, `shrink-0`; hidden when printing). `json`, `csv` and `md` are `<a href download>` to `/api/results/<id>/export?format=…`; the server sends an attachment. `print` calls `window.print()`.
+**03 speed vs quality.** A scatter of mean score (y, fixed 0–100 so runs compare) against median chars/s (x, linear, ticks at 1/2/5 × 10ⁿ).
+- Points are 20px rank badges. Filled = recommended; thick border = best score and fastest; thin = other models. Direct labels: `best score`, `recommended`, `fastest`.
+- The quadrant faster and better than both medians is `bg-surface`, bounded by dashed median lines with their values in the plot (`median 90.5 c/s`, `median 52.5`). The labels flip near the right edge and the top, so nothing leaves the box.
+- A dashed Pareto line joins the models nobody beats on both axes. It is the only SVG; everything else is positioned HTML.
+- A legend in one wrapping row under the plot. Models without a score or c/s are listed as "not plotted". The plot has `role="img"` with a text summary.
 
-`@media print` in `_theme.html` (plain CSS, unlayered, so it wins over the utilities):
-- The tokens get a light variant: `bg` #ffffff, `surface` #f5f5f6, `line` #c9c9cf, `fg` #000000, `fg-muted` #55555a, `link` #0b5cad, `warn` #8a5a00. This is the only place where colours differ.
-- `print-color-adjust: exact` everywhere, otherwise the `bg-fg` / `bg-line` bars and the surface boxes disappear.
-- The header and both panels are hidden; `h-screen`, `overflow-hidden` on the body and `overflow-y-auto` on `main` are reset, so the report flows over pages. The tabs are hidden. Code blocks wrap.
+**04 details.** Four small multiples in a 2×2 grid. Every panel uses the same badges and shares one model order, so a model is found at the same place in each. Each has a title, a one-line explanation on the right and a dashed median line.
+- `score / GB`: mean score per GB on disk.
+- `tokens / correct`: generated tokens per correct answer; lower is better. An outlier bar is cut with `axis cut`.
+- `memory`: size loaded by Ollama, split into `CPU (VRAM)` and `CPU (RAM, offload)`; the label shows the share on the GPU when a model spills over **(backend)**.
+- `tokens vs characters`: a scatter of tokens/s (x) against chars/s (y) with reference lines for `3 chars/token` and `4 chars/token`; it shows how far chars/s can be compared across tokenizers.
 
-Limits:
-- Only the active view is printed: `per model` or `per question` (they are `x-if`), `table` or `chart`. Switch the tab first.
-- Closed `<details>` with the reference answers print closed.
-- A wide matrix keeps its `overflow-x-auto` and is clipped at the page edge.
+**Answers by category.** Stacked horizontal bars, one per model: perfect, acceptable, violation of instructions, broken logic, garbage, in five monochrome steps from light to dark, with `uncategorised` and error segments only where they occur (errors in warn). A dashed line marks the 80% pass threshold; the pass share is written at the end of the bar.
 
-### Live region
-One `sr-only aria-live="polite"` region per page (`announcement`). Announced: the first event of each phase, the load notice (once per row), finish. Errors use `role="alert"` on the warn notice.
+**05 hardest questions.** The five questions with the lowest mean score: question, mean, a range track (min–max with the mean as a tick), `passed n/N`, and the best model as a badge.
 
-## Alpine state
+**06 run.** How the run was made, in a few muted lines: start time, runtime version, judge and mode, the number of candidates, questions and steps, candidate and judge generation parameters (temperature, seed, `num_predict`, `num_ctx`, thinking off). It exists so a result can be reproduced and compared.
 
-The source of truth is `static/js/lmao.js` (`Alpine.data('lmao')`): panel flags (`setupOpen`, `archiveOpen`), `view` (`idle | running | results`), `resultsView` (`model | question`), `comparisonView` (`table | chart`), the setup form, `names` (display names from `shortNames`), `history`, `run` (rows, progress, timers, folded phases), `report` (everything the results screen shows, built once by `buildReport()` in `lib.js`), `announcement`, `canCopy`.
+#### Answers
 
-Getters: `busy` (`run.status === 'running'`), `topStatus`, `checklist`, `phaseProgress`, `pct`, `elapsed`.
+**01 scores.** A models × questions matrix with every score and a value bar under it. Rows keep the rank badges. The matrix scrolls sideways with a sticky model column and a `… q30 →` hint. The model name jumps to its block below; a score jumps to its answer. A missing result is a disabled cell. Legend: `err`, `?`, muted.
 
-- Run start: `setupOpen = false`, `view = 'running'`, rows are built from the payload, `total` is corrected by the first event with `progress`.
-- `elapsed`, the row timers and the load notice tick from one `setInterval` (`tick`), cleared on completion or error.
-- Panel state is not persisted across reloads.
+**02 answers.** `every answer with its grade and the judge comment`, with a `per model` / `per question` tab.
+- *Per model*: a list of collapsed rows (badge, name, `mean · median · pass · errors`, `show/hide`). An opened model shows its answers as eval blocks and a `N more answers · show all` footer after the first few.
+- *Per question*: one card per question with the score scale (a hairline 0–100 with one tick per distinct score; a taller tick when several models share it), then one eval block per model, best first, failed ones last. Ranks use competition ranking (1, 1, 3).
+- Only one view is in the DOM at a time. An answer has the same id in both views, so a link from the matrix lands on the right block.
 
-## SSE event mapping (`/api/stream/<task_id>`)
+**Eval block.** Two columns, gap 33. Left (120px): the label (question or model), the score in `text-display font-thin`, `/ 100`, the category. Right: the first line (the question, or `rank 01 / 03`), notes (muted), the judge comment, the answer box. A failed block has a `border border-warn` frame, the score replaced by `err`, and the reason in warn.
 
-Every event except `info`, `completed` and `error` carries `phase`, `model`, `question` (`q1`...) and `progress: {done, total}`. Row key: `phase:model:question`; for `reference` the model is the judge, for `summary` the question is `null` (`reference::q1` style, `summary::`).
+**03 reference answers.** `written by the judge unless provided`. One collapsed row per question (`q1 · en-fact-astronomy · provided`), `N more questions · show all`.
+
+### 5.4 Archive
+
+A list in the right panel. Each item: `py-15 border-b border-line`; the title (`text-subheading`; the open run is `text-fg` with a leading `size-6` filled marker, others are muted); three muted lines (date, `N models · N qs`, `judge: <full name>`). Newest first (the time is read from the end of the run id, with the stored timestamp as a fallback). Items are disabled while a run is in progress. Empty and error states have their own muted line or warn notice with `reload`.
+
+## 6. States
+
+| Situation | Treatment |
+|---|---|
+| waiting for a model to load | one `running` state plus the load notice after ~8 s |
+| no models | warn notice with `reload`; status `no models found` |
+| connection missing or failed | warn notice inside the connection block; the checklist judge row is `error` |
+| generation error | `err` cell, warn eval block, the matching grading step is `skipped` |
+| judge error | `?` cell, warn eval block; the answer is kept, excluded from the scores |
+| truncated answer | `*` after the score, a note in the eval block; it can never count as a pass |
+| no reference | muted cells and bars; notes say `excluded from the scores` |
+| run failed | warn notice with `back to setup`; topbar `stopped` |
+| unreadable run file | a warn message in the results area; nothing else breaks |
+| loading | muted `loading…` |
+
+Disabled controls use `bg-line text-fg-muted cursor-not-allowed` (primary) or muted text (others). The global focus style is a 1px `fg` outline with a 2px offset.
+
+## 7. Accessibility
+
+- One `sr-only aria-live="polite"` region per page. It announces the first event of each phase, the load notice (once per row), imports and the finish. Errors use `role="alert"` on the warn notice.
+- Tabs follow the tablist pattern: ids `tab-<state>-<value>`, panel `panel-<state>`, arrows and Home/End, the focus follows the active tab.
+- Everything clickable is a native button or link. The matrix, tables and charts have text equivalents: aria labels on cells and headers, `role="img"` with a summary on plots.
+- A matrix cell state is never carried by colour alone: shape and fill differ.
+- Closed panels are `inert`. Hotkeys do not fire while typing.
+- Checkboxes use `:has()` (Firefox 121+, Safari 15.4+); the native input stays in the DOM.
+
+## 8. Data contract
+
+The sources of truth are `static/js/lmao.js` (Alpine state, SSE, requests) and `static/js/lib.js` (pure helpers, tested with `node --test`). Only what the design depends on is repeated here.
+
+State: panel flags, `view` (`idle | running | results`), `resultsTab` (`overview | answers`), `answersView` (`model | question`), the setup form, the judge connection, `history`, `run` (rows, progress, timers), `report` (everything the results screens show, built once by `buildReport()`), `announcement`.
+
+Getters: `busy`, `topStatus`, `checklist`, `phaseProgress`, `elapsed`.
+
+### Stream events
+
+`/api/stream/<task_id>`. Every event except `info`, `completed` and `error` carries `phase`, `model`, `question` and `progress: {done, total}`. The row key is `phase:model:question`; for the reference phase the model is the judge, and for the summary the question is empty.
 
 | Event | UI |
 |---|---|
-| `reference_start` / `reference_done` | row `reference · q<n>`: `running` / `done` (meta = source) or `error` when `success=false` (no reference, graded without one) |
-| `candidate_start` | group marker only (no row, has no question) |
-| `answer_start` / `answer_done` | row `<short name> · q<n>`: `running`, then `done` or `error` (meta = error text). On `success=false` the matching grading row becomes `skipped` immediately (the backend sends no grading events for it) |
-| `grading_start` / `grading_done` | row `judge · <short name> · q<n>`, same states |
-| `summary_start` / `summary_done` | row `final summary` |
-| `completed` | `done = total`, fetch `/api/results/<id>`, `view='results'`, refresh archive |
-| `error` | `warn` notice, keep panels as they are |
-| `info` | not shown in the new design |
+| `reference_start`, `reference_done` | reference row `running`, then `done` (meta = source) or `error` (graded without a reference) |
+| `candidate_start` | group marker only |
+| `answer_start`, `answer_done` | matrix cell `answering`, then `answer ready` or `generation error`; a failure marks the matching grading cell `skipped` immediately |
+| `grading_start`, `grading_done` | matrix cell `grading`, then `graded` or `judge error` |
+| `summary_start`, `summary_done` | the summary row |
+| `completed` | `done = total`, fetch the results, switch to the results screen, refresh the archive |
+| `error` | warn notice |
+| `info` | not shown |
 
-Progress comes from `event.progress` (`total = Q*(1+2M)+1`, M = unique candidates). In cloud mode several judge rows can be `running` at once. Close the `EventSource` on the first `onerror`: it would reconnect and replay the stream from the start.
+Progress is `total = Q × (1 + 2M) + 1` (M = unique candidates). Durations come from event timestamps, so parallel calls are not added up. A duplicate `*_start` does not reset a running row. A finished row ignores later events. The stream is closed on the first `onerror`.
 
-While no event is due, the stream sends a `: ping` comment line every 15 s (`HEARTBEAT_SEC` in `app.py`). `EventSource` ignores comments, so the client needs no handling. The writes make a closed connection fail, which frees its gunicorn thread instead of holding it until the run ends.
+The server sends a `: ping` comment every 15 seconds, so a closed connection fails a write and frees its thread.
 
-Durations are computed from event `timestamp` fields (ISO) without backend changes.A `*_done` without a start (or with a broken timestamp) gets no duration. A duplicate `*_start` does not reset a running row; a finished row ignores later events.
+## 9. Export and print
 
-## Gaps between design and current backend
+In the results header: `export json csv md print` (muted, hidden when printing). `json`, `csv` and `md` are download links to `/api/results/<id>/export?format=…`; `print` calls `window.print()`. CSV cells that look like formulas are defused, and Markdown exports fence model output.
 
-1. **Load phase is invisible** (`generate()` uses `stream: False`). Done with option (a): one `running` state and a load notice after ~8 s on the first call of a model load group. A real `loading` / `generating` phase needs streaming or `/api/ps` polling.
-2. ~~Short model names~~ done: `shortNames()` in `lib.js`.
-3. ~~Results API fields~~ done in the backend (`judge_model`, `specific_rationale`, `finished_at`).
-4. ~~Per-question view~~ done on the client by transposing `/api/results`.
-5. ~~Ranking and averages~~ done on the client.
-6. ~~innerHTML safety~~ done: all data goes through `x-text`.
-7. ~~Old run files~~ done: `buildReport` throws `ReportFormatError` for files without `questions_results` / `summary.models`; missing fields fall back to `–`.
+`@media print` (plain CSS, unlayered, so it wins over utilities):
+- The tokens get a light variant: `bg #ffffff`, `surface #f5f5f6`, `line #c9c9cf`, `fg #000000`, `fg-muted #55555a`, `link #0b5cad`, `warn #8a5a00`. This is the only place colours differ.
+- `print-color-adjust: exact` everywhere, otherwise bars and surface boxes disappear.
+- The header and both panels are hidden; the body and `main` flow across pages; tabs are hidden; code blocks wrap.
 
-## Not designed yet
+Limits: only the active tab and view are printed, so switch first. Closed `<details>` print closed. A wide matrix is clipped at the page edge.
 
-- Disabled and error states beyond the proposals above, run error screen, cancel behaviour (`cancel run` button exists in Figma, no endpoint yet).
-- Responsive behaviour. Proposal: below ~1024px panels become overlays (`absolute inset-y-0 z-10`) instead of columns.
+## 10. Not designed yet
+
+- Cancel run (needs an endpoint: a flag per task, checks between steps in both modes, unloading in `finally`).
+- A queue of runs.
 - Light theme.
-- SSE reconnect. Because the backend replays the stream from the start, a reconnect could reset the rows to `queued` and subscribe again (limited retries, then check `/api/results/<id>`).
-
-## Decisions made while porting
-
-- **Files.** `templates/_theme.html`, `base.html`, `index.html`, `_components.html`; `static/js/lmao.js` (Alpine state, SSE, requests) and `static/js/lib.js` (pure helpers: `shortName`, `shortNames`, `buildSteps`, `parseMarkdown`, `buildReport`, `buildChart`, `competitionRanks`, `sortHistory`, `domId`, `payloadCase`, `buildCasesFile`, `parseCasesFile`; no DOM, tested with `node --test` in `tests/js/`).
-- **Components.** One Jinja macro per Figma component in `_components.html`: `activity_dot`, `section_label`, `md_inline`, `md`, `answer_box`, `warn_notice`, `field`, `checkbox_row`, `status_row`, `card_head`, `eval_block`, `nav_toggle`, `tabs`.
-- **Short names.** `shortNames()` builds one map per model set. Colliding short names get the quantisation (`foo · Q4_K_M`), otherwise the full name. The full name stays in `title` attributes and in the archive meta.
-- **Matrix.** Per-question scores, mean, median, pass rate, c/s, t/s and time. fails / critical / errors / judge errors live in the model card header (median is shown in both). Scores have no colour scale.
-- **Judge summary.** Markdown is parsed into blocks and rendered with `x-text` (see "Markdown"); bold is shown with `text-fg` because only Inter 100 and 300 are loaded.
-- **Wording.** Questions without a reference: "excluded from the scores" everywhere.
-- **Running screen.** Rows are built up front as `queued` from the request payload and keyed `phase:model:question`. Grading rows go model by model, question by question, in both modes (`_run_local` and `_run_cloud` grade in the same order). The order is display only: events find their row by key. A failed answer marks its grading row `skipped` (the backend sends no event for it). Rows in flight when the stream breaks become `error` / `interrupted`. The stream is closed on the first `onerror` (no auto-reconnect: the backend replays from the start).
-- **Load notice.** Only on the first call of a model load group (first reference, first grading, first answer of each candidate), after ~8 s. No VRAM claims.
-- **Per question view.** Ranks use competition ranking (1, 1, 3); failed answers are `not ranked` and listed last. The denominator is the number of models in the question. Truncated answers are ranked by their score and keep the `*`.
-- **Additions without a Figma frame.** `collapse` in an expanded test case, import / export of test cases, export links and print, cloud judge row, reference field, specific criteria field, `reload` in empty/error states, `back to setup` in the error notice, section numbering `01`–`04` in results, reference answers block, first screen checklist, topbar status and wordmark navigation, phase progress segments and folding, per-model groups in the answer and grading phases, comparison chart and matrix bars, matrix median column and navigation, summary figures, answers by category, score scale, Markdown answers with `raw` / `copy`, hotkeys, favicon.
-- **Interaction states.** Global `:focus-visible` outline (1px `fg`, offset 2px); hover: archive item `bg-bg`, nav toggles, wordmark subtitle, inactive tabs and matrix q headers `text-fg`; matrix model names `text-fg-muted`; primary `bg-fg-muted`, secondary `border-fg`, warn buttons `bg-line`.
-- **Not in this PR.** `cancel run` (needs an endpoint: flag in `TASKS`, check between steps in both `_run_local` and `_run_cloud`, `unload` in `finally`), light theme, responsive overlays, SSE reconnect, vendoring Tailwind / Alpine / fonts (see the CDN note below).
-
-### CDN
-Tailwind browser build, Alpine and the fonts load from pinned CDN URLs without SRI. Offline machines get an unstyled page. Planned follow-up: vendor them into `static/vendor/` with pinned versions and sha256, or at least add `integrity` and `crossorigin`.
+- Responsive behaviour. Proposal: below ~1024px the panels become overlays (`absolute inset-y-0 z-10`) instead of columns.
+- Stream reconnect (needs the server to resume instead of replaying from the start).
+- Vendoring Tailwind, Alpine and the fonts.
