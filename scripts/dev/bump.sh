@@ -22,15 +22,10 @@ for part in "$@"; do
     args+=(--bump "$part")
 done
 
-# --no-deps: do not start Ollama just to bump a version.
-docker compose -f compose.yaml -f compose.dev.yaml \
-    run --rm --no-deps --build \
-    --user "$(id -u):$(id -g)" \
-    --env UV_CACHE_DIR=/tmp/uv-cache \
-    app \
+dev_run --env UV_CACHE_DIR=/tmp/uv-cache app \
     uv version "${args[@]}" --no-sync
 
-new_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' pyproject.toml)"
+new_version="$(project_version)"
 log "Version is now $new_version."
 
 # Only pyproject.toml and uv.lock may change.

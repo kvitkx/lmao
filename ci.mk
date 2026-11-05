@@ -1,12 +1,16 @@
-# Checks. Everything .github/workflows/ci.yml runs is defined here.
+# Checks. Everything the workflows run is defined here:
+# each workflow calls `make report-TARGET` for the targets listed in
+# CI_JOBS, SECURITY_JOBS and RELEASE_JOBS (enforced by check-parity).
 
 export CI_DEV_IMAGE    ?= lmao:dev-ci
 export CI_IMAGE        ?= lmao:ci-local
-export TRIVY_CACHE_DIR ?= $(HOME)/.cache/lmao/trivy
+# In GitHub Actions: $RUNNER_TEMP/trivy-cache, the path that
+# .github/actions/setup-trivy-cache restores and saves.
+export TRIVY_CACHE_DIR ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/trivy-cache,$(HOME)/.cache/lmao/trivy)
 export GH_TOKEN
 
 # Online zizmor audits: always on in GitHub Actions (CI=true),
-# locally only through `make ci`.
+# locally only through `make ci` and `make security`.
 export ZIZMOR_ONLINE ?= $(if $(CI),1,0)
 
 # Tool images live in docker/tools.Dockerfile (single source of truth,
@@ -25,8 +29,25 @@ export REGISTRY_IMAGE    := $(call tool_image,registry)
 # Published image scanned by `make scan-published`. Override for forks.
 export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
 
-.PHONY: check ci \
-        check-workflows check-code check-image test-image \
+# What each workflow runs, as `make report-TARGET`:
+#   ci.yml       -> CI_JOBS        (make ci)
+#   security.yml -> SECURITY_JOBS  (make security)
+#   release.yml  -> RELEASE_JOBS   (the image itself is built by build-push-action)
+export CI_JOBS       := check-workflows check-code check-image
+export SECURITY_JOBS := audit scan-published zizmor-sarif
+export RELEASE_JOBS  := test-image
+
+# Run TARGETS with make -k (every failing check is reported, not only the
+# first), then always render the report: terminal, reports/summary.md and,
+# in GitHub Actions, the job summary. Exits with the status of the checks.
+# Usage in a recipe: @$(call run_report,TITLE,TARGETS)
+run_report = scripts/ci/report.sh begin '$(1)'; \
+	status=0; $(MAKE) -k $(2) || status=$$?; \
+	scripts/ci/report.sh render; \
+	exit $$status
+
+.PHONY: check ci security \
+        check-workflows check-parity check-code check-image test-image \
         check-python lint-python lint-shell lint-docker audit test test-js \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
@@ -34,16 +55,20 @@ export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
 
 ##@ Checks
 
-check: check-workflows check-code check-image ##> All checks offline, no token needed.
-	@echo "All checks passed."
+check: ##> What CI runs, offline (no token needed).
+	@$(call run_report,All checks,$(CI_JOBS))
 
 ci: export ZIZMOR_ONLINE := 1
-ci: check ##> Exactly what GitHub CI runs (needs GH_TOKEN).
+ci: check ##> Exactly what the CI workflow runs (needs GH_TOKEN).
+
+security: export ZIZMOR_ONLINE := 1
+security: ##> Exactly what the daily Security workflow runs (needs GH_TOKEN).
+	@$(call run_report,Security,$(SECURITY_JOBS))
 
 
 ##@ CI jobs
 
-check-workflows: ##> Lint GitHub workflows (actionlint, zizmor).
+check-workflows: check-parity ##> Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
 check-code: check-python lint-shell lint-python audit test test-js ##> Check Python version, lint, audit, run Python and JS tests.
@@ -57,6 +82,9 @@ test-image: smoke-test scan-image ##> Smoke-test and scan existing CI_IMAGE (no 
 
 
 ##@ Building blocks
+
+check-parity: ##> Workflows run exactly the targets in CI_JOBS, SECURITY_JOBS, RELEASE_JOBS.
+	scripts/ci/check-parity.sh
 
 lint-python audit test: build-dev
 
@@ -92,11 +120,22 @@ scan-image: ##> Scan CI_IMAGE for vulnerabilities.
 
 ##@ Scheduled security
 
+# Default SARIF paths for local runs; security.yml sets the same paths.
+scan-published: export SARIF_FILE ?= reports/trivy-latest.sarif
+zizmor-sarif:   export SARIF_FILE ?= reports/zizmor.sarif
+
 scan-published: ##> Scan the published image (latest + current X.Y) with Trivy.
 	scripts/ci/scan-published.sh
 
-zizmor-sarif: ##> Online zizmor audit as SARIF (needs GH_TOKEN, SARIF_FILE).
+zizmor-sarif: ##> Online zizmor audit as SARIF (needs GH_TOKEN).
 	scripts/ci/zizmor-sarif.sh
+
+##@ Reports
+
+# make report-TARGET: run TARGET with a summary report (what CI runs),
+# for example `make report-check-code`.
+report-%:
+	@$(call run_report,$*,$*)
 
 print-%:
 	@printf '%s\n' '$($*)'

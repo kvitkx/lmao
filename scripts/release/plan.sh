@@ -13,8 +13,7 @@ emit() {
     fi
 }
 
-version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' pyproject.toml)"
-[[ -n "$version" ]] || die "Cannot find version in pyproject.toml."
+version="$(project_version)"
 
 # PEP 440 -> semver tag: 1.2.3 -> v1.2.3, 1.2.3rc1 -> v1.2.3-rc.1
 re='^([0-9]+\.[0-9]+\.[0-9]+)((a|b|rc)([0-9]+))?$'

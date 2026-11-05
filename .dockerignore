@@ -37,3 +37,6 @@ history/
 .coverage.*
 coverage.xml
 htmlcov/
+
+# CI reports (scripts/ci/report.sh)
+reports/

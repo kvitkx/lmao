@@ -9,29 +9,22 @@ require_env CI_IMAGE
 container=""
 
 # shellcheck disable=SC2317,SC2329
-cleanup() {
-    local status=$?
-    trap - EXIT
+remove_container() {
+    [[ -n "$container" ]] || return 0
 
-    if [[ -n "$container" ]]; then
-        if [[ "$status" != 0 ]]; then
-            echo "=== Container health ==="
-            docker inspect --format '{{json .State.Health}}' "$container" || true
-            echo "=== Container logs ==="
-            docker logs "$container" 2>&1 || true
-        fi
-
-        docker rm -f "$container" >/dev/null 2>&1 || true
+    if [[ "$1" != 0 ]]; then
+        echo "=== Container health ==="
+        docker inspect --format '{{json .State.Health}}' "$container" || true
+        echo "=== Container logs ==="
+        docker logs "$container" 2>&1 || true
     fi
 
-    exit "$status"
+    docker rm -f "$container" >/dev/null 2>&1 || true
 }
-
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+on_exit remove_container
 
 log "Starting $CI_IMAGE"
+started=$SECONDS
 
 container="$(
     docker run --detach \
@@ -64,8 +57,21 @@ for i in {1..60}; do
 done
 
 [[ "$health" == healthy ]] || die "Application failed to become healthy."
-log "Application is healthy."
+healthy_after=$((SECONDS - started))
+log "Application is healthy after ${healthy_after}s."
 
 user_id="$(docker exec "$container" id -u)"
 [[ "$user_id" != 0 ]] || die "Container is running as root."
 log "Container runs as UID $user_id."
+
+size_bytes="$(docker image inspect --format '{{.Size}}' "$CI_IMAGE")"
+
+{
+    echo "### Smoke test"
+    echo
+    echo "| Image | Healthy after | UID | Size |"
+    echo "|---|---|---|---|"
+    printf '| %s | %ss | %s | %s MiB |\n' \
+        "$CI_IMAGE" "$healthy_after" "$user_id" "$((size_bytes / 1024 / 1024))"
+    echo
+} | report_details

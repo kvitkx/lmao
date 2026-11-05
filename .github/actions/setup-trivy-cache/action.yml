@@ -1,0 +1,21 @@
+name: Set up Trivy cache
+description: >-
+  Restore and save the Trivy DB cache (one key per day) in
+  $RUNNER_TEMP/trivy-cache, the TRIVY_CACHE_DIR that ci.mk uses in GitHub Actions.
+
+runs:
+  using: composite
+  steps:
+    - name: Compute cache day
+      id: day
+      shell: bash
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Trivy data
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        # Keep in sync with TRIVY_CACHE_DIR in ci.mk.
+        path: ${{ runner.temp }}/trivy-cache
+        key: trivy-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.day.outputs.day }}
+        restore-keys: |
+          trivy-v1-${{ runner.os }}-${{ runner.arch }}-

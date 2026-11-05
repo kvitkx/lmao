@@ -8,8 +8,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
 require_env PUBLISHED_IMAGE
 
-minor="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+)\.[0-9]+.*/\1/p' pyproject.toml)"
-[[ -n "$minor" ]] || die "Cannot find version in pyproject.toml."
+version="$(project_version)"
+# 1.2.3 -> 1.2, 1.2.3rc1 -> 1.2
+minor="${version%.*}"
 
 status=0
 seen=" "
