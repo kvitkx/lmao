@@ -25,6 +25,15 @@ export REGISTRY_IMAGE    := $(call tool_image,registry)
 # Published image scanned by `make scan-published`. Override for forks.
 export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
 
+# Run TARGETS with make -k (every failing check is reported, not only the
+# first), then always render the report: terminal, reports/summary.md and,
+# in GitHub Actions, the job summary. Exits with the status of the checks.
+# Usage in a recipe: @$(call run_report,TITLE,TARGETS)
+run_report = scripts/ci/report.sh begin '$(1)'; \
+	status=0; $(MAKE) -k $(2) || status=$$?; \
+	scripts/ci/report.sh render; \
+	exit $$status
+
 .PHONY: check ci \
         check-workflows check-code check-image test-image \
         check-python lint-python lint-shell lint-docker audit test test-js \
@@ -34,8 +43,8 @@ export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
 
 ##@ Checks
 
-check: check-workflows check-code check-image ##> All checks offline, no token needed.
-	@echo "All checks passed."
+check: ##> All checks offline, no token needed.
+	@$(call run_report,All checks,check-workflows check-code check-image)
 
 ci: export ZIZMOR_ONLINE := 1
 ci: check ##> Exactly what GitHub CI runs (needs GH_TOKEN).
@@ -97,6 +106,13 @@ scan-published: ##> Scan the published image (latest + current X.Y) with Trivy.
 
 zizmor-sarif: ##> Online zizmor audit as SARIF (needs GH_TOKEN, SARIF_FILE).
 	scripts/ci/zizmor-sarif.sh
+
+##@ Reports
+
+# make report-TARGET: run TARGET with a summary report (what CI runs),
+# for example `make report-check-code`.
+report-%:
+	@$(call run_report,$*,$*)
 
 print-%:
 	@printf '%s\n' '$($*)'
