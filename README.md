@@ -45,7 +45,7 @@ You need at least two models in Ollama: one judge and one candidate (they can be
 
 Pick one way to run lmao.
 
-### With make (Recommend)
+### With make (recommended)
 
 Requires Docker with Compose v2, GNU Make and Bash. NVIDIA Container Toolkit is needed only for GPU mode.
 
@@ -67,15 +67,24 @@ Stop with `make down ENV=prod`. Run `make help` to list all commands.
 
 ### With Docker
 
-The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/ykvit/lmao`. Both registries carry the same image (same digest). The Docker Hub page has the run command, a Docker Compose example and the list of tags.
+The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/ykvit/lmao`. Both registries carry the same image (same digest). The Docker Hub page also has a Docker Compose example and the list of tags.
+
+If Ollama runs on your machine:
 
 ```bash
-docker run -d --name lmao -p 127.0.0.1:5000:5000 kvitkx/lmao:latest
+docker run -d --name lmao \
+  -p 127.0.0.1:5000:5000 \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  --add-host=host.docker.internal:host-gateway \
+  -v lmao_history:/app/history \
+  kvitkx/lmao:latest
 ```
+
+Open **http://localhost:5000**. Stop with `docker stop lmao`.
 
 - `--add-host` is needed on Linux; Docker Desktop on macOS and Windows resolves `host.docker.internal` on its own.
 - On Linux, Ollama must accept connections from the Docker bridge: start it with `OLLAMA_HOST=0.0.0.0`. Keep that port closed to your network.
-- Docker Hub: use `kvitkx/lmao:latest` instead of `ghcr.io/ykvit/lmao:latest`. Both registries carry the same image (same digest).
+- To pull from GHCR, use `ghcr.io/ykvit/lmao:latest` instead of `kvitkx/lmao:latest`.
 - Tags: `latest`, `X.Y` (for example `2.2`) and exact `X.Y.Z`. See the [releases](https://github.com/ykvit/lmao/releases).
 - Verify the image: `gh attestation verify oci://ghcr.io/ykvit/lmao:latest --repo ykvit/lmao` (for Docker Hub: `oci://docker.io/kvitkx/lmao:latest`)
 
@@ -106,11 +115,11 @@ make test-js                          # JavaScript tests (node --test)
 GH_TOKEN="$(gh auth token)" make ci   # everything GitHub CI runs
 ```
 
-See [CONTRIBUTING](CONTRIBUTING) for commits, branches, PRs and releases, and [DESIGN](DESIGN) for the UI.
+See [CONTRIBUTING](CONTRIBUTING.md) for commits, branches, PRs and releases, and [DESIGN](DESIGN.md) for the UI.
 
 ## Security
 
-lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network. Details and how to report a vulnerability: [SECURITY](SECURITY).
+lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network. Details and how to report a vulnerability: [SECURITY](SECURITY.md).
 
 ## License
 
