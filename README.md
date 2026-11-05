@@ -14,6 +14,7 @@ Benchmark local LLMs with [Ollama](https://ollama.com): blind grading against a 
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square&logo=ruff&logoColor=f6f8f7&labelColor=000000&color=2a292e)](https://docs.astral.sh/ruff/)
 [![Release build](https://img.shields.io/github/actions/workflow/status/ykvit/lmao/release.yml?branch=main&style=flat-square&label=build&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](https://github.com/ykvit/lmao/actions/workflows/release.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ykvit%2Flmao-2a292e?style=flat-square&logo=docker&logoColor=f6f8f7&labelColor=000000)](https://github.com/ykvit/lmao/pkgs/container/lmao)
+[![Docker Hub](https://img.shields.io/badge/docker%20hub-kvitkx%2Flmao-2a292e?style=flat-square&logo=docker&logoColor=f6f8f7&labelColor=000000)](https://hub.docker.com/r/kvitkx/lmao)
 [![Ollama](https://img.shields.io/badge/llm%20runtime-Ollama-2a292e?style=flat-square&logo=ollama&logoColor=f6f8f7&labelColor=000000)](https://ollama.com)
 
 <!-- TODO: add a short screen recording (setup -> run -> results) as docs/assets/demo.gif
@@ -64,25 +65,19 @@ docker compose -f compose.yaml -f compose.prod.yaml exec ollama ollama pull MODE
 
 Stop with `make down ENV=prod`. Run `make help` to list all commands.
 
-### With Docker (image from GHCR)
+### With Docker
 
-Use this if Ollama already runs on your machine.
+The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/ykvit/lmao`. Both registries carry the same image (same digest). The Docker Hub page has the run command, a Docker Compose example and the list of tags.
 
 ```bash
-docker run -d --name lmao \
-  -p 127.0.0.1:5000:5000 \
-  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  --add-host=host.docker.internal:host-gateway \
-  -v lmao_history:/app/history \
-  ghcr.io/ykvit/lmao:latest
+docker run -d --name lmao -p 127.0.0.1:5000:5000 kvitkx/lmao:latest
 ```
-
-Open **http://localhost:5000**. Stop with `docker stop lmao`.
 
 - `--add-host` is needed on Linux; Docker Desktop on macOS and Windows resolves `host.docker.internal` on its own.
 - On Linux, Ollama must accept connections from the Docker bridge: start it with `OLLAMA_HOST=0.0.0.0`. Keep that port closed to your network.
+- Docker Hub: use `kvitkx/lmao:latest` instead of `ghcr.io/ykvit/lmao:latest`. Both registries carry the same image (same digest).
 - Tags: `latest`, `X.Y` (for example `2.2`) and exact `X.Y.Z`. See the [releases](https://github.com/ykvit/lmao/releases).
-- Verify the image: `gh attestation verify oci://ghcr.io/ykvit/lmao:latest --repo ykvit/lmao`
+- Verify the image: `gh attestation verify oci://ghcr.io/ykvit/lmao:latest --repo ykvit/lmao` (for Docker Hub: `oci://docker.io/kvitkx/lmao:latest`)
 
 ### With uv
 
@@ -111,11 +106,11 @@ make test-js                          # JavaScript tests (node --test)
 GH_TOKEN="$(gh auth token)" make ci   # everything GitHub CI runs
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for commits, branches, PRs and releases, and [DESIGN.md](DESIGN.md) for the UI.
+See [CONTRIBUTING](CONTRIBUTING) for commits, branches, PRs and releases, and [DESIGN](DESIGN) for the UI.
 
 ## Security
 
-lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network. Details and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network. Details and how to report a vulnerability: [SECURITY](SECURITY).
 
 ## License
 

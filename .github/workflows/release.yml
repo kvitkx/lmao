@@ -2,8 +2,8 @@ name: Release
 
 # Every push to main builds and verifies the production image once.
 # If pyproject.toml carries a version without a tag yet, that same image
-# (same digest) is copied to GHCR, its provenance attested in the GitHub
-# Attestations API, and the GitHub Release creates the tag.
+# (same digest) is copied to GHCR and Docker Hub, its provenance attested
+# in the GitHub Attestations API, and the GitHub Release creates the tag.
 
 on:
   push:
@@ -60,9 +60,20 @@ jobs:
         id: plan
         run: scripts/release/plan.sh
 
-      - name: Compute image name
+      - name: Compute image names
         id: image
-        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "${GITHUB_OUTPUT}"
+        env:
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+        run: |
+          re='^[a-z0-9_.-]+/[a-z0-9_.-]+$'
+          if [[ ! "${DOCKERHUB_REPOSITORY}" =~ ${re} ]]; then
+            echo "::error::Repository variable DOCKERHUB_REPOSITORY must be namespace/name."
+            exit 1
+          fi
+          {
+            echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}"
+            echo "dockerhub=docker.io/${DOCKERHUB_REPOSITORY}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker
         uses: ./.github/actions/setup-docker # zizmor: ignore[self-repository]
@@ -84,7 +95,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ steps.image.outputs.name }}
+          images: |
+            ${{ steps.image.outputs.name }}
+            ${{ steps.image.outputs.dockerhub }}
           tags: |
             type=semver,pattern={{version}},value=${{ steps.plan.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.plan.outputs.tag }},enable=${{ !contains(steps.plan.outputs.tag, '-') }}
@@ -132,6 +145,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: steps.plan.outputs.release == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Promote verified image to release tags
         if: steps.plan.outputs.release == 'true'
         env:
@@ -150,17 +170,28 @@ jobs:
           # stored in the GitHub Attestations API only, verifiable with
           # gh attestation verify, and GHCR keeps no referrer manifests.
 
+      - name: Attest build provenance (Docker Hub)
+        if: steps.plan.outputs.release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: index.docker.io/${{ vars.DOCKERHUB_REPOSITORY }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          # push-to-registry stays false, same as for GHCR.
+
       - name: Write summary
         env:
           RELEASE: ${{ steps.plan.outputs.release }}
           TAG: ${{ steps.plan.outputs.tag }}
           IMAGE_REF: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          DOCKERHUB_REF: ${{ steps.image.outputs.dockerhub }}@${{ steps.build.outputs.digest }}
         run: |
           {
             if [[ "${RELEASE}" == true ]]; then
               echo "### Published ${TAG}"
               echo
               echo "\`${IMAGE_REF}\`"
+              echo
+              echo "\`${DOCKERHUB_REF}\`"
             else
               echo "### No release"
               echo
