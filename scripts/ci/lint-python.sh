@@ -6,10 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
 require_env CI_DEV_IMAGE
 
-output_format=full
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-    output_format=github
-fi
+output_format="$(ci_format github full)"
 
 docker run --rm \
     --network none \

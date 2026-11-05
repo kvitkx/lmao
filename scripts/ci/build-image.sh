@@ -8,10 +8,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 target="${1:?Usage: build-image.sh dev|production TAG}"
 tag="${2:?Usage: build-image.sh dev|production TAG}"
 
+report_label "build-image ($target)"
 
 cache_args=()
 
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+if in_ci; then
     scope="lmao-${target}"
     cache_args=(
         --cache-from "type=gha,version=2,scope=${scope}"

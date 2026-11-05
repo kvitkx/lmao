@@ -20,10 +20,7 @@ docker_tool \
     "$ACTIONLINT_IMAGE" \
     "${files[@]}"
 
-format=plain
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-    format=github
-fi
+format="$(ci_format github plain)"
 
 if [[ "${ZIZMOR_ONLINE:-0}" == 1 ]]; then
     [[ -n "${GH_TOKEN:-}" ]] \
