@@ -72,14 +72,16 @@ trivy_scan image \
     --input /scan/image.tar \
     --severity CRITICAL,HIGH \
     --ignore-unfixed \
-    --vuln-type os,library \
+    --pkg-types os,library \
     --scanners vuln \
     --timeout 10m \
     --format json \
     --output /report/trivy.json \
     --exit-code 0
 
-trivy_convert --format table
+# Only the detailed table: the summary table needs scanner info that
+# `convert` does not have, and the report already has a summary.
+trivy_convert --format table --table-mode detailed
 
 if [[ -n "${SARIF_FILE:-}" ]]; then
     log "Writing SARIF report: $SARIF_FILE"

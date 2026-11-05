@@ -34,10 +34,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: make check-workflows
+      - name: make report-check-workflows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: make check-workflows
+        run: make report-check-workflows
 
   check-code:
     name: Check code
@@ -53,8 +53,8 @@ jobs:
       - name: Set up Docker
         uses: ./.github/actions/setup-docker # zizmor: ignore[self-repository]
 
-      - name: make check-code
-        run: make check-code
+      - name: make report-check-code
+        run: make report-check-code
 
       - name: Upload coverage report
         if: always()
@@ -83,19 +83,8 @@ jobs:
       - name: Set up Docker
         uses: ./.github/actions/setup-docker # zizmor: ignore[self-repository]
 
-      - name: Set Trivy cache date
-        id: cache-date
-        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Set up Trivy cache
+        uses: ./.github/actions/setup-trivy-cache # zizmor: ignore[self-repository]
 
-      - name: Cache Trivy data
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/trivy-cache
-          key: trivy-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-date.outputs.day }}
-          restore-keys: |
-            trivy-v1-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: make check-image
-        env:
-          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
-        run: make check-image
+      - name: make report-check-image
+        run: make report-check-image

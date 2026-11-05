@@ -2,7 +2,9 @@
 
 export CI_DEV_IMAGE    ?= lmao:dev-ci
 export CI_IMAGE        ?= lmao:ci-local
-export TRIVY_CACHE_DIR ?= $(HOME)/.cache/lmao/trivy
+# In GitHub Actions: $RUNNER_TEMP/trivy-cache, the path that
+# .github/actions/setup-trivy-cache restores and saves.
+export TRIVY_CACHE_DIR ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/trivy-cache,$(HOME)/.cache/lmao/trivy)
 export GH_TOKEN
 
 # Online zizmor audits: always on in GitHub Actions (CI=true),

@@ -9,16 +9,21 @@ name: Security
 
 on:
   schedule:
-    - cron: "17 4 * * *"
+    - cron: "00 4 * * *"
   workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
       - .github/workflows/security.yml
+      - .github/actions/setup-trivy-cache/**
       - ci.mk
+      - docker/tools.Dockerfile
+      - scripts/lib.sh
       - scripts/ci/audit.sh
+      - scripts/ci/report.sh
       - scripts/ci/scan-image.sh
       - scripts/ci/scan-published.sh
+      - scripts/ci/trivy-summary.tpl
       - scripts/ci/zizmor-sarif.sh
 
 permissions:
@@ -46,8 +51,8 @@ jobs:
       - name: Set up Docker
         uses: ./.github/actions/setup-docker # zizmor: ignore[self-repository]
 
-      - name: make audit
-        run: make audit
+      - name: make report-audit
+        run: make report-audit
 
   scan-published:
     name: Scan published image
@@ -66,33 +71,23 @@ jobs:
           persist-credentials: false
 
       - name: Log in to GHCR
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Trivy cache date
-        id: cache-date
-        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Set up Trivy cache
+        uses: ./.github/actions/setup-trivy-cache # zizmor: ignore[self-repository]
 
-      - name: Cache Trivy data
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/trivy-cache
-          key: trivy-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-date.outputs.day }}
-          restore-keys: |
-            trivy-v1-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: make scan-published
+      - name: make report-scan-published
         env:
-          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
           SARIF_FILE: reports/trivy-latest.sarif
-        run: make scan-published
+        run: make report-scan-published
 
       - name: Upload SARIF to Code scanning
         if: ${{ !cancelled() && hashFiles('reports/trivy-latest.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: reports/trivy-latest.sarif
           category: trivy-published-image
@@ -112,15 +107,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: make zizmor-sarif
+      - name: make report-zizmor-sarif
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SARIF_FILE: reports/zizmor.sarif
-        run: make zizmor-sarif
+        run: make report-zizmor-sarif
 
       - name: Upload SARIF to Code scanning
         if: ${{ !cancelled() && hashFiles('reports/zizmor.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: reports/zizmor.sarif
           category: zizmor
