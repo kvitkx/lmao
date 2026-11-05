@@ -2,6 +2,12 @@ name: Security
 
 # Daily checks that do not depend on a code change: new advisories appear
 # for pinned dependencies, actions and the published image.
+# Same as `GH_TOKEN="$(gh auth token)" make security`.
+#
+# Not run on pull requests: the result reflects the published image and
+# today's advisories, not the change under review. To test a change to this
+# workflow or its scripts: `make security`, then
+# `gh workflow run security.yml --ref <branch>`.
 #
 # GitHub disables scheduled workflows in a public repository after 60 days
 # without repository activity (Dependabot merges do not count). If that
@@ -11,20 +17,6 @@ on:
   schedule:
     - cron: "00 4 * * *"
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/security.yml
-      - .github/actions/setup-trivy-cache/**
-      - ci.mk
-      - docker/tools.Dockerfile
-      - scripts/lib.sh
-      - scripts/ci/audit.sh
-      - scripts/ci/report.sh
-      - scripts/ci/scan-image.sh
-      - scripts/ci/scan-published.sh
-      - scripts/ci/trivy-summary.tpl
-      - scripts/ci/zizmor-sarif.sh
 
 permissions:
   contents: read
