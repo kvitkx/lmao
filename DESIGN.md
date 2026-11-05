@@ -2,7 +2,7 @@
 
 The interface of a local engineering tool: strict, utilitarian, pure black. Structure comes from hairlines, not fills. Colour carries state and nothing else. Every screen is a dense, left-aligned column of text, numbers and small square markers.
 
-Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpine.js. This document describes the target state of the interface; features that need new backend support are marked **(backend)**.
+Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpine.js. This document describes the target state of the interface, not only what is built. Blocks without a mark match the code. Other blocks are marked **[partial]** (built in a simpler form, the note says how) or **[planned]** (not built yet). Features that need new backend support are also marked **(backend)**.
 
 ## 1. Principles
 
@@ -159,11 +159,11 @@ Select: the same box as a field, native `<select class="appearance-none">` with 
 
 Colours: `done`, `ready` = fg. `running` = link. `queued`, `skipped` = muted. `error` = warn.
 
-### Rank badge
+### Rank badge [planned]
 
 A 20px square with a two-digit number (`01`), `border border-fg`. The number is the model's rank by mean score and never changes when the table is re-sorted. Variants: thin border = ordinary model; filled (`bg-fg text-bg`) = recommended; thick border = best on the metric shown (best score or fastest). Badges tie rows, chart points and bars together across the page.
 
-### Matrix cell
+### Matrix cell [planned]
 
 A 16px square in a models × questions grid. The state is encoded by shape and fill, in the same colours as the rest of the UI:
 
@@ -201,7 +201,7 @@ Label (muted), value (`text-display font-thin`) with a unit, caption (muted). Ca
 - A `markdown` fence around the whole text is removed; the judge summary also drops a bare fence.
 - Answers are parsed once per run (`WeakMap`); both views share the blocks.
 
-### Code box
+### Code box [planned]
 
 `bg-surface border border-line p-15 font-mono`, an optional header row (title left, actions right). Used for the request preview.
 
@@ -211,7 +211,7 @@ Label (muted), value (`text-display font-thin`) with a unit, caption (muted). Ca
 
 **Setup panel**, top to bottom, with `run evaluation` pinned to the bottom (`flex flex-col justify-between gap-22`). Any input clears `formError`.
 
-1. **01 judge.** A three-way tab: `local`, `ollama cloud`, `openai api`.
+1. **01 judge.** [partial] Built: a select of installed models and a `cloud judge` checkbox. Planned: a three-way tab: `local`, `ollama cloud`, `openai api`.
    - `local`: a select of installed models.
    - `ollama cloud`: a select of cloud models; a hint that grading runs in parallel and that prompts and answers leave the machine.
    - `openai api`: shows the saved connection (see *Connection* below) and a model field.
@@ -232,7 +232,7 @@ File format, with the same field names as the `/api/evaluate` payload:
 - Import checks the size (256 KB) before reading, then validates the version, types and count (at most 200). Errors name the case: `case 03: the question is empty`. Unknown fields are ignored; `null` counts as missing.
 - Import into an empty form replaces it; otherwise cases are appended. Blank cases are dropped. Imported cases arrive collapsed. The general criteria of the file are used only while the field is empty.
 
-**Connection (openai api) (backend).** A bordered block in the setup panel.
+**Connection (openai api) (backend). [planned]** A bordered block in the setup panel.
 
 - Header: `connection · openai`, `cancel` on the right while editing.
 - Fields: `base url`, `api key` (shown masked with the last four characters), `model`.
@@ -243,10 +243,10 @@ File format, with the same field names as the `/api/evaluate` payload:
 **Centre: the first screen.** A block of `max-w-560`: `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
 
 1. **checklist**: `01 judge`, `02 candidates`, `03 test cases`, `04 run evaluation`. Row states: `done`, `queued`, `error`, `ready`, `running`. The judge row says `editing connection` while the connection form is open.
-2. **route** (shown for a remote judge): three bordered boxes joined by labelled arrows: `candidates · N · local ollama` → *answers* → `lmao · blind grading` → *prompt* → `judge · api.openai.com`, and *grade* back. Under it: `this machine` on the left, `internet · tls` on the right.
-3. **preflight** (remote judge) **(backend)**: status rows run against the connection, with technical labels in mono: model list reachable (status, latency, model count), structured output supported, seed and temperature accepted, token usage reported, rate limit (`unknown · retry on 429`).
-4. **budget · estimate for this run** (remote judge): four key figures in hairline columns: `judge calls`, `tokens`, `cost`, `sent out`. The captions explain the basis: `3 refs · 9 grades · 1 summary`, `in ~18k · out ~3k`, `gpt-4.1-mini list price`, `graded blind, no names`.
-5. **request preview**: a code box titled `grading call · no model names` with `key redacted · copy as curl`. It shows the real shape of one grading request with placeholders for the question, reference and answer.
+2. **route** [planned] (shown for a remote judge):three bordered boxes joined by labelled arrows: `candidates · N · local ollama` → *answers* → `lmao · blind grading` → *prompt* → `judge · api.openai.com`, and *grade* back. Under it: `this machine` on the left, `internet · tls` on the right.
+3. **preflight** [planned] (remote judge) **(backend)**: status rows run against the connection, with technical labels in mono: model list reachable (status, latency, model count), structured output supported, seed and temperature accepted, token usage reported, rate limit (`unknown · retry on 429`).
+4. **budget · estimate for this run** [planned] (remote judge): four key figures in hairline columns: `judge calls`, `tokens`, `cost`, `sent out`. The captions explain the basis: `3 refs · 9 grades · 1 summary`, `in ~18k · out ~3k`, `gpt-4.1-mini list price`, `graded blind, no names`.
+5. **request preview**[planned]: a code box titled `grading call · no model names` with `key redacted · copy as curl`. It shows the real shape of one grading request with placeholders for the question, reference and answer.
 
 Buttons below: `back to run` while a run is in progress; `open setup` while the panel is closed.
 
@@ -256,7 +256,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 
 **Progress.** A grid of four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each segment is a button: the label (with an activity dot while running) and `finished / total` on the right, then an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates still answer. A finished phase also shows its duration (wall clock from the first start to the last end). Errors show as `· N err` in warn. Summary is a single call: half width, no counter. Clicking a segment scrolls to its rows. An `sr-only` `progressbar` carries the overall value.
 
-**Matrix.** `models × questions`, with the judge mode noted on the right (`local judge · one model in VRAM at a time`, or the cloud variant).
+**Matrix.** [planned] Built instead: rows grouped by phase and model, each with a fold/unfold header. `models × questions`, with the judge mode noted on the right(`local judge · one model in VRAM at a time`, or the cloud variant).
 
 - Rows: the reference row (judge name in muted text, with its answered count and no graded count) and one row per candidate. The model currently working is coloured `link`.
 - Columns: model, `time` (total answering time of the model), question columns, `answered`, `graded`.
@@ -264,13 +264,13 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 - Cells use the matrix cell states (section 4). Hovering a cell shows its tooltip.
 - Legend and a one-line explanation under the grid.
 
-**Long runs (more than 10 questions).** The matrix shows a window of 10 question columns.
+**Long runs (more than 10 questions).** [planned] The matrix shows a window of 10 question columns.
 
 - A line above the grid: `24 questions · showing q07–q16`, with `follow current · on/off`, `‹ prev` and `next ›`.
 - Columns outside the window collapse into counters at the edges (`‹ 6`, `8 ›`) in every row. A counter turns `warn` if any hidden cell has an error; its tooltip summarises the hidden range (`5 graded · 1 judge error (q4)`).
 - `follow current` moves the window with the active question. Manual paging turns it off.
 
-**Now.** Under the matrix, a `now` section lists the calls in flight as status rows: state, label, timer. In cloud mode several rows can run at once.
+**Now.** [planned] Under the matrix, a `now` section lists the calls in flight as status rows: state, label, timer. In cloud mode several rows can run at once.
 
 **Load notice.** Shown only after a row has been `running` for about 8 seconds on the first call of a model load group, so it appears only where a model may still be loading. It says that loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
@@ -280,7 +280,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 
 **Header.** Run name (`text-heading`) and a muted line (`finished … · took … · judge … · cloud judge`). On the right: `export json csv md print`.
 
-**Two tabs:** `overview` and `answers`. Under the tabs the overview has an anchor navigation on the right: `summary · models · speed vs quality · details · questions · run`.
+**Two tabs** [planned]: `overview` and `answers`. Built instead: one page with the sections 01 summary, 02 comparison (`table` / `chart` tabs), 03 view (`per model` / `per question` tabs) and 04 reference answers. The blocks below describe the target layout; the marks show how far each one is. Under the tabs the overview has an anchor navigation on the right: `summary · models · speed vs quality · details · questions · run`.
 
 #### Overview
 
@@ -290,7 +290,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 - `notes` row (muted): the judge is also a candidate, questions without a reference, low confidence.
 - `judge summary`: the judge text as Markdown, collapsed by default (`show`). Full model names in it are replaced with short names.
 
-**02 models.** One sortable table, one row per model.
+**02 models.** [partial] Built as the `table` tab of 02 comparison: not sortable, no rank badge, no `length`, `score/GB`, `tok/pass`, `memory GB` columns; value bars only under question cells. One sortable table, one row per model.
 
 - Columns: rank badge, model, `mean` (default sort, descending), `median`, `pass`, `c/s`, `time, s`, `length`, `score/GB`, `tok/pass`, `memory GB`. Each numeric cell has a value bar. The first column is the badge, so a re-sorted table keeps the numbers of the models.
 - A click on a column header sorts by it; the active column shows the direction.
@@ -298,25 +298,25 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 - Wide tables scroll sideways with a sticky model column; the sticky cell stretches to the row height.
 - Cell notes: `err` (generation error, warn), `?` (judge error, warn), `*` (truncated), muted (question without a reference, excluded from the scores).
 
-**03 speed vs quality.** A scatter of mean score (y, fixed 0–100 so runs compare) against median chars/s (x, linear, ticks at 1/2/5 × 10ⁿ).
+**03 speed vs quality.** [partial] Built as the `chart` tab: square points instead of rank badges, no `best score` / `fastest` labels. A scatter of mean score (y, fixed 0–100 so runs compare) against median chars/s (x, linear, ticks at 1/2/5 × 10ⁿ).
 - Points are 20px rank badges. Filled = recommended; thick border = best score and fastest; thin = other models. Direct labels: `best score`, `recommended`, `fastest`.
 - The quadrant faster and better than both medians is `bg-surface`, bounded by dashed median lines with their values in the plot (`median 90.5 c/s`, `median 52.5`). The labels flip near the right edge and the top, so nothing leaves the box.
 - A dashed Pareto line joins the models nobody beats on both axes. It is the only SVG; everything else is positioned HTML.
 - A legend in one wrapping row under the plot. Models without a score or c/s are listed as "not plotted". The plot has `role="img"` with a text summary.
 
-**04 details.** Four small multiples in a 2×2 grid. Every panel uses the same badges and shares one model order, so a model is found at the same place in each. Each has a title, a one-line explanation on the right and a dashed median line.
+**04 details.** [planned] Four small multiples in a 2×2 grid. Every panel uses the same badges and shares one model order, so a model is found at the same place in each. Each has a title, a one-line explanation on the right and a dashed median line.
 - `score / GB`: mean score per GB on disk.
 - `tokens / correct`: generated tokens per correct answer; lower is better. An outlier bar is cut with `axis cut`.
 - `memory`: size loaded by Ollama, split into `CPU (VRAM)` and `CPU (RAM, offload)`; the label shows the share on the GPU when a model spills over **(backend)**.
 - `tokens vs characters`: a scatter of tokens/s (x) against chars/s (y) with reference lines for `3 chars/token` and `4 chars/token`; it shows how far chars/s can be compared across tokenizers.
 
-**Answers by category.** Stacked horizontal bars, one per model: perfect, acceptable, violation of instructions, broken logic, garbage, in five monochrome steps from light to dark, with `uncategorised` and error segments only where they occur (errors in warn). A dashed line marks the 80% pass threshold; the pass share is written at the end of the bar.
+**Answers by category.** [partial] Built as a bar list inside each model card: no stacked bar, no 80% line. Stacked horizontal bars, one per model: perfect, acceptable, violation of instructions, broken logic, garbage, in five monochrome steps from light to dark, with `uncategorised` and error segments only where they occur (errors in warn). A dashed line marks the 80% pass threshold; the pass share is written at the end of the bar.
 
-**05 hardest questions.** The five questions with the lowest mean score: question, mean, a range track (min–max with the mean as a tick), `passed n/N`, and the best model as a badge.
+**05 hardest questions.** [planned] The five questions with the lowest mean score: question, mean, a range track (min–max with the mean as a tick), `passed n/N`, and the best model as a badge.
 
-**06 run.** How the run was made, in a few muted lines: start time, runtime version, judge and mode, the number of candidates, questions and steps, candidate and judge generation parameters (temperature, seed, `num_predict`, `num_ctx`, thinking off). It exists so a result can be reproduced and compared.
+**06 run.** [planned]How the run was made, in a few muted lines: start time, runtime version, judge and mode, the number of candidates, questions and steps, candidate and judge generation parameters (temperature, seed, `num_predict`, `num_ctx`, thinking off). It exists so a result can be reproduced and compared.
 
-#### Answers
+#### Answers [partial: built as 03 view and 04 reference answers of the single page]
 
 **01 scores.** A models × questions matrix with every score and a value bar under it. Rows keep the rank badges. The matrix scrolls sideways with a sticky model column and a `… q30 →` hint. The model name jumps to its block below; a score jumps to its answer. A missing result is a disabled cell. Legend: `err`, `?`, muted.
 
@@ -363,7 +363,7 @@ Disabled controls use `bg-line text-fg-muted cursor-not-allowed` (primary) or mu
 
 The sources of truth are `static/js/lmao.js` (Alpine state, SSE, requests) and `static/js/lib.js` (pure helpers, tested with `node --test`). Only what the design depends on is repeated here.
 
-State: panel flags, `view` (`idle | running | results`), `resultsTab` (`overview | answers`), `answersView` (`model | question`), the setup form, the judge connection, `history`, `run` (rows, progress, timers), `report` (everything the results screens show, built once by `buildReport()`), `announcement`.
+State: panel flags, `view` (`idle | running | results`), `resultsView` (`model | question`), `comparisonView` (`table | chart`), the setup form (`judge`, `judgeCloud`, `selected`, `baseRationale`, `cases`), `history`, `run` (rows, progress, timers), `report` (everything the results screens show, built once by `buildReport()`), `announcement`.
 
 Getters: `busy`, `topStatus`, `checklist`, `phaseProgress`, `elapsed`.
 
