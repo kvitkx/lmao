@@ -70,6 +70,7 @@ document.addEventListener("alpine:init", () => {
         historyError: "",
         activeRunId: null,
         resultsError: "",
+        openAnswers: {}, // eval block anchor -> true: its answer text is rendered
         run: freshRun(),
         results: null,
         report: null,
@@ -315,6 +316,7 @@ document.addEventListener("alpine:init", () => {
             if (this.$refs?.main) this.$refs.main.scrollTop = 0;
             this.results = null;
             this.report = null;
+            this.openAnswers = {};
             this.resultsError = "";
             try {
                 const response = await fetch(`/api/results/${encodeURIComponent(id)}`);
@@ -680,6 +682,12 @@ document.addEventListener("alpine:init", () => {
                 this.resultsView = view;
                 await this.$nextTick();
             }
+            // The answer text exists only when opened: open it first, so the
+            // scroll lands on the final layout.
+            if (id.startsWith("answer-")) {
+                this.openAnswers[id] = true;
+                await this.$nextTick();
+            }
             const target = document.getElementById(id);
             if (!target) return;
             const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -696,6 +704,14 @@ document.addEventListener("alpine:init", () => {
                 console.error("Copy failed:", e);
                 return false;
             }
+        },
+
+        isAnswerOpen(id) {
+            return Boolean(this.openAnswers[id]);
+        },
+
+        toggleAnswer(id) {
+            this.openAnswers[id] = !this.openAnswers[id];
         },
 
         // [ and ] toggle the panels, Esc goes to the first screen.

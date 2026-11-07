@@ -401,7 +401,8 @@ function evalEntry(question, result, index) {
         category: failed ? "" : CATEGORY_LABELS[result.category] || result.category || "",
         comment: failed ? result.error || "" : result.comment || "",
         answer: result.answer || "",
-        answerBlocks: answerBlocks(result),
+        // A function: the Markdown is parsed when the answer is opened, not for every answer of the run.
+        answerBlocks: () => answerBlocks(result),
         notes,
     };
 }

@@ -56,3 +56,10 @@ def test_index_html_has_export_links_and_print_styles(client):
         assert f"/export?format={fmt}" in html
     assert "window.print()" in html
     assert "@media print" in html
+
+
+def test_index_html_renders_answers_only_when_opened(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert "toggleAnswer(" in html
+    assert 'x-if="isAnswerOpen(' in html

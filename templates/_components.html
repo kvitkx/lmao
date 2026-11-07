@@ -208,7 +208,15 @@
             <div class="text-fg-muted" x-text="n"></div>
         </template>
         <div class="break-words" :class="e.error && 'text-warn'" x-text="e.comment"></div>
-        {{ answer_box("e.answerBlocks", "e.answer", show="e.answer") }}
+        <div x-show="e.answer" class="flex flex-col gap-8">
+            <button type="button" @click="toggleAnswer({{ anchor }})"
+                    :aria-expanded="isAnswerOpen({{ anchor }})"
+                    class="self-start text-fg-muted hover:text-fg"
+                    x-text="isAnswerOpen({{ anchor }}) ? 'hide answer' : 'show answer'"></button>
+            <template x-if="isAnswerOpen({{ anchor }})">
+                {{ answer_box("e.answerBlocks()", "e.answer") }}
+            </template>
+        </div>
     </div>
 </div>
 {%- endmacro %}

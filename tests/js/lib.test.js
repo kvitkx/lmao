@@ -617,6 +617,20 @@ test("buildReport: model rows", () => {
     assert.equal(b.entries[0].comment, "oom");
 });
 
+test("buildReport: answer blocks are parsed lazily and once", () => {
+    const report = lib.buildReport(runFixture());
+    const [a] = report.models;
+    const [card] = report.questionCards;
+    const fromModel = a.entries[0];
+    const fromQuestion = card.entries.find((e) => e.model === "a");
+
+    assert.equal(typeof fromModel.answerBlocks, "function");
+    assert.equal(fromModel.answerBlocks()[0].type, "paragraph");
+    assert.equal(fromModel.answerBlocks(), fromModel.answerBlocks());
+    // both views share the parsed blocks of one answer
+    assert.equal(fromModel.answerBlocks(), fromQuestion.answerBlocks());
+});
+
 test("buildReport: question cards rank answers and put failures last", () => {
     const [card] = lib.buildReport(runFixture()).questionCards;
 
