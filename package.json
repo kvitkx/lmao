@@ -1,0 +1,9 @@
+{
+  "name": "lmao-frontend",
+  "private": true,
+  "description": "Build tools for static/css/app.css. Never shipped in the image.",
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.2",
+    "tailwindcss": "4.3.2"
+  }
+}

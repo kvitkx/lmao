@@ -222,3 +222,6 @@ history/*
 
 # CI reports
 reports/
+
+# Frontend build tools (installed in Docker only)
+node_modules/

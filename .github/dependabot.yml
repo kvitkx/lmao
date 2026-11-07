@@ -32,7 +32,7 @@ updates:
     cooldown:
       default-days: 7
 
-  # Runtime images: ./Dockerfile (python, uv).
+  # Runtime images: ./Dockerfile (python, uv, node for the css build).
   - package-ecosystem: "docker"
     directory: "/"
     patterns: ["*"]
@@ -48,6 +48,14 @@ updates:
 
   # Compose services: the Ollama image in compose.yaml.
   - package-ecosystem: "docker-compose"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "runtime"
+    cooldown:
+      default-days: 7
+
+  # Frontend build tools: package.json and package-lock.json (Tailwind CLI).
+  - package-ecosystem: "npm"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "runtime"

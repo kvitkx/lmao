@@ -30,6 +30,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --python /usr/local/bin/python --no-python-downloads
 
 
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS css
+
+WORKDIR /build
+
+# Build tools only, never copied into the final image. --ignore-scripts: no
+# install script of a dependency runs in the build.
+COPY package.json package-lock.json ./
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts --no-audit --no-fund
+
+
 FROM deps AS dev
 
 RUN --mount=type=cache,target=/root/.cache/uv \
