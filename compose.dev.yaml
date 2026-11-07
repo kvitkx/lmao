@@ -12,3 +12,34 @@ services:
     volumes:
       # The whole project, including ./history (dev evaluation history).
       - .:/app
+    depends_on:
+      # The first stylesheet exists before the page is served.
+      css:
+        condition: service_healthy
+
+  css:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: css-deps
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      - HOME=/tmp
+    volumes:
+      # Live sources for the class scan; the output lands in ./static/css.
+      - ./static:/build/static
+      - ./templates:/build/templates:ro
+    # One build first, so the healthcheck passes as soon as the file exists.
+    # --watch=always: Tailwind v4 stops watching when stdin closes, and it does
+    # in a container without a terminal.
+    command:
+      - sh
+      - -c
+      - >-
+        ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css &&
+        exec ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css --watch=always
+    healthcheck:
+      test: ["CMD-SHELL", "test -s static/css/app.css"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

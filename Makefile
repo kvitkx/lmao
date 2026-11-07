@@ -27,7 +27,7 @@ help: ##> Show this help message.
 models-volume:
 	@docker volume inspect ollama >/dev/null 2>&1 || docker volume create ollama >/dev/null
 
-dev: models-volume css ##> Start DEV with hot reload on port 5000 (make dev [GPU=1]).
+dev: models-volume ##> Start DEV with hot reload and css rebuild on port 5000 (make dev [GPU=1]).
 	@test -z "$$($(CMD_PROD) ps -q)" || { echo "prod is running: run 'make down ENV=prod' first (dev and prod share the models volume and the GPU)." >&2; exit 1; }
 	$(CMD_DEV) up --build -d
 	@echo "App is running at http://localhost:5000"
@@ -56,7 +56,7 @@ down-all: ##> Stop dev and prod.
 format: ##> Fix and format Python files (changes source!).
 	scripts/dev/format.sh
 
-css: ##> Build static/css/app.css from static/css/input.css (needed by make dev).
+css: ##> Build static/css/app.css once (make dev rebuilds it on change).
 	docker buildx build --target css-out --output type=local,dest=static/css .
 
 
