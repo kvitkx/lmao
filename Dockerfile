@@ -41,6 +41,21 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --ignore-scripts --no-audit --no-fund
 
+# Only what the class scan reads (see the @source lines of input.css).
+COPY static/css/input.css static/css/input.css
+COPY static/js/ static/js/
+COPY templates/ templates/
+
+RUN ./node_modules/.bin/tailwindcss \
+    --input static/css/input.css \
+    --output /build/app.css \
+    --minify
+
+
+# Just the stylesheet: `make css` exports it, the production stage copies it.
+FROM scratch AS css-out
+COPY --from=css /build/app.css /app.css
+
 
 FROM deps AS dev
 
@@ -61,6 +76,7 @@ COPY --from=deps /opt/venv /opt/venv
 
 COPY core/ /app/core/
 COPY static/ /app/static/
+COPY --from=css-out /app.css /app/static/css/app.css
 COPY templates/ /app/templates/
 COPY app.py /app/
 

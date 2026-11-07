@@ -20,6 +20,9 @@ venv/
 .venv/
 node_modules/
 
+# Built in the css stage
+static/css/app.css
+
 # Secrets
 .env
 .env.*

@@ -225,3 +225,6 @@ reports/
 
 # Frontend build tools (installed in Docker only)
 node_modules/
+
+# Built from static/css/input.css (make css, Dockerfile)
+static/css/app.css
