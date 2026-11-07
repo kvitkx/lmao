@@ -19,69 +19,12 @@
 <div{% if id %} id="{{ id }}"{% endif %} class="pb-8 border-b border-line text-fg-muted"{% if text_expr %} x-text="{{ text_expr }}"{% endif %}>{{ text }}</div>
 {%- endmacro %}
 
-{# Markdown inline parts: { text, bold, code }. Bold is fg colour (only 100/300 are loaded). #}
-{% macro md_inline(parts) -%}
-<template x-for="(p, pi) in {{ parts }}" :key="pi"><span
-          :class="p.code ? 'font-mono text-fg bg-bg px-4' : (p.bold && 'text-fg')" x-text="p.text"></span></template>
-{%- endmacro %}
-
-{# Markdown blocks from parseMarkdown(). Everything goes through x-text:
-   HTML in a model answer is shown as text, never executed. #}
+{# Markdown blocks from parseMarkdown(), built as DOM by the `x-md` directive
+   (lmao.js, tree from markdownTree() in lib.js). Only createElement and text
+   nodes: HTML in a model answer is shown as text, never executed. Bold is fg
+   colour (only 100/300 are loaded). #}
 {% macro md(blocks) -%}
-<div class="min-w-0 flex flex-col gap-12">
-    <template x-for="(b, bi) in {{ blocks }}" :key="bi">
-        <div class="min-w-0">
-            <template x-if="b.type === 'heading'">
-                <div class="text-fg break-words" :class="b.level <= 2 && 'text-subheading'">{{ md_inline("b.inlines") }}</div>
-            </template>
-            <template x-if="b.type === 'paragraph'">
-                <p class="text-fg-muted break-words">{{ md_inline("b.inlines") }}</p>
-            </template>
-            <template x-if="b.type === 'list'">
-                <ul class="flex flex-col gap-6">
-                    <template x-for="(item, ii) in b.items" :key="ii">
-                        <li class="flex gap-8 text-fg-muted">
-                            <span aria-hidden="true" class="shrink-0" :class="b.ordered && 'text-fg'"
-                                  x-text="b.ordered ? (b.start + ii) + '.' : '–'"></span>
-                            <span class="min-w-0 break-words">{{ md_inline("item") }}</span>
-                        </li>
-                    </template>
-                </ul>
-            </template>
-            <template x-if="b.type === 'code'">
-                <div class="flex flex-col">
-                    <div x-show="b.lang" class="self-start px-12 py-4 border border-b-0 border-line font-mono text-fg-muted" x-text="b.lang"></div>
-                    <pre class="bg-bg border border-line p-12 font-mono text-caption font-light text-fg whitespace-pre overflow-x-auto" x-text="b.text"></pre>
-                </div>
-            </template>
-            <template x-if="b.type === 'table'">
-                <div class="overflow-x-auto">
-                    <table class="border-collapse text-left">
-                        <thead>
-                            <tr>
-                                <template x-for="(cell, hi) in b.head" :key="hi">
-                                    <th class="px-12 py-6 border border-line font-light text-fg align-top">{{ md_inline("cell") }}</th>
-                                </template>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="(row, ri) in b.rows" :key="ri">
-                                <tr>
-                                    <template x-for="(cell, ci) in row" :key="ci">
-                                        <td class="px-12 py-6 border border-line text-fg-muted align-top">{{ md_inline("cell") }}</td>
-                                    </template>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-            </template>
-            <template x-if="b.type === 'rule'">
-                <div class="border-t border-line"></div>
-            </template>
-        </div>
-    </template>
-</div>
+<div x-md="{{ blocks }}"></div>
 {%- endmacro %}
 
 {# Answer box: rendered markdown, `raw` shows the source, `copy` copies the source.

@@ -500,7 +500,8 @@
             <section class="flex flex-col">
                 {{ ui.section_label("04 reference answers") }}
                 <template x-for="r in report.references" :key="r.id">
-                    <details class="group border-b border-line">
+                    <details class="group border-b border-line" x-data="{ shown: false }"
+                             @toggle="shown = $el.open">
                         <summary class="py-12 flex gap-12 text-fg-muted hover:text-fg">
                             <span aria-hidden="true" class="w-8 group-open:hidden">+</span>
                             <span aria-hidden="true" class="w-8 hidden group-open:inline">–</span>
@@ -508,7 +509,9 @@
                         </summary>
                         <div class="pb-15 flex flex-col gap-12">
                             <div class="text-fg-muted" x-text="r.question"></div>
-                            {{ ui.answer_box("r.blocks", "r.text", show="r.text") }}
+                            <template x-if="shown && r.text">
+                                {{ ui.answer_box("r.blocks()", "r.text") }}
+                            </template>
                             <div x-show="!r.text" class="text-fg-muted">no reference answer.</div>
                         </div>
                     </details>

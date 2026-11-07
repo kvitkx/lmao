@@ -7,6 +7,7 @@ and a block ends up in the wrong place.
 """
 
 from html.parser import HTMLParser
+from pathlib import Path
 
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img",
@@ -63,3 +64,20 @@ def test_index_html_renders_answers_only_when_opened(client):
 
     assert "toggleAnswer(" in html
     assert 'x-if="isAnswerOpen(' in html
+
+
+def test_index_html_builds_markdown_with_the_directive(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert 'x-md="' in html
+    assert 'x-for="(b, bi)' not in html
+    assert "x-html" not in html
+
+
+def test_scripts_never_write_html():
+    scripts = Path(__file__).parent.parent / "static" / "js"
+
+    for path in scripts.glob("*.js"):
+        text = path.read_text(encoding="utf-8")
+        for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML"):
+            assert forbidden not in text, f"{path.name} uses {forbidden}"

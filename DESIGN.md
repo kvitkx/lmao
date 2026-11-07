@@ -13,7 +13,7 @@ Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpin
 5. **Text is left-aligned, at least 13px.** The topbar status and the first screen are the only centred blocks, and the text inside them stays left-aligned.
 6. **Numbers are first-class content.** Large numerals (`text-display font-thin`) for key figures; `tabular-nums` only where digits change live or stand in columns. Never on body text: in Inter it also widens the hyphen, which breaks names like `ministral-3:3b`.
 7. **Honest feedback.** Every wait has a visible reason: a breathing dot, a counter, a timer. The UI never claims what the backend does not report (for example VRAM state).
-8. **Model output is text.** Nothing from a model or from a connection is ever rendered as HTML. Everything goes through `x-text`.
+8. **Model output is text.** Nothing from a model or from a connection is ever rendered as HTML. Everything goes through `x-text` or through the `x-md` directive, which builds elements with `createElement` and text nodes only.
 9. **Short names in the UI, full names in `title`.** Model names are shortened (`shortNames()`); the full name stays in tooltips, the archive and exports.
 
 ## 2. Tokens
@@ -193,13 +193,13 @@ Label (muted), value (`text-display font-thin`) with a unit, caption (muted). Ca
 
 ### Markdown
 
-`parseMarkdown()` produces blocks; `ui.md` renders them with `x-text` only.
+`parseMarkdown()` produces blocks, `markdownTree()` turns them into a plain element tree and the `x-md` directive builds the DOM from it with `createElement` and text nodes only.
 
 - Blocks: headings (h1–h2 use `text-subheading`), paragraphs, lists (ordered lists keep their numbers), code fences (`bg-bg`, `whitespace-pre`, horizontal scroll, a language tag above), tables (hairline cells; the header needs the `|---|` row), rules.
 - Inline: `**bold**` is `text-fg`; `` `code` `` is mono with `bg-bg`.
 - Not supported, stays text: links, italics, images, HTML, nested lists (flattened).
 - A `markdown` fence around the whole text is removed; the judge summary also drops a bare fence.
-- Answers are parsed once per run (`WeakMap`); both views share the blocks.
+- Answers and reference answers are parsed when opened, once (`WeakMap`); both views share the blocks.
 
 ### Code box [planned]
 
