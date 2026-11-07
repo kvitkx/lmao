@@ -687,9 +687,11 @@ document.addEventListener("alpine:init", () => {
             }
             const target = document.getElementById(id);
             if (!target) return;
-            const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            target.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
-            // Keyboard users continue from the target; preventScroll keeps the smooth scroll.
+            // Instant on purpose: the blocks above the target are skipped
+            // (content-visibility) and their heights are estimates, so a long
+            // smooth scroll would end off target while they render.
+            target.scrollIntoView({ block: "start", behavior: "auto" });
+            // Keyboard users continue from the target.
             target.focus({ preventScroll: true });
         },
 

@@ -67,6 +67,7 @@ Scale: 15, 22, 33, 66 for structure. 4, 6, 8, 10, 12 for small gaps.
 
 - `@theme` must live in an inline `<style type="text/tailwindcss">`; the browser build does not load an external theme file.
 - The browser build compiles on the client: expect a short unstyled flash. Alpine blocks use `x-cloak`.
+- Eval blocks use `.defer-render` (`content-visibility: auto`): blocks outside the screen are neither laid out nor painted, which keeps long reports and the panel animation cheap. Print turns it off. Jumps from the comparison table scroll instantly, because the heights of skipped blocks are estimates.
 - `static/favicon.svg` has hardcoded colours because it renders outside the page. It is the only exception to "tokens only".
 - Tailwind, Alpine and the fonts load from pinned CDN URLs. Offline machines get an unstyled page. Planned: vendor them with pinned versions and hashes.
 

@@ -81,3 +81,12 @@ def test_scripts_never_write_html():
         text = path.read_text(encoding="utf-8")
         for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML"):
             assert forbidden not in text, f"{path.name} uses {forbidden}"
+
+
+def test_index_html_defers_offscreen_eval_blocks(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert "defer-render" in html
+    assert "content-visibility: auto" in html
+    # print shows every block
+    assert "content-visibility: visible" in html

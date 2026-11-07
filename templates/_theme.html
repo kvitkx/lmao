@@ -5,7 +5,16 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300&family=IBM+Plex+Mono:wght@300&display=swap">
 
-<style>[x-cloak] { display: none !important; }</style>
+<style>
+  [x-cloak] { display: none !important; }
+
+  /* Offscreen eval blocks are neither laid out nor painted. `auto` in the
+     size remembers the real height once a block has been shown. */
+  .defer-render {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 180px;
+  }
+</style>
 
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.2"></script>
 
@@ -92,6 +101,11 @@
     * {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+    }
+
+    /* Print shows every block, not only the ones on screen. */
+    .defer-render {
+      content-visibility: visible;
     }
 
     html, body {
