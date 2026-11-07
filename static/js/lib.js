@@ -142,6 +142,56 @@ function modelGroups(steps, phase) {
     });
 }
 
+// The figures of every phase from one pass over the rows. `groups` is the list
+// of phases ({ phase, ...labels }); the result is keyed by phase.
+// Duration = wall clock from the first start to the last end (server
+// timestamps), so parallel calls are not added up. Error and skipped rows are
+// finished too; errors are counted separately.
+function phaseStats(steps, groups) {
+    const acc = new Map(
+        groups.map((g) => [
+            g.phase,
+            { total: 0, open: 0, running: 0, errors: 0, first: Infinity, last: -Infinity },
+        ]),
+    );
+    for (const s of steps) {
+        const a = acc.get(s.phase);
+        if (!a) continue;
+        a.total += 1;
+        if (s.state === "queued" || s.state === "running") a.open += 1;
+        if (s.state === "running") a.running += 1;
+        if (s.state === "error") a.errors += 1;
+        if (s.startTs !== null) a.first = Math.min(a.first, s.startTs);
+        if (s.endTs !== null) a.last = Math.max(a.last, s.endTs);
+    }
+
+    const out = {};
+    for (const g of groups) {
+        const { total, open, running, errors, first, last } = acc.get(g.phase);
+        const finished = total - open;
+        let state = "queued";
+        if (running) state = "running";
+        else if (total && !open) state = "done";
+
+        const span =
+            state === "done" && Number.isFinite(first) && Number.isFinite(last)
+                ? fmtSpan((last - first) / 1000)
+                : "";
+        // A single-call phase (summary) needs no counter.
+        const count = total > 1 ? `${finished} / ${total}` : "";
+        out[g.phase] = {
+            ...g,
+            total,
+            finished,
+            errors,
+            state,
+            side: [count, span].filter(Boolean).join(" · "),
+            pct: total ? Math.round((100 * finished) / total) : 0,
+        };
+    }
+    return out;
+}
+
 // Empty for missing, broken or negative durations (clock skew, lost start event).
 function fmtSeconds(sec) {
     return typeof sec === "number" && isFinite(sec) && sec >= 0 ? `${sec.toFixed(1)} s` : "";
@@ -789,7 +839,9 @@ function buildReport(data) {
 
     const finished =
         typeof data.finished_at === "string" ? data.finished_at.replace("T", " ").slice(0, 16) : "";
-    return {
+    // Frozen on purpose: Alpine does not wrap a frozen object in a reactive
+    // proxy, and a report never changes after it is built.
+    return Object.freeze({
         meta: [
             finished && `finished ${finished}`,
             data.judge_model && `judge: ${data.judge_model}`,
@@ -826,7 +878,7 @@ function buildReport(data) {
                 blocks: parseMarkdown(ref.text || ""),
             };
         }),
-    };
+    });
 }
 
 // --- test cases file ------------------------------------------------------
@@ -984,6 +1036,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseInline,
         parseMarkdown,
         payloadCase,
+        phaseStats,
         questionLabel,
         rankOf,
         round1,

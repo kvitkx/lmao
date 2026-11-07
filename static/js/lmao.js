@@ -6,8 +6,17 @@ document.addEventListener("alpine:init", () => {
     // Not reactive on purpose: one run at a time.
     let source = null; // EventSource
     let timer = null; // setInterval id
+    let loadWatch = []; // rows that may still show the load notice
 
     const SLOW_LOAD_MS = 8000;
+
+    // `short` is the label of the progress segment (a quarter of the width).
+    const PHASE_GROUPS = [
+        { phase: "reference", title: "01 reference answers", short: "01 reference" },
+        { phase: "answer", title: "02 candidate answers", short: "02 answers" },
+        { phase: "grading", title: "03 grading", short: "03 grading" },
+        { phase: "summary", title: "04 summary", short: "04 summary" },
+    ];
 
     // `fields`: values of an imported case (see caseFields in lib.js).
     const newCase = (fields = {}) => ({
@@ -35,6 +44,7 @@ document.addEventListener("alpine:init", () => {
         error: "",
         expanded: {}, // phase -> true/false, set by the user; default: folded when done without errors
         openModels: {}, // "phase:model" -> true/false, set by the user; default: open while running
+        phases: phaseStats([], PHASE_GROUPS), // phase -> figures, see updatePhases()
     });
 
     Alpine.data("lmao", () => ({
@@ -45,13 +55,7 @@ document.addEventListener("alpine:init", () => {
         resultsView: "model", // model | question
         comparisonView: "table", // table | chart
 
-        // `short` is the label of the progress segment (a quarter of the width).
-        phaseGroups: [
-            { phase: "reference", title: "01 reference answers", short: "01 reference" },
-            { phase: "answer", title: "02 candidate answers", short: "02 answers" },
-            { phase: "grading", title: "03 grading", short: "03 grading" },
-            { phase: "summary", title: "04 summary", short: "04 summary" },
-        ],
+        phaseGroups: PHASE_GROUPS,
 
         models: [],
         names: {}, // full model name -> display name (see shortNames)
@@ -139,53 +143,18 @@ document.addEventListener("alpine:init", () => {
 
         // One segment per phase, filled from the rows themselves: phases fill
         // independently (a cloud judge grades while local candidates still answer).
-        // error and skipped rows are finished too; errors are counted separately.
         get phaseProgress() {
-            return this.phaseGroups.map((g) => this.phaseStats(g));
+            return this.phaseGroups.map((g) => this.run.phases[g.phase]);
         },
 
-        // Duration = wall clock from the first start to the last done (server
-        // timestamps), so parallel calls are not added up.
-        phaseStats(g) {
-            let total = 0;
-            let open = 0; // queued or running
-            let running = 0;
-            let errors = 0;
-            let first = Infinity;
-            let last = -Infinity;
-            for (const s of this.run.steps) {
-                if (s.phase !== g.phase) continue;
-                total += 1;
-                if (s.state === "queued" || s.state === "running") open += 1;
-                if (s.state === "running") running += 1;
-                if (s.state === "error") errors += 1;
-                if (s.startTs !== null) first = Math.min(first, s.startTs);
-                if (s.endTs !== null) last = Math.max(last, s.endTs);
-            }
-            const finished = total - open;
-            let state = "queued";
-            if (running) state = "running";
-            else if (total && !open) state = "done";
-
-            const span =
-                state === "done" && Number.isFinite(first) && Number.isFinite(last)
-                    ? fmtSpan((last - first) / 1000)
-                    : "";
-            // A single-call phase (summary) needs no counter.
-            const count = total > 1 ? `${finished} / ${total}` : "";
-            return {
-                ...g,
-                total,
-                finished,
-                errors,
-                state,
-                side: [count, span].filter(Boolean).join(" · "),
-                pct: total ? Math.round((100 * finished) / total) : 0,
-            };
+        // Recomputed once per event, not on every read: the template reads
+        // these figures many times per row.
+        updatePhases() {
+            this.run.phases = phaseStats(this.run.steps, this.phaseGroups);
         },
 
         phaseOf(phase) {
-            return this.phaseStats(this.phaseGroups.find((g) => g.phase === phase));
+            return this.run.phases[phase];
         },
 
         // A finished phase folds into its header. Phases with errors stay open
@@ -490,6 +459,8 @@ document.addEventListener("alpine:init", () => {
                 startedAt: now,
                 now,
             };
+            this.updatePhases();
+            loadWatch = [];
             this.activeRunId = taskId;
             this.setupOpen = false;
             this.view = "running";
@@ -511,12 +482,14 @@ document.addEventListener("alpine:init", () => {
         // One clock for the elapsed time, the row timers and the load notice.
         tick() {
             this.run.now = Date.now();
-            for (const step of this.run.steps) {
-                if (step.loading && !step.announced && this.showLoadNotice(step)) {
-                    step.announced = true;
-                    this.announce("the model may still be loading. this is normal.");
-                }
-            }
+            if (!loadWatch.length) return;
+            loadWatch = loadWatch.filter((step) => {
+                if (step.state !== "running") return false;
+                if (!this.showLoadNotice(step)) return true;
+                step.announced = true;
+                this.announce("the model may still be loading. this is normal.");
+                return false;
+            });
         },
 
         stopStream() {
@@ -558,6 +531,7 @@ document.addEventListener("alpine:init", () => {
             if (!step) return;
             if (match[2] === "start") this.stepStarted(step, event);
             else this.stepDone(step, event);
+            this.updatePhases();
         },
 
         stepStarted(step, event) {
@@ -579,6 +553,7 @@ document.addEventListener("alpine:init", () => {
             if (loadKey && !this.run.seen[loadKey]) {
                 this.run.seen[loadKey] = true;
                 step.loading = true;
+                loadWatch.push(step);
             }
         },
 
@@ -640,6 +615,7 @@ document.addEventListener("alpine:init", () => {
                     step.meta = "interrupted";
                 }
             });
+            this.updatePhases();
             this.run.status = "error";
             this.run.error = message; // announced by the role="alert" notice
             this.run.endedAt = Date.now();
