@@ -27,6 +27,8 @@ models.
 - **Cloud judge (off by default):** questions, criteria, reference answers and
   all candidate answers are sent to Ollama's cloud service. Do not use it with
   confidential data.
+- **Page assets:** the page loads no scripts, styles or fonts from other hosts.
+  The browser talks only to the app.
 - **History:** every run is saved as JSON in `history/` (a Docker volume in
   prod) with your questions and the model answers. `make reset` removes the
   prod volume.
@@ -36,7 +38,9 @@ models.
 Candidate answers are wrapped in delimiters and given to the judge as data, and
 the grade must match a fixed JSON schema. This reduces but does not eliminate
 prompt injection, so scores are not a security boundary. The UI renders model
-output as text, never as HTML. CSV exports prefix cells that start with `=`,
+output as text, never as HTML: Markdown becomes elements through
+`createElement` and text nodes, and a test fails if a script uses an
+HTML-writing API. CSV exports prefix cells that start with `=`,
 `+`, `-`, `@`, a tab or a carriage return with an apostrophe, so a spreadsheet
 does not run them as formulas. Markdown exports fence model answers with a
 fence longer than any backtick run inside them and quote the judge text.
@@ -44,7 +48,8 @@ fence longer than any backtick run inside them and quote the judge text.
 ## Supply chain
 
 - Images and Actions are pinned by digest or SHA; dependencies are locked
-  with hashes.
+  with hashes: Python in `uv.lock`, the front end (Tailwind CLI, Alpine, fonts)
+  in `package-lock.json`. Nothing is loaded from a CDN at runtime.
 - CI runs Trivy on the published image, `pip-audit` on dependencies and
   zizmor on workflows, with the results uploaded to code scanning; daily
   scheduled scans cover the published image.

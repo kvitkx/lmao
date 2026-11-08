@@ -142,6 +142,56 @@ function modelGroups(steps, phase) {
     });
 }
 
+// The figures of every phase from one pass over the rows. `groups` is the list
+// of phases ({ phase, ...labels }); the result is keyed by phase.
+// Duration = wall clock from the first start to the last end (server
+// timestamps), so parallel calls are not added up. Error and skipped rows are
+// finished too; errors are counted separately.
+function phaseStats(steps, groups) {
+    const acc = new Map(
+        groups.map((g) => [
+            g.phase,
+            { total: 0, open: 0, running: 0, errors: 0, first: Infinity, last: -Infinity },
+        ]),
+    );
+    for (const s of steps) {
+        const a = acc.get(s.phase);
+        if (!a) continue;
+        a.total += 1;
+        if (s.state === "queued" || s.state === "running") a.open += 1;
+        if (s.state === "running") a.running += 1;
+        if (s.state === "error") a.errors += 1;
+        if (s.startTs !== null) a.first = Math.min(a.first, s.startTs);
+        if (s.endTs !== null) a.last = Math.max(a.last, s.endTs);
+    }
+
+    const out = {};
+    for (const g of groups) {
+        const { total, open, running, errors, first, last } = acc.get(g.phase);
+        const finished = total - open;
+        let state = "queued";
+        if (running) state = "running";
+        else if (total && !open) state = "done";
+
+        const span =
+            state === "done" && Number.isFinite(first) && Number.isFinite(last)
+                ? fmtSpan((last - first) / 1000)
+                : "";
+        // A single-call phase (summary) needs no counter.
+        const count = total > 1 ? `${finished} / ${total}` : "";
+        out[g.phase] = {
+            ...g,
+            total,
+            finished,
+            errors,
+            state,
+            side: [count, span].filter(Boolean).join(" · "),
+            pct: total ? Math.round((100 * finished) / total) : 0,
+        };
+    }
+    return out;
+}
+
 // Empty for missing, broken or negative durations (clock skew, lost start event).
 function fmtSeconds(sec) {
     return typeof sec === "number" && isFinite(sec) && sec >= 0 ? `${sec.toFixed(1)} s` : "";
@@ -345,6 +395,113 @@ function parseMarkdown(text, options = {}) {
     return blocks;
 }
 
+// --- markdown view --------------------------------------------------------
+
+// Blocks of parseMarkdown() -> a plain element tree: a string is a text node,
+// an object is { tag, cls, attrs, children }. lmao.js builds the DOM from it
+// with createElement and text nodes only, so nothing from a model is parsed
+// as HTML.
+function treeNode(tag, cls = "", children = [], attrs = {}) {
+    return { tag, cls, attrs, children };
+}
+
+function mdInline(parts) {
+    return parts.map((p) => {
+        if (p.code) return treeNode("span", "font-mono text-fg bg-bg px-4", [p.text]);
+        if (p.bold) return treeNode("span", "text-fg", [p.text]);
+        return p.text;
+    });
+}
+
+function mdBlock(b) {
+    switch (b.type) {
+        case "heading":
+            return treeNode(
+                "div",
+                `text-fg break-words${b.level <= 2 ? " text-subheading" : ""}`,
+                mdInline(b.inlines),
+            );
+        case "paragraph":
+            return treeNode("p", "text-fg-muted break-words", mdInline(b.inlines));
+        case "list":
+            return treeNode(
+                "ul",
+                "flex flex-col gap-6",
+                b.items.map((item, i) =>
+                    treeNode("li", "flex gap-8 text-fg-muted", [
+                        treeNode(
+                            "span",
+                            `shrink-0${b.ordered ? " text-fg" : ""}`,
+                            [b.ordered ? `${b.start + i}.` : "–"],
+                            { "aria-hidden": "true" },
+                        ),
+                        treeNode("span", "min-w-0 break-words", mdInline(item)),
+                    ]),
+                ),
+            );
+        case "code": {
+            const parts = [];
+            if (b.lang) {
+                parts.push(
+                    treeNode(
+                        "div",
+                        "self-start px-12 py-4 border border-b-0 border-line font-mono text-fg-muted",
+                        [b.lang],
+                    ),
+                );
+            }
+            parts.push(
+                treeNode(
+                    "pre",
+                    "bg-bg border border-line p-12 font-mono text-caption font-light text-fg whitespace-pre overflow-x-auto",
+                    [b.text],
+                ),
+            );
+            return treeNode("div", "flex flex-col", parts);
+        }
+        case "table": {
+            const th = (cell) =>
+                treeNode(
+                    "th",
+                    "px-12 py-6 border border-line font-light text-fg align-top",
+                    mdInline(cell),
+                );
+            const td = (cell) =>
+                treeNode(
+                    "td",
+                    "px-12 py-6 border border-line text-fg-muted align-top",
+                    mdInline(cell),
+                );
+            const parts = [];
+            if (b.head.length) {
+                parts.push(treeNode("thead", "", [treeNode("tr", "", b.head.map(th))]));
+            }
+            parts.push(
+                treeNode(
+                    "tbody",
+                    "",
+                    b.rows.map((row) => treeNode("tr", "", row.map(td))),
+                ),
+            );
+            return treeNode("div", "overflow-x-auto", [
+                treeNode("table", "border-collapse text-left", parts),
+            ]);
+        }
+        case "rule":
+            return treeNode("div", "border-t border-line");
+        default:
+            return treeNode("div");
+    }
+}
+
+function markdownTree(blocks) {
+    return treeNode(
+        "div",
+        "min-w-0 flex flex-col gap-12",
+        (blocks || []).map((b) => treeNode("div", "min-w-0", [mdBlock(b)])),
+    );
+}
+
 // An answer appears in both views: parse it once.
 const blockCache = new WeakMap();
 function answerBlocks(result) {
@@ -401,7 +558,8 @@ function evalEntry(question, result, index) {
         category: failed ? "" : CATEGORY_LABELS[result.category] || result.category || "",
         comment: failed ? result.error || "" : result.comment || "",
         answer: result.answer || "",
-        answerBlocks: answerBlocks(result),
+        // A function: the Markdown is parsed when the answer is opened, not for every answer of the run.
+        answerBlocks: () => answerBlocks(result),
         notes,
     };
 }
@@ -788,7 +946,9 @@ function buildReport(data) {
 
     const finished =
         typeof data.finished_at === "string" ? data.finished_at.replace("T", " ").slice(0, 16) : "";
-    return {
+    // Frozen on purpose: Alpine does not wrap a frozen object in a reactive
+    // proxy, and a report never changes after it is built.
+    return Object.freeze({
         meta: [
             finished && `finished ${finished}`,
             data.judge_model && `judge: ${data.judge_model}`,
@@ -817,15 +977,17 @@ function buildReport(data) {
         questionCards: questions.map((q) => buildQuestionCard(q, summaryModels, display)),
         references: questions.map((q) => {
             const ref = q.reference || {};
+            let blocks = null;
             return {
                 id: q.id,
                 title: `${q.id} · ${q.tag || "–"} · ${ref.source || "none"}`,
                 question: q.question || "",
                 text: ref.text || "",
-                blocks: parseMarkdown(ref.text || ""),
+                // Parsed when the reference is opened.
+                blocks: () => (blocks ??= parseMarkdown(ref.text || "")),
             };
         }),
-    };
+    });
 }
 
 // --- test cases file ------------------------------------------------------
@@ -975,6 +1137,7 @@ if (typeof module !== "undefined" && module.exports) {
         isFailed,
         loadGroup,
         matrixCell,
+        markdownTree,
         modelGroups,
         median,
         niceStep,
@@ -983,6 +1146,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseInline,
         parseMarkdown,
         payloadCase,
+        phaseStats,
         questionLabel,
         rankOf,
         round1,

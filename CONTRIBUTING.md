@@ -3,8 +3,11 @@
 ## Setup
 
 Requires Docker with Compose v2, GNU Make and Bash. Everything runs through
-Docker; nothing else is installed on the host. See the README for `make dev`
-and `make help`.
+Docker; nothing else is installed on the host (Node is not needed either: the
+front end is built in Docker). See the README for `make dev` and `make help`.
+
+`make dev` also rebuilds `static/css/app.css` whenever a template, a script or
+`static/css/input.css` changes. `make css` builds the front-end files once.
 
 ## Before every commit
 
@@ -105,5 +108,25 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as
 - New scripts are executable: `chmod +x` and `git add --chmod=+x`.
 - Scripts source `scripts/lib.sh` and use its helpers (`log`, `die`,
   `require_env`, `on_exit` for cleanup) instead of their own traps.
-- Do not edit `uv.lock` by hand.
+- Do not edit `uv.lock` or `package-lock.json` by hand. Front-end packages are
+  pinned to exact versions in `package.json`; after changing it, regenerate the
+  lockfile in Docker:
+
+  ```bash
+  docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+    --volume "$PWD:/app" --workdir /app \
+    "$(make -s print-NODE_IMAGE)" \
+    npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+  ```
+
+- Styles live in `static/css/input.css`. `static/css/app.css`, `static/vendor/`
+  and `static/fonts/` are generated (`make css`) and never committed.
+- The CSS build finds class names by scanning `templates/` and `static/js/`.
+  A class that a template composes from a variable (as `nav_toggle` does) is
+  invisible to the scan: list it in the `@source inline(...)` line of
+  `input.css` (a test checks `nav_toggle`).
+- The page loads nothing from another host (a test checks `index.html`). A new
+  front-end file comes from an npm package through `scripts/build-assets.sh`.
+- Nothing from a model is written as HTML: no `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML` or `x-html` (tests check this).
 - Security issues: see [SECURITY.md](SECURITY.md), not a public issue.

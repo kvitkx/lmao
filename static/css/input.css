@@ -1,0 +1,173 @@
+/* Source of static/css/app.css. Built by the `css` stage of the Dockerfile
+   and by `make css`; app.css itself is not committed. */
+@import "tailwindcss" source(none);
+
+/* Class names are read from the templates and from the scripts that build
+   markup (lib.js). */
+@source "../../templates";
+@source "../js";
+
+/* nav_toggle composes these from a Jinja variable (side), so the scanner
+   cannot see them in the template source. */
+@source inline("{-left-px,-right-px,left-6,right-6,w-7,w-px}");
+
+/* Self-hosted fonts: files from @fontsource, copied by scripts/build-assets.sh.
+   Inter Thin only draws numerals, so it is latin only. Characters outside
+   latin and cyrillic fall back to the system font. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  src: url("../fonts/inter-latin-100.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/inter-latin-300.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/inter-cyrillic-300.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-latin-300.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-cyrillic-300.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@theme {
+  /* Zero radius, zero shadows: these utilities must produce nothing. */
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+
+  /* 1 unit = 1px: p-22 = 22px, w-320 = 320px. */
+  --spacing: 1px;
+
+  --color-*: initial;
+  --color-bg: #000000;
+  --color-surface: #0f0e12;
+  --color-line: #2a292e;
+  --color-fg: #f6f8f7;
+  --color-fg-muted: #b2b2b2;
+  --color-link: #3b9ae1;
+  --color-warn: #f0a800;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --text-*: initial;
+  --text-caption: 13px;
+  --text-caption--line-height: 1.5;
+  --text-subheading: 19px;
+  --text-subheading--line-height: 1.15;
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.15;
+  --text-heading: 26px;
+  --text-heading--line-height: 1.15;
+  --text-display: 40px;
+  --text-display--line-height: 1.11;
+
+  --animate-breathe: breathe 2s ease-in-out infinite;
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+}
+
+/* Base layer: utilities (outline-none, cursor-not-allowed...) still win. */
+@layer base {
+  :focus-visible {
+    outline: 1px solid var(--color-fg);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+  summary {
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+[x-cloak] { display: none !important; }
+
+/* Offscreen eval blocks are neither laid out nor painted. `auto` in the size
+   remembers the real height once a block has been shown. */
+.defer-render {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+/* Print: the same tokens in a light variant, the page flows instead of
+   scrolling inside panels. Plain CSS is unlayered, so it wins over utilities. */
+@media print {
+  @page { margin: 15mm; }
+
+  :root {
+    --color-bg: #ffffff;
+    --color-surface: #f5f5f6;
+    --color-line: #c9c9cf;
+    --color-fg: #000000;
+    --color-fg-muted: #55555a;
+    --color-link: #0b5cad;
+    --color-warn: #8a5a00;
+  }
+
+  /* Without this the bars (bg-fg, bg-line) and the surfaces disappear. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Print shows every block, not only the ones on screen. */
+  .defer-render {
+    content-visibility: visible;
+  }
+
+  html, body {
+    height: auto;
+    overflow: visible;
+  }
+  body {
+    display: block;
+  }
+  body > div:not(.sr-only) {
+    display: block;
+  }
+  header, aside {
+    display: none;
+  }
+  main {
+    overflow: visible;
+    padding: 0;
+  }
+  pre {
+    overflow: visible;
+    white-space: pre-wrap;
+  }
+}

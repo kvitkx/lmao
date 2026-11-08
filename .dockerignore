@@ -18,6 +18,12 @@ __pycache__/
 env/
 venv/
 .venv/
+node_modules/
+
+# Built in the css stage
+static/css/app.css
+static/vendor/
+static/fonts/
 
 # Secrets
 .env

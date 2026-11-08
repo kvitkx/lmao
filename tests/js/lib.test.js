@@ -192,6 +192,47 @@ test("modelGroups: no duration without server timestamps", () => {
     assert.equal(lib.modelGroups(steps, "answer")[0].side, "1/1");
 });
 
+const PHASES = [
+    { phase: "reference", title: "01 reference answers" },
+    { phase: "answer", title: "02 candidate answers" },
+    { phase: "grading", title: "03 grading" },
+    { phase: "summary", title: "04 summary" },
+];
+
+test("phaseStats counts every phase in one pass", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    setRow(steps, "reference:j:q1", { state: "done", startTs: 1000, endTs: 3000 });
+    setRow(steps, "reference:j:q2", { state: "done", startTs: 3000, endTs: 5000 });
+    setRow(steps, "answer:a:q1", { state: "error", startTs: 5000, endTs: 6000 });
+    setRow(steps, "answer:a:q2", { state: "running", startTs: 6000 });
+    setRow(steps, "grading:a:q1", { state: "skipped" });
+
+    const stats = lib.phaseStats(steps, PHASES);
+
+    assert.equal(stats.reference.state, "done");
+    assert.equal(stats.reference.side, "2 / 2 · 4.0 s");
+    assert.equal(stats.reference.pct, 100);
+    assert.equal(stats.reference.title, "01 reference answers");
+    assert.equal(stats.answer.state, "running");
+    assert.equal(stats.answer.errors, 1);
+    assert.equal(stats.answer.side, "1 / 2");
+    assert.equal(stats.answer.pct, 50);
+    assert.equal(stats.grading.state, "queued");
+    assert.equal(stats.grading.finished, 1);
+    assert.equal(stats.summary.total, 1);
+    assert.equal(stats.summary.side, "");
+});
+
+test("phaseStats of an empty run is queued everywhere", () => {
+    const stats = lib.phaseStats([], PHASES);
+
+    assert.deepEqual(Object.keys(stats), ["reference", "answer", "grading", "summary"]);
+    assert.equal(stats.answer.total, 0);
+    assert.equal(stats.answer.state, "queued");
+    assert.equal(stats.answer.pct, 0);
+    assert.equal(stats.answer.side, "");
+});
+
 test("fmtSeconds is empty for broken durations", () => {
     assert.equal(lib.fmtSeconds(1.234), "1.2 s");
     assert.equal(lib.fmtSeconds(0), "0.0 s");
@@ -316,6 +357,86 @@ test("parseMarkdown keeps HTML as text", () => {
 
     assert.equal(block.type, "paragraph");
     assert.equal(block.inlines[0].text, "<script>alert(1)</script>");
+});
+
+function collectTags(node, tags = []) {
+    if (typeof node === "string") return tags;
+    tags.push(node.tag);
+    node.children.forEach((child) => collectTags(child, tags));
+    return tags;
+}
+
+function textOf(node) {
+    return typeof node === "string" ? node : node.children.map(textOf).join("");
+}
+
+test("markdownTree: one wrapped block per parsed block, inline styles kept", () => {
+    const tree = lib.markdownTree(lib.parseMarkdown("# T\n\ntext **b** `c`"));
+    const [heading, paragraph] = tree.children.map((block) => block.children[0]);
+
+    assert.equal(tree.tag, "div");
+    assert.equal(tree.children.length, 2);
+    assert.equal(heading.cls, "text-fg break-words text-subheading");
+    assert.equal(textOf(heading), "T");
+    assert.deepEqual(
+        paragraph.children.map((c) => (typeof c === "string" ? c : [c.tag, c.cls, textOf(c)])),
+        [
+            "text ",
+            ["span", "text-fg", "b"],
+            " ",
+            ["span", "font-mono text-fg bg-bg px-4", "c"],
+        ],
+    );
+    assert.equal(lib.markdownTree([]).children.length, 0);
+    assert.equal(lib.markdownTree(null).children.length, 0);
+});
+
+test("markdownTree: lists keep their numbers and bullets", () => {
+    const marker = (text) =>
+        lib
+            .markdownTree(lib.parseMarkdown(text))
+            .children[0].children[0].children.map((li) => textOf(li.children[0]));
+
+    assert.deepEqual(marker("3. x\n4. y"), ["3.", "4."]);
+    assert.deepEqual(marker("- a\n- b"), ["–", "–"]);
+});
+
+test("markdownTree: code keeps its text and an optional language tag", () => {
+    const code = (text) =>
+        lib.markdownTree(lib.parseMarkdown(text)).children[0].children[0];
+    const withLang = code("```js\nconst a = 1;\n```");
+    const noLang = code("```\nx\n```");
+
+    assert.deepEqual(
+        withLang.children.map((c) => c.tag),
+        ["div", "pre"],
+    );
+    assert.equal(textOf(withLang.children[1]), "const a = 1;");
+    assert.deepEqual(
+        noLang.children.map((c) => c.tag),
+        ["pre"],
+    );
+});
+
+test("markdownTree: a table has a header only with a separator row", () => {
+    const tags = (text) => collectTags(lib.markdownTree(lib.parseMarkdown(text)));
+
+    assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("thead"));
+    assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("th"));
+    assert.ok(!tags("| 1 | 2 |").includes("thead"));
+    assert.ok(tags("| 1 | 2 |").includes("td"));
+});
+
+test("markdownTree never turns model text into elements", () => {
+    const tree = lib.markdownTree(
+        lib.parseMarkdown(
+            "<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n```html\n<b>x</b>\n```",
+        ),
+    );
+
+    assert.ok(collectTags(tree).every((tag) => ["div", "p", "pre", "span"].includes(tag)));
+    assert.ok(textOf(tree).includes("<script>alert(1)</script>"));
+    assert.ok(textOf(tree).includes("<b>x</b>"));
 });
 
 test("answerBlocks parses an answer once", () => {
@@ -615,6 +736,32 @@ test("buildReport: model rows", () => {
     assert.equal(b.entries[0].scoreText, "err");
     assert.equal(b.entries[0].caption, "generation failed");
     assert.equal(b.entries[0].comment, "oom");
+});
+
+test("buildReport: answer blocks are parsed lazily and once", () => {
+    const report = lib.buildReport(runFixture());
+    const [a] = report.models;
+    const [card] = report.questionCards;
+    const fromModel = a.entries[0];
+    const fromQuestion = card.entries.find((e) => e.model === "a");
+
+    assert.equal(typeof fromModel.answerBlocks, "function");
+    assert.equal(fromModel.answerBlocks()[0].type, "paragraph");
+    assert.equal(fromModel.answerBlocks(), fromModel.answerBlocks());
+    // both views share the parsed blocks of one answer
+    assert.equal(fromModel.answerBlocks(), fromQuestion.answerBlocks());
+});
+
+test("buildReport: reference blocks are parsed on demand and once", () => {
+    const [ref] = lib.buildReport(runFixture()).references;
+
+    assert.equal(typeof ref.blocks, "function");
+    assert.equal(ref.blocks()[0].type, "paragraph");
+    assert.equal(ref.blocks(), ref.blocks());
+});
+
+test("buildReport returns a frozen report", () => {
+    assert.ok(Object.isFrozen(lib.buildReport(runFixture())));
 });
 
 test("buildReport: question cards rank answers and put failures last", () => {

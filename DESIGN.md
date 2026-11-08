@@ -2,7 +2,7 @@
 
 The interface of a local engineering tool: strict, utilitarian, pure black. Structure comes from hairlines, not fills. Colour carries state and nothing else. Every screen is a dense, left-aligned column of text, numbers and small square markers.
 
-Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpine.js. This document describes the target state of the interface, not only what is built. Blocks without a mark match the code. Other blocks are marked **[partial]** (built in a simpler form, the note says how) or **[planned]** (not built yet). Features that need new backend support are also marked **(backend)**.
+Stack: Flask templates, Tailwind CSS v4 (built ahead of time, no Node on the host) and Alpine.js. This document describes the target state of the interface, not only what is built. Blocks without a mark match the code. Other blocks are marked **[partial]** (built in a simpler form, the note says how) or **[planned]** (not built yet). Features that need new backend support are also marked **(backend)**.
 
 ## 1. Principles
 
@@ -13,7 +13,7 @@ Stack: Flask templates, Tailwind CSS v4 (browser build, no build step) and Alpin
 5. **Text is left-aligned, at least 13px.** The topbar status and the first screen are the only centred blocks, and the text inside them stays left-aligned.
 6. **Numbers are first-class content.** Large numerals (`text-display font-thin`) for key figures; `tabular-nums` only where digits change live or stand in columns. Never on body text: in Inter it also widens the hyphen, which breaks names like `ministral-3:3b`.
 7. **Honest feedback.** Every wait has a visible reason: a breathing dot, a counter, a timer. The UI never claims what the backend does not report (for example VRAM state).
-8. **Model output is text.** Nothing from a model or from a connection is ever rendered as HTML. Everything goes through `x-text`.
+8. **Model output is text.** Nothing from a model or from a connection is ever rendered as HTML. Everything goes through `x-text` or through the `x-md` directive, which builds elements with `createElement` and text nodes only.
 9. **Short names in the UI, full names in `title`.** Model names are shortened (`shortNames()`); the full name stays in tooltips, the archive and exports.
 
 ## 2. Tokens
@@ -65,10 +65,12 @@ Scale: 15, 22, 33, 66 for structure. 4, 6, 8, 10, 12 for small gaps.
 
 ### Technical notes
 
-- `@theme` must live in an inline `<style type="text/tailwindcss">`; the browser build does not load an external theme file.
-- The browser build compiles on the client: expect a short unstyled flash. Alpine blocks use `x-cloak`.
+- Styles are built ahead of time: `static/css/input.css` (tokens in `@theme`, fonts, base and print styles) is compiled by the Tailwind CLI into `static/css/app.css`. Production does it in the `css` stage of the Dockerfile; development uses `make css` or the `css` service of `make dev`, which rebuilds on every change. `app.css` is not committed.
+- The class scan reads `templates/` and `static/js/`. Classes that a template composes from a variable (`nav_toggle`) are listed in `@source inline(...)`; a test checks them.
+- Alpine blocks use `x-cloak`.
+- Eval blocks use `.defer-render` (`content-visibility: auto`): blocks outside the screen are neither laid out nor painted, which keeps long reports and the panel animation cheap. Print turns it off. Jumps from the comparison table scroll instantly, because the heights of skipped blocks are estimates.
 - `static/favicon.svg` has hardcoded colours because it renders outside the page. It is the only exception to "tokens only".
-- Tailwind, Alpine and the fonts load from pinned CDN URLs. Offline machines get an unstyled page. Planned: vendor them with pinned versions and hashes.
+- Nothing loads from another host. Alpine and the font files come from npm packages pinned by `package-lock.json` and are copied to `static/` by `scripts/build-assets.sh`. Inter and IBM Plex Mono are split into latin and cyrillic files (Inter Thin is latin only, it draws numerals); other scripts fall back to the system font. The body font is preloaded.
 
 ## 3. Layout
 
@@ -193,13 +195,13 @@ Label (muted), value (`text-display font-thin`) with a unit, caption (muted). Ca
 
 ### Markdown
 
-`parseMarkdown()` produces blocks; `ui.md` renders them with `x-text` only.
+`parseMarkdown()` produces blocks, `markdownTree()` turns them into a plain element tree and the `x-md` directive builds the DOM from it with `createElement` and text nodes only.
 
 - Blocks: headings (h1–h2 use `text-subheading`), paragraphs, lists (ordered lists keep their numbers), code fences (`bg-bg`, `whitespace-pre`, horizontal scroll, a language tag above), tables (hairline cells; the header needs the `|---|` row), rules.
 - Inline: `**bold**` is `text-fg`; `` `code` `` is mono with `bg-bg`.
 - Not supported, stays text: links, italics, images, HTML, nested lists (flattened).
 - A `markdown` fence around the whole text is removed; the judge summary also drops a bare fence.
-- Answers are parsed once per run (`WeakMap`); both views share the blocks.
+- Answers and reference answers are parsed when opened, once (`WeakMap`); both views share the blocks.
 
 ### Code box [planned]
 
@@ -325,7 +327,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 - *Per question*: one card per question with the score scale (a hairline 0–100 with one tick per distinct score; a taller tick when several models share it), then one eval block per model, best first, failed ones last. Ranks use competition ranking (1, 1, 3).
 - Only one view is in the DOM at a time. An answer has the same id in both views, so a link from the matrix lands on the right block.
 
-**Eval block.** Two columns, gap 33. Left (120px): the label (question or model), the score in `text-display font-thin`, `/ 100`, the category. Right: the first line (the question, or `rank 01 / 03`), notes (muted), the judge comment, the answer box. A failed block has a `border border-warn` frame, the score replaced by `err`, and the reason in warn.
+**Eval block.** Two columns, gap 33. Left (120px): the label (question or model), the score in `text-display font-thin`, `/ 100`, the category. Right: the first line (the question, or `rank 01 / 03`), notes (muted), the judge comment, a `show answer` / `hide answer` button and the answer box. The answer box exists only while it is open; a jump from the comparison table opens it. A failed block has a `border border-warn` frame, the score replaced by `err`, and the reason in warn.
 
 **03 reference answers.** `written by the judge unless provided`. One collapsed row per question (`q1 · en-fact-astronomy · provided`), `N more questions · show all`.
 
@@ -395,7 +397,7 @@ In the results header: `export json csv md print` (muted, hidden when printing).
 - `print-color-adjust: exact` everywhere, otherwise bars and surface boxes disappear.
 - The header and both panels are hidden; the body and `main` flow across pages; tabs are hidden; code blocks wrap.
 
-Limits: only the active tab and view are printed, so switch first. Closed `<details>` print closed. A wide matrix is clipped at the page edge.
+Limits: only the active tab and view are printed, so switch first. Closed `<details>` and answers that were not opened print closed. A wide matrix is clipped at the page edge.
 
 ## 10. Not designed yet
 
@@ -404,4 +406,3 @@ Limits: only the active tab and view are printed, so switch first. Closed `<deta
 - Light theme.
 - Responsive behaviour. Proposal: below ~1024px the panels become overlays (`absolute inset-y-0 z-10`) instead of columns.
 - Stream reconnect (needs the server to resume instead of replaying from the start).
-- Vendoring Tailwind, Alpine and the fonts.

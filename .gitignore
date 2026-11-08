@@ -222,3 +222,12 @@ history/*
 
 # CI reports
 reports/
+
+# Frontend build tools (installed in Docker only)
+node_modules/
+
+# Built by make css and the Dockerfile: static/css/input.css -> app.css,
+# alpinejs and fonts from package-lock.json -> vendor/, fonts/
+static/css/app.css
+static/vendor/
+static/fonts/

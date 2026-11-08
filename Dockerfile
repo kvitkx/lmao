@@ -1,7 +1,7 @@
 FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
 
-FROM python:3.15.2-slim@sha256:f0aecb335180611a3a000c45def529ec8ee768d5d26ff24bae4dfb70594a9121 AS base
+FROM python:3.15.2-slim@sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75 AS base
 
 # No apt-get upgrade: OS patches arrive via base image bumps (Dependabot),
 # which keeps this layer reproducible.
@@ -30,6 +30,40 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --python /usr/local/bin/python --no-python-downloads
 
 
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS css-deps
+
+WORKDIR /build
+
+# Build tools only, never copied into the final image. --ignore-scripts: no
+# install script of a dependency runs in the build.
+COPY package.json package-lock.json ./
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts --no-audit --no-fund
+
+FROM css-deps AS css
+
+COPY scripts/build-assets.sh scripts/build-assets.sh
+
+# Only what the class scan reads (see the @source lines of input.css).
+COPY static/css/input.css static/css/input.css
+COPY static/js/ static/js/
+COPY templates/ templates/
+
+# /build/out has the layout of /app/static: Alpine, the fonts and the stylesheet.
+RUN sh scripts/build-assets.sh node_modules /build/out && \
+    ./node_modules/.bin/tailwindcss \
+      --input static/css/input.css \
+      --output /build/out/css/app.css \
+      --minify
+
+
+# What the page loads from /static: `make css` exports it, the production
+# stage copies it. Nothing comes from a CDN.
+FROM scratch AS assets-out
+COPY --from=css /build/out /
+
+
 FROM deps AS dev
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -49,6 +83,7 @@ COPY --from=deps /opt/venv /opt/venv
 
 COPY core/ /app/core/
 COPY static/ /app/static/
+COPY --from=assets-out / /app/static/
 COPY templates/ /app/templates/
 COPY app.py /app/
 
