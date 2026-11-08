@@ -7,18 +7,35 @@ Docker; nothing else is installed on the host (Node is not needed either: the
 front end is built in Docker). See the README for `make dev` and `make help`.
 
 `make dev` also rebuilds `static/css/app.css` whenever a template, a script or
-`static/css/input.css` changes. `make css` builds the front-end files once.
+`static/css/input.css` changes. `make run` (the app on the host, with uv)
+builds the front-end files in Docker when they are missing or outdated;
+`make css` does the same on its own, and `make -B css` forces it.
+
+`make help` ends with the variables the commands accept (`ENV`, `GPU`, `MODEL`,
+`ARGS`, `PART`). Keep that list in `Makefile` up to date when you add one.
+
+## While you work
+
+```bash
+make test                   # Python and JS tests, no coverage
+make test ARGS="-k export"  # ARGS goes to pytest
+```
+
+Run it after every change or commit. It is quick feedback, not the CI check:
+coverage and the `--network none` run only happen in `make ci`.
 
 ## Before every commit
 
 ```bash
 make format
-GH_TOKEN="$(gh auth token)" make ci
+make ci
 ```
 
 `make format` changes files, so run it first and review `git diff`. `make ci`
 runs exactly what GitHub CI runs and must pass for each commit, not only for the
-last one. It ends with a table of every check; the same report, with test,
+last one. It takes the GitHub token from `gh auth token`, or from `GH_TOKEN`
+if that is set, and passes it only to the zizmor container. 
+It ends with a table of every check; the same report, with test,
 coverage, audit and Trivy details, is written to `reports/summary.md`.
 
 ## CI and make
@@ -28,8 +45,8 @@ the targets each workflow runs are listed in `ci.mk`:
 
 | Workflow | Runs | Locally |
 |---|---|---|
-| `ci.yml` (pull requests) | `CI_JOBS` | `GH_TOKEN="$(gh auth token)" make ci` |
-| `security.yml` (daily) | `SECURITY_JOBS` | `GH_TOKEN="$(gh auth token)" make security` |
+| `ci.yml` (pull requests) | `CI_JOBS` | `make ci` |
+| `security.yml` (daily) | `SECURITY_JOBS` | `make security` |
 | `release.yml` (push to `main`) | `RELEASE_JOBS` | `make test-image` (after `make build-prod`) |
 
 `make check-parity` (part of `make ci`) fails when a workflow and `ci.mk`
@@ -40,6 +57,12 @@ add commands to a workflow.
   `make report-check-code`. Checks run with `make -k`, so one run reports
   every failure, not only the first.
 - `make check` is `make ci` without the online zizmor audit (no token).
+- `make help` lists only the everyday commands. The CI targets are internal
+  and not listed; each has a one-line comment in `ci.mk`. The ones worth
+  running by hand are `check-code`, `check-image` and `check-workflows` (the
+  three CI jobs), `security`, `test-js`, `lint-python`, `lint-shell`,
+  `lint-docker` and `audit`. Describe a new target with a plain `#` comment,
+  not `##>`: the marker is reserved for commands that `make help` shows.
 - The Security workflow does not run on pull requests: its result depends on
   the published image and today's advisories, not on the change. When you
   change `security.yml` or its scripts, run `make security`, then
@@ -97,9 +120,10 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as
 
 ## Rules of the repository
 
-- Tests: coverage must stay at or above `fail_under` in `pyproject.toml`.
+- Tests: coverage must stay at or above `fail_under` in `pyproject.toml`
+  (measured by `make ci`; `make test` skips it).
 - JS tests: `static/js/lib.js` holds the pure helpers; cover new ones in
-  `tests/js/` (`make test-js`). Keep the DOM and Alpine out of `lib.js`.
+  `tests/js/` (`make test`). Keep the DOM and Alpine out of `lib.js`.
 - Python version: the `Dockerfile` `FROM python:` line and `requires-python`
   change together (`make check-python` verifies it).
 - Workflows call make only as a single-line `run: make report-TARGET`

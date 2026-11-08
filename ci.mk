@@ -1,6 +1,9 @@
 # Checks. Everything the workflows run is defined here:
 # each workflow calls `make report-TARGET` for the targets listed in
 # CI_JOBS, SECURITY_JOBS and RELEASE_JOBS (enforced by check-parity).
+#
+# `make help` lists only targets marked with `##>` (here: `ci`). The rest is
+# internal: describe a new target with a plain `#` comment, not `##>`.
 
 export CI_DEV_IMAGE    ?= lmao:dev-ci
 export CI_IMAGE        ?= lmao:ci-local
@@ -51,89 +54,89 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python lint-python lint-shell lint-docker audit test test-js \
+        check-python lint-python lint-shell lint-docker audit test-py test-js \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
 
 ##@ Checks
 
-check: ##> What CI runs, offline (no token needed).
+check: # What CI runs, offline (no token needed).
 	@$(call run_report,All checks,$(CI_JOBS))
 
 ci: export ZIZMOR_ONLINE := 1
-ci: check ##> Exactly what the CI workflow runs (needs GH_TOKEN).
+ci: check ##> Exactly what the CI workflow runs (uses your gh login).
 
 security: export ZIZMOR_ONLINE := 1
-security: ##> Exactly what the daily Security workflow runs (needs GH_TOKEN).
+security: # Exactly what the daily Security workflow runs (uses your gh login).
 	@$(call run_report,Security,$(SECURITY_JOBS))
 
 
-##@ CI jobs
+# CI jobs
 
-check-workflows: check-parity ##> Lint GitHub workflows (parity, actionlint, zizmor).
+check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python lint-shell lint-python audit test test-js ##> Check Python version, lint, audit, run Python and JS tests.
+check-code: check-python lint-shell lint-python audit test-py test-js # Check Python version, lint, audit, run Python and JS tests.
 
-check-python: ##> Dockerfile and requires-python agree on Python version.
+check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
 
-check-image: lint-docker build-prod test-image ##> Lint Docker config, build and test prod image.
+check-image: lint-docker build-prod test-image # Lint Docker config, build and test prod image.
 
-test-image: smoke-test scan-image ##> Smoke-test and scan existing CI_IMAGE (no build).
+test-image: smoke-test scan-image # Smoke-test and scan existing CI_IMAGE (no build).
 
 
-##@ Building blocks
+# Building blocks
 
-check-parity: ##> Workflows run exactly the targets in CI_JOBS, SECURITY_JOBS, RELEASE_JOBS.
+check-parity: # Workflows run exactly the targets in CI_JOBS, SECURITY_JOBS, RELEASE_JOBS.
 	scripts/ci/check-parity.sh
 
-lint-python audit test: build-dev
+lint-python audit test-py: build-dev
 
-lint-python: ##> Ruff lint and format check.
+lint-python: # Ruff lint and format check.
 	scripts/ci/lint-python.sh
 
-lint-shell: ##> ShellCheck all scripts.
+lint-shell: # ShellCheck all scripts.
 	scripts/ci/lint-shell.sh
 
-lint-docker: ##> Hadolint and Compose validation.
+lint-docker: # Hadolint and Compose validation.
 	scripts/ci/lint-docker.sh
 
-audit: ##> Audit production dependencies.
+audit: # Audit production dependencies.
 	scripts/ci/audit.sh
 
-test: ##> Tests with coverage (coverage.xml, htmlcov/).
-	scripts/ci/test.sh
+test-py: # Tests with coverage (coverage.xml, htmlcov/).
+	scripts/ci/test-py.sh
 
-test-js: ##> JavaScript unit tests (node --test).
+test-js: # JavaScript unit tests (node --test).
 	scripts/ci/test-js.sh
 
-build-dev: ##> Build dev image.
+build-dev: # Build dev image.
 	scripts/ci/build-image.sh dev "$(CI_DEV_IMAGE)"
 
-build-prod: ##> Build production image.
+build-prod: # Build production image.
 	scripts/ci/build-image.sh production "$(CI_IMAGE)"
 
-smoke-test: ##> Smoke-test CI_IMAGE.
+smoke-test: # Smoke-test CI_IMAGE.
 	scripts/ci/smoke-test.sh
 
-scan-image: ##> Scan CI_IMAGE for vulnerabilities.
+scan-image: # Scan CI_IMAGE for vulnerabilities.
 	scripts/ci/scan-image.sh
 
-##@ Scheduled security
+# Scheduled security
 
 # Default SARIF paths for local runs; security.yml sets the same paths.
 scan-published: export SARIF_FILE ?= reports/trivy-latest.sarif
 zizmor-sarif:   export SARIF_FILE ?= reports/zizmor.sarif
 
-scan-published: ##> Scan the published image (latest + current X.Y) with Trivy.
+scan-published: # Scan the published image (latest + current X.Y) with Trivy.
 	scripts/ci/scan-published.sh
 
-zizmor-sarif: ##> Online zizmor audit as SARIF (needs GH_TOKEN).
+zizmor-sarif: # Online zizmor audit as SARIF (uses your gh login).
 	scripts/ci/zizmor-sarif.sh
 
-##@ Reports
+# Reports
 
 # make report-TARGET: run TARGET with a summary report (what CI runs),
 # for example `make report-check-code`.
