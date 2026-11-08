@@ -34,7 +34,8 @@ make ci
 `make format` changes files, so run it first and review `git diff`. `make ci`
 runs exactly what GitHub CI runs and must pass for each commit, not only for the
 last one. It takes the GitHub token from `gh auth token`, or from `GH_TOKEN`
-if that is set.It ends with a table of every check; the same report, with test,
+if that is set, and passes it only to the zizmor container. 
+It ends with a table of every check; the same report, with test,
 coverage, audit and Trivy details, is written to `reports/summary.md`.
 
 ## CI and make

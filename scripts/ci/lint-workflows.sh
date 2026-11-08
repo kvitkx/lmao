@@ -24,10 +24,10 @@ docker_tool \
 format="$(ci_format github plain)"
 
 if [[ "${ZIZMOR_ONLINE:-0}" == 1 ]]; then
-    require_gh_token
+    token="$(gh_token)"
 
     log "zizmor (online)"
-    docker_tool \
+    GH_TOKEN="$token" docker_tool \
         --env GH_TOKEN \
         --entrypoint zizmor \
         "$ZIZMOR_IMAGE" \

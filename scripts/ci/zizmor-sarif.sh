@@ -7,12 +7,12 @@ set -Eeuo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
 require_env ZIZMOR_IMAGE SARIF_FILE
-require_gh_token
+token="$(gh_token)"
 
 mkdir -p "$(dirname "$SARIF_FILE")"
 
 log "zizmor (online, SARIF: $SARIF_FILE)"
-docker_tool \
+GH_TOKEN="$token" docker_tool \
     --env GH_TOKEN \
     --entrypoint zizmor \
     "$ZIZMOR_IMAGE" \

@@ -54,15 +54,18 @@ require_env() {
     done
 }
 
-# GitHub token for online audits: GH_TOKEN from the environment (GitHub
-# Actions), otherwise the gh login. Exported for child processes.
-require_gh_token() {
-    if [[ -z "${GH_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
-        GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+# GitHub token for online audits, printed to stdout: GH_TOKEN from the
+# environment (GitHub Actions), otherwise the gh login. It is never exported
+# here: the caller hands it to the one command that needs it, for example
+# `token="$(gh_token)"` and then `GH_TOKEN="$token" docker_tool --env GH_TOKEN ...`.
+gh_token() {
+    local token="${GH_TOKEN:-}"
+    if [[ -z "$token" ]] && command -v gh >/dev/null 2>&1; then
+        token="$(gh auth token 2>/dev/null || true)"
     fi
-    [[ -n "${GH_TOKEN:-}" ]] \
+    [[ -n "$token" ]] \
         || die "No GitHub token: run 'gh auth login' or set GH_TOKEN."
-    export GH_TOKEN
+    printf '%s' "$token"
 }
 
 
