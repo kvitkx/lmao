@@ -227,6 +227,7 @@ reports/
 node_modules/
 
 # Built by make css and the Dockerfile: static/css/input.css -> app.css,
-# alpinejs from package-lock.json -> vendor/
+# alpinejs and fonts from package-lock.json -> vendor/, fonts/
 static/css/app.css
 static/vendor/
+static/fonts/

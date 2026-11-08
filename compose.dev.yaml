@@ -29,6 +29,7 @@ services:
       # Live sources for the class scan; the output lands in ./static/css.
       - ./static:/build/static
       - ./templates:/build/templates:ro
+      - ./scripts/build-assets.sh:/build/scripts/build-assets.sh:ro
     # One build first, so the healthcheck passes as soon as the file exists.
     # --watch=always: Tailwind v4 stops watching when stdin closes, and it does
     # in a container without a terminal.
@@ -36,12 +37,11 @@ services:
       - sh
       - -c
       - >-
-        mkdir -p static/vendor &&
-        cp node_modules/alpinejs/dist/cdn.min.js static/vendor/alpine.min.js &&
+        sh scripts/build-assets.sh node_modules static &&
         ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css &&
         exec ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css --watch=always
     healthcheck:
-      test: ["CMD-SHELL", "test -s static/css/app.css && test -s static/vendor/alpine.min.js"]
+      test: ["CMD-SHELL", "test -s static/css/app.css && test -s static/vendor/alpine.min.js && test -s static/fonts/inter-latin-300.woff2"]
       interval: 2s
       timeout: 2s
       retries: 30

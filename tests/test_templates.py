@@ -6,6 +6,7 @@ extra closing tag fails nothing loudly: the browser repairs the tree silently
 and a block ends up in the wrong place.
 """
 
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -136,3 +137,19 @@ def test_index_html_serves_alpine_from_static(client):
     assert "cdn.jsdelivr.net" not in html
     # the page scripts must register 'alpine:init' before Alpine starts
     assert html.index("js/lmao.js") < html.index("vendor/alpine.min.js")
+
+
+def test_index_html_loads_nothing_from_another_host(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert re.findall(r'(?:src|href)="https?://', html) == []
+    assert "fonts.googleapis.com" not in html
+    assert "fonts.gstatic.com" not in html
+
+
+def test_index_html_preloads_the_body_font(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert "/static/fonts/inter-latin-300.woff2" in html
+    assert 'as="font"' in html
+    assert "crossorigin" in html

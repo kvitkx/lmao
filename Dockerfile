@@ -43,22 +43,25 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM css-deps AS css
 
+COPY scripts/build-assets.sh scripts/build-assets.sh
+
 # Only what the class scan reads (see the @source lines of input.css).
 COPY static/css/input.css static/css/input.css
 COPY static/js/ static/js/
 COPY templates/ templates/
 
-RUN ./node_modules/.bin/tailwindcss \
-    --input static/css/input.css \
-    --output /build/app.css \
-    --minify
+# /build/out has the layout of /app/static: Alpine, the fonts and the stylesheet.
+RUN sh scripts/build-assets.sh node_modules /build/out && \
+    ./node_modules/.bin/tailwindcss \
+      --input static/css/input.css \
+      --output /build/out/css/app.css \
+      --minify
 
 
 # What the page loads from /static: `make css` exports it, the production
-# stage copies it. Alpine comes from the lockfile, not from a CDN.
+# stage copies it. Nothing comes from a CDN.
 FROM scratch AS assets-out
-COPY --from=css /build/app.css /css/app.css
-COPY --from=css /build/node_modules/alpinejs/dist/cdn.min.js /vendor/alpine.min.js
+COPY --from=css /build/out /
 
 
 FROM deps AS dev

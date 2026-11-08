@@ -1,12 +1,9 @@
-{# Head partial: fonts, stylesheet, Alpine.
-   The stylesheet is built from static/css/input.css (tokens, base and print
-   styles): see the `css` stage of the Dockerfile and `make css`.
-   Alpine is built from the lockfile (the `assets-out` stage of the Dockerfile).
-   Planned: vendor the fonts (DESIGN.md, section 10). #}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300&family=IBM+Plex+Mono:wght@300&display=swap">
-
+{# Head partial: stylesheet, fonts, Alpine. Nothing is loaded from another host.
+   The stylesheet is built from static/css/input.css (tokens, fonts, base and
+   print styles); Alpine and the font files come from the lockfile. All of it is
+   produced by the `assets-out` stage of the Dockerfile (`make css` in dev). #}
+<link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-300.woff2') }}"
+      as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 
 <script defer src="{{ url_for('static', filename='vendor/alpine.min.js') }}"></script>
