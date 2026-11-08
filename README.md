@@ -90,15 +90,18 @@ Open **http://localhost:5000**. Stop with `docker stop lmao`.
 
 ### With uv
 
-Requires [uv](https://docs.astral.sh/uv/) and a running Ollama. uv installs the right Python (3.15) for you.
+Requires [uv](https://docs.astral.sh/uv/) and a running Ollama. uv installs the right Python (3.15) for you. The stylesheet, Alpine and the fonts are built in Docker, so you also need Docker and GNU Make once; without them the page has no styles.
 
 ```bash
 git clone https://github.com/ykvit/lmao.git
 cd lmao
 
+make css                             # builds static/css/app.css, static/vendor and static/fonts
 uv sync --locked
 uv run flask --app app run
 ```
+
+Run `make css` again after you change a template, a script or `static/css/input.css`.
 
 Open **http://localhost:5000**. If Ollama is not on `http://localhost:11434`, set `OLLAMA_BASE_URL` (see `.env.example`).
 
@@ -109,7 +112,8 @@ Every run is saved in `./history` (make dev, uv), in the `history_data` Docker v
 ## Development
 
 ```bash
-make dev                              # hot reload on http://localhost:5000
+make dev                              # hot reload and css rebuild on http://localhost:5000
+make css                              # build static/css/app.css, vendor and fonts once
 make test                             # tests with coverage
 make test-js                          # JavaScript tests (node --test)
 GH_TOKEN="$(gh auth token)" make ci   # everything GitHub CI runs
