@@ -12,7 +12,7 @@ CMD_DEV     := docker compose -f compose.yaml -f compose.dev.yaml $(COMPOSE_GPU)
 CMD_PROD    := docker compose -f compose.yaml -f compose.prod.yaml $(COMPOSE_GPU)
 CMD_ACTIVE  := $(if $(filter prod,$(ENV)),$(CMD_PROD),$(CMD_DEV))
 
-.PHONY: help models-volume dev prod run logs shell down down-all format test css clean reset bump release-plan
+.PHONY: help models-volume dev prod run logs shell down format test css clean reset bump release-plan
 
 
 ##@ General
@@ -46,12 +46,13 @@ logs: ##> Follow logs (make logs [ENV=prod]).
 shell: ##> Open bash in app (make shell [ENV=prod]).
 	$(CMD_ACTIVE) exec app /bin/bash
 
-down: ##> Stop environment (make down [ENV=prod]).
-	$(CMD_ACTIVE) down --remove-orphans
-
-down-all: ##> Stop dev and prod.
+down: ##> Stop environment (make down [ENV=prod|all]).
+ifeq ($(ENV),all)
 	$(CMD_DEV) down --remove-orphans
 	$(CMD_PROD) down --remove-orphans
+else
+	$(CMD_ACTIVE) down --remove-orphans
+endif
 
 
 ##@ Code
