@@ -9,16 +9,27 @@ front end is built in Docker). See the README for `make dev` and `make help`.
 `make dev` also rebuilds `static/css/app.css` whenever a template, a script or
 `static/css/input.css` changes. `make css` builds the front-end files once.
 
+## While you work
+
+```bash
+make test                   # Python and JS tests, no coverage
+make test ARGS="-k export"  # ARGS goes to pytest
+```
+
+Run it after every change or commit. It is quick feedback, not the CI check:
+coverage and the `--network none` run only happen in `make ci`.
+
 ## Before every commit
 
 ```bash
 make format
-GH_TOKEN="$(gh auth token)" make ci
+make ci
 ```
 
 `make format` changes files, so run it first and review `git diff`. `make ci`
 runs exactly what GitHub CI runs and must pass for each commit, not only for the
-last one. It ends with a table of every check; the same report, with test,
+last one. It takes the GitHub token from `gh auth token`, or from `GH_TOKEN`
+if that is set.It ends with a table of every check; the same report, with test,
 coverage, audit and Trivy details, is written to `reports/summary.md`.
 
 ## CI and make
@@ -28,8 +39,8 @@ the targets each workflow runs are listed in `ci.mk`:
 
 | Workflow | Runs | Locally |
 |---|---|---|
-| `ci.yml` (pull requests) | `CI_JOBS` | `GH_TOKEN="$(gh auth token)" make ci` |
-| `security.yml` (daily) | `SECURITY_JOBS` | `GH_TOKEN="$(gh auth token)" make security` |
+| `ci.yml` (pull requests) | `CI_JOBS` | `make ci` |
+| `security.yml` (daily) | `SECURITY_JOBS` | `make security` |
 | `release.yml` (push to `main`) | `RELEASE_JOBS` | `make test-image` (after `make build-prod`) |
 
 `make check-parity` (part of `make ci`) fails when a workflow and `ci.mk`
@@ -103,9 +114,10 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as
 
 ## Rules of the repository
 
-- Tests: coverage must stay at or above `fail_under` in `pyproject.toml`.
+- Tests: coverage must stay at or above `fail_under` in `pyproject.toml`
+  (measured by `make ci`; `make test` skips it).
 - JS tests: `static/js/lib.js` holds the pure helpers; cover new ones in
-  `tests/js/` (`make test-js`). Keep the DOM and Alpine out of `lib.js`.
+  `tests/js/` (`make test`). Keep the DOM and Alpine out of `lib.js`.
 - Python version: the `Dockerfile` `FROM python:` line and `requires-python`
   change together (`make check-python` verifies it).
 - Workflows call make only as a single-line `run: make report-TARGET`

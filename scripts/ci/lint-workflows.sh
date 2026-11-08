@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Lint GitHub workflows with actionlint and audit them with zizmor.
-# ZIZMOR_ONLINE=1 enables online audits and requires GH_TOKEN.
+# ZIZMOR_ONLINE=1 enables online audits and needs a GitHub token
+# (GH_TOKEN or `gh auth login`).
 set -Eeuo pipefail
 # shellcheck source=../lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
@@ -23,8 +24,7 @@ docker_tool \
 format="$(ci_format github plain)"
 
 if [[ "${ZIZMOR_ONLINE:-0}" == 1 ]]; then
-    [[ -n "${GH_TOKEN:-}" ]] \
-        || die "GH_TOKEN is required. Try: GH_TOKEN=\"\$(gh auth token)\" make ci"
+    require_gh_token
 
     log "zizmor (online)"
     docker_tool \

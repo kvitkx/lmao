@@ -2,7 +2,7 @@ name: Security
 
 # Daily checks that do not depend on a code change: new advisories appear
 # for pinned dependencies, actions and the published image.
-# Same as `GH_TOKEN="$(gh auth token)" make security`.
+# Same as `make security`.
 #
 # Not run on pull requests: the result reflects the published image and
 # today's advisories, not the change under review. To test a change to this

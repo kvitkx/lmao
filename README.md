@@ -114,9 +114,8 @@ Every run is saved in `./history` (make dev, uv), in the `history_data` Docker v
 ```bash
 make dev                              # hot reload and css rebuild on http://localhost:5000
 make css                              # build static/css/app.css, vendor and fonts once
-make test                             # tests with coverage
-make test-js                          # JavaScript tests (node --test)
-GH_TOKEN="$(gh auth token)" make ci   # everything GitHub CI runs
+make test                             # Python and JS tests, quick (no coverage)
+make ci                               # everything GitHub CI runs
 ```
 
 See [CONTRIBUTING](CONTRIBUTING.md) for commits, branches, PRs and releases, and [DESIGN](DESIGN.md) for the UI.

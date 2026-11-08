@@ -54,6 +54,17 @@ require_env() {
     done
 }
 
+# GitHub token for online audits: GH_TOKEN from the environment (GitHub
+# Actions), otherwise the gh login. Exported for child processes.
+require_gh_token() {
+    if [[ -z "${GH_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
+        GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+    fi
+    [[ -n "${GH_TOKEN:-}" ]] \
+        || die "No GitHub token: run 'gh auth login' or set GH_TOKEN."
+    export GH_TOKEN
+}
+
 
 # ---------- Exit hooks ----------
 

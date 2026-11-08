@@ -54,7 +54,7 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python lint-python lint-shell lint-docker audit test test-js \
+        check-python lint-python lint-shell lint-docker audit test-py test-js \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
@@ -65,10 +65,10 @@ check: # What CI runs, offline (no token needed).
 	@$(call run_report,All checks,$(CI_JOBS))
 
 ci: export ZIZMOR_ONLINE := 1
-ci: check ##> Exactly what the CI workflow runs (needs GH_TOKEN).
+ci: check ##> Exactly what the CI workflow runs (uses your gh login).
 
 security: export ZIZMOR_ONLINE := 1
-security: # Exactly what the daily Security workflow runs (needs GH_TOKEN).
+security: # Exactly what the daily Security workflow runs (uses your gh login).
 	@$(call run_report,Security,$(SECURITY_JOBS))
 
 
@@ -77,7 +77,7 @@ security: # Exactly what the daily Security workflow runs (needs GH_TOKEN).
 check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python lint-shell lint-python audit test test-js # Check Python version, lint, audit, run Python and JS tests.
+check-code: check-python lint-shell lint-python audit test-py test-js # Check Python version, lint, audit, run Python and JS tests.
 
 check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
@@ -92,7 +92,7 @@ test-image: smoke-test scan-image # Smoke-test and scan existing CI_IMAGE (no bu
 check-parity: # Workflows run exactly the targets in CI_JOBS, SECURITY_JOBS, RELEASE_JOBS.
 	scripts/ci/check-parity.sh
 
-lint-python audit test: build-dev
+lint-python audit test-py: build-dev
 
 lint-python: # Ruff lint and format check.
 	scripts/ci/lint-python.sh
@@ -106,8 +106,8 @@ lint-docker: # Hadolint and Compose validation.
 audit: # Audit production dependencies.
 	scripts/ci/audit.sh
 
-test: # Tests with coverage (coverage.xml, htmlcov/).
-	scripts/ci/test.sh
+test-py: # Tests with coverage (coverage.xml, htmlcov/).
+	scripts/ci/test-py.sh
 
 test-js: # JavaScript unit tests (node --test).
 	scripts/ci/test-js.sh
@@ -133,7 +133,7 @@ zizmor-sarif:   export SARIF_FILE ?= reports/zizmor.sarif
 scan-published: # Scan the published image (latest + current X.Y) with Trivy.
 	scripts/ci/scan-published.sh
 
-zizmor-sarif: # Online zizmor audit as SARIF (needs GH_TOKEN).
+zizmor-sarif: # Online zizmor audit as SARIF (uses your gh login).
 	scripts/ci/zizmor-sarif.sh
 
 # Reports

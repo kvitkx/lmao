@@ -12,7 +12,7 @@ CMD_DEV     := docker compose -f compose.yaml -f compose.dev.yaml $(COMPOSE_GPU)
 CMD_PROD    := docker compose -f compose.yaml -f compose.prod.yaml $(COMPOSE_GPU)
 CMD_ACTIVE  := $(if $(filter prod,$(ENV)),$(CMD_PROD),$(CMD_DEV))
 
-.PHONY: help models-volume dev prod logs shell down down-all format css clean reset bump release-plan
+.PHONY: help models-volume dev prod logs shell down down-all format test css clean reset bump release-plan
 
 
 ##@ General
@@ -55,6 +55,9 @@ down-all: ##> Stop dev and prod.
 
 format: ##> Fix and format Python files (changes source!).
 	scripts/dev/format.sh
+
+test: ##> Run Python and JS tests, no coverage (make test [ARGS="-k name"]: ARGS goes to pytest).
+	scripts/dev/test.sh $(ARGS)
 
 css: ##> Build static/css/app.css, vendor/ and fonts/ once (make dev rebuilds the css on change).
 	docker buildx build --target assets-out --output type=local,dest=static .

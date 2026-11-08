@@ -6,4 +6,4 @@ Releases vX.Y.Z. Merging this PR publishes the image and creates the GitHub Rele
 ## Checks
 
 - [ ] `make release-plan` prints the tag vX.Y.Z
-- [ ] `GH_TOKEN="$(gh auth token)" make ci` passes
+- [ ] `make ci` passes

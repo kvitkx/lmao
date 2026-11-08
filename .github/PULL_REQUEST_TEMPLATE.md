@@ -19,6 +19,6 @@ Mark breaking changes (schema, API, payload) explicitly. -->
 
 ## Checks
 
-- [ ] `make format` and `GH_TOKEN="$(gh auth token)" make ci` pass on every commit
+- [ ] `make format` and `make ci` pass on every commit
 - [ ] Tests are in the same commit as the code
 - [ ] No version bump here (releases are cut by `make bump`, which opens its own PR)
