@@ -7,7 +7,9 @@ Docker; nothing else is installed on the host (Node is not needed either: the
 front end is built in Docker). See the README for `make dev` and `make help`.
 
 `make dev` also rebuilds `static/css/app.css` whenever a template, a script or
-`static/css/input.css` changes. `make css` builds the front-end files once.
+`static/css/input.css` changes. `make run` (the app on the host, with uv)
+builds the front-end files in Docker when they are missing or outdated;
+`make css` does the same on its own, and `make -B css` forces it.
 
 ## While you work
 

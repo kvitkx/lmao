@@ -12,7 +12,7 @@ CMD_DEV     := docker compose -f compose.yaml -f compose.dev.yaml $(COMPOSE_GPU)
 CMD_PROD    := docker compose -f compose.yaml -f compose.prod.yaml $(COMPOSE_GPU)
 CMD_ACTIVE  := $(if $(filter prod,$(ENV)),$(CMD_PROD),$(CMD_DEV))
 
-.PHONY: help models-volume dev prod logs shell down down-all format test css clean reset bump release-plan
+.PHONY: help models-volume dev prod run logs shell down down-all format test css clean reset bump release-plan
 
 
 ##@ General
@@ -37,6 +37,9 @@ prod: models-volume ##> Start PROD locally on port 5001 (make prod [GPU=1]).
 	$(CMD_PROD) up --build -d
 	@echo "App is running at http://localhost:5001"
 
+run: static/css/app.css ##> Run on the host with uv (builds the css in Docker if needed).
+	uv run --locked flask --app app run
+
 logs: ##> Follow logs (make logs [ENV=prod]).
 	$(CMD_ACTIVE) logs -f
 
@@ -59,8 +62,19 @@ format: ##> Fix and format Python files (changes source!).
 test: ##> Run Python and JS tests, no coverage (make test [ARGS="-k name"]: ARGS goes to pytest).
 	scripts/dev/test.sh $(ARGS)
 
-css: ##> Build static/css/app.css, vendor/ and fonts/ once (make dev rebuilds the css on change).
+# What the css stage of the Dockerfile reads (see its COPY lines).
+CSS_SOURCES := Dockerfile package.json package-lock.json scripts/build-assets.sh \
+    static/css/input.css $(shell find static/js templates -type f)
+
+# Rebuilt only when a source is newer. `touch`: a BuildKit cache hit exports the
+# files with their old time, and this rule would then run on every call.
+static/css/app.css: $(CSS_SOURCES)
 	docker buildx build --target assets-out --output type=local,dest=static .
+	@touch $@
+
+# Hidden from help: `make dev` and `make run` build the css themselves.
+# `make -B css` forces a rebuild (for example after deleting static/fonts).
+css: static/css/app.css
 
 
 ##@ Cleanup
