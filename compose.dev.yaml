@@ -36,10 +36,12 @@ services:
       - sh
       - -c
       - >-
+        mkdir -p static/vendor &&
+        cp node_modules/alpinejs/dist/cdn.min.js static/vendor/alpine.min.js &&
         ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css &&
         exec ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css --watch=always
     healthcheck:
-      test: ["CMD-SHELL", "test -s static/css/app.css"]
+      test: ["CMD-SHELL", "test -s static/css/app.css && test -s static/vendor/alpine.min.js"]
       interval: 2s
       timeout: 2s
       retries: 30

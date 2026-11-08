@@ -127,3 +127,12 @@ def test_nav_toggle_classes_are_in_the_css_safelist(client):
         assert composed in html
         for name in composed.split():
             assert name in css
+
+
+def test_index_html_serves_alpine_from_static(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert "/static/vendor/alpine.min.js" in html
+    assert "cdn.jsdelivr.net" not in html
+    # the page scripts must register 'alpine:init' before Alpine starts
+    assert html.index("js/lmao.js") < html.index("vendor/alpine.min.js")

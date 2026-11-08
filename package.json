@@ -4,6 +4,7 @@
   "description": "Build tools for static/css/app.css. Never shipped in the image.",
   "devDependencies": {
     "@tailwindcss/cli": "4.3.2",
+    "alpinejs": "3.14.9",
     "tailwindcss": "4.3.2"
   }
 }

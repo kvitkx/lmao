@@ -56,8 +56,8 @@ down-all: ##> Stop dev and prod.
 format: ##> Fix and format Python files (changes source!).
 	scripts/dev/format.sh
 
-css: ##> Build static/css/app.css once (make dev rebuilds it on change).
-	docker buildx build --target css-out --output type=local,dest=static/css .
+css: ##> Build static/css/app.css and static/vendor/ once (make dev rebuilds the css on change).
+	docker buildx build --target assets-out --output type=local,dest=static .
 
 
 ##@ Cleanup

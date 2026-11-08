@@ -64,9 +64,11 @@ user_id="$(docker exec "$container" id -u)"
 [[ "$user_id" != 0 ]] || die "Container is running as root."
 log "Container runs as UID $user_id."
 
-docker exec "$container" python -c 'import urllib.request as u; b = u.urlopen("http://localhost:5000/static/css/app.css").read(); assert len(b) > 1000, "empty"' \
-    || die "The stylesheet /static/css/app.css is not served."
-log "The stylesheet is served."
+for asset in css/app.css vendor/alpine.min.js; do
+    docker exec "$container" python -c 'import sys, urllib.request as u; b = u.urlopen("http://localhost:5000/static/" + sys.argv[1]).read(); assert len(b) > 1000, "empty"' "$asset" \
+        || die "The static file /static/$asset is not served."
+    log "Served: /static/$asset"
+done
 
 size_bytes="$(docker image inspect --format '{{.Size}}' "$CI_IMAGE")"
 

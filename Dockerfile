@@ -54,9 +54,11 @@ RUN ./node_modules/.bin/tailwindcss \
     --minify
 
 
-# Just the stylesheet: `make css` exports it, the production stage copies it.
-FROM scratch AS css-out
-COPY --from=css /build/app.css /app.css
+# What the page loads from /static: `make css` exports it, the production
+# stage copies it. Alpine comes from the lockfile, not from a CDN.
+FROM scratch AS assets-out
+COPY --from=css /build/app.css /css/app.css
+COPY --from=css /build/node_modules/alpinejs/dist/cdn.min.js /vendor/alpine.min.js
 
 
 FROM deps AS dev
@@ -78,7 +80,7 @@ COPY --from=deps /opt/venv /opt/venv
 
 COPY core/ /app/core/
 COPY static/ /app/static/
-COPY --from=css-out /app.css /app/static/css/app.css
+COPY --from=assets-out / /app/static/
 COPY templates/ /app/templates/
 COPY app.py /app/
 

@@ -226,5 +226,7 @@ reports/
 # Frontend build tools (installed in Docker only)
 node_modules/
 
-# Built from static/css/input.css (make css, Dockerfile)
+# Built by make css and the Dockerfile: static/css/input.css -> app.css,
+# alpinejs from package-lock.json -> vendor/
 static/css/app.css
+static/vendor/

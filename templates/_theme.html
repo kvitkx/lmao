@@ -1,12 +1,12 @@
 {# Head partial: fonts, stylesheet, Alpine.
    The stylesheet is built from static/css/input.css (tokens, base and print
    styles): see the `css` stage of the Dockerfile and `make css`.
-   Versions are pinned, but SRI hashes are not set yet.
-   Planned: vendor Alpine and the fonts (DESIGN.md, section 10). #}
+   Alpine is built from the lockfile (the `assets-out` stage of the Dockerfile).
+   Planned: vendor the fonts (DESIGN.md, section 10). #}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300&family=IBM+Plex+Mono:wght@300&display=swap">
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<script defer src="{{ url_for('static', filename='vendor/alpine.min.js') }}"></script>
