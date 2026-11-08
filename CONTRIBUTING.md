@@ -43,6 +43,11 @@ add commands to a workflow.
   `gh workflow run security.yml --ref <branch>`.
 - A failing `scan-published` means the published image needs a new release
   (usually a base image fix that is already on `main`): run `make bump`.
+- `scan-image` sorts findings into *to fix* (the newest base image does not
+  have them: rebuild or bump) and *waiting* (the newest base image has them
+  too, so only its rebuild fixes them). *Waiting* is a warning and a report
+  section, not a failure, until the base image is older than
+  `BASE_MAX_AGE_DAYS` (14 by default, set in `ci.mk`).
 
 GitHub disables the daily Security workflow after 60 days without repository
 activity (Dependabot merges do not count). Re-enable it in the Actions tab.
