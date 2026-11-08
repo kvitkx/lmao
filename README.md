@@ -60,9 +60,8 @@ make prod GPU=1      # NVIDIA GPU
 Open **http://localhost:5001**. Compose starts the app and Ollama together. Pull the models into that Ollama:
 
 ```bash
-docker compose -f compose.yaml -f compose.prod.yaml exec ollama ollama pull MODEL_NAME
+make pull MODEL=MODEL_NAME
 ```
-
 Stop with `make down ENV=prod`. Run `make help` to list all commands.
 
 ### With Docker

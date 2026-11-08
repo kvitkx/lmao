@@ -11,6 +11,9 @@ front end is built in Docker). See the README for `make dev` and `make help`.
 builds the front-end files in Docker when they are missing or outdated;
 `make css` does the same on its own, and `make -B css` forces it.
 
+`make help` ends with the variables the commands accept (`ENV`, `GPU`, `MODEL`,
+`ARGS`, `PART`). Keep that list in `Makefile` up to date when you add one.
+
 ## While you work
 
 ```bash
