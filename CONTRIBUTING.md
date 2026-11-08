@@ -40,6 +40,12 @@ add commands to a workflow.
   `make report-check-code`. Checks run with `make -k`, so one run reports
   every failure, not only the first.
 - `make check` is `make ci` without the online zizmor audit (no token).
+- `make help` lists only the everyday commands. The CI targets are internal
+  and not listed; each has a one-line comment in `ci.mk`. The ones worth
+  running by hand are `check-code`, `check-image` and `check-workflows` (the
+  three CI jobs), `security`, `test-js`, `lint-python`, `lint-shell`,
+  `lint-docker` and `audit`. Describe a new target with a plain `#` comment,
+  not `##>`: the marker is reserved for commands that `make help` shows.
 - The Security workflow does not run on pull requests: its result depends on
   the published image and today's advisories, not on the change. When you
   change `security.yml` or its scripts, run `make security`, then
