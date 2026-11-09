@@ -54,7 +54,7 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python lint-python lint-shell lint-docker audit test-py test-js \
+        check-python lint-python lint-shell lint-docker audit audit-npm test-py test-js \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
@@ -77,7 +77,7 @@ security: # Exactly what the daily Security workflow runs (uses your gh login).
 check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python lint-shell lint-python audit test-py test-js # Check Python version, lint, audit, run Python and JS tests.
+check-code: check-python lint-shell lint-python audit audit-npm test-py test-js # Check Python version, lint, audit, run Python and JS tests.
 
 check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
@@ -105,6 +105,9 @@ lint-docker: # Hadolint and Compose validation.
 
 audit: # Audit production dependencies.
 	scripts/ci/audit.sh
+
+audit-npm: # Audit the npm lockfile (fails only on findings that have a fix).
+	scripts/ci/audit-npm.sh
 
 test-py: # Tests with coverage (coverage.xml, htmlcov/).
 	scripts/ci/test-py.sh
