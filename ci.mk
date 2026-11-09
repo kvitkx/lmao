@@ -40,7 +40,7 @@ export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
 #   security.yml -> SECURITY_JOBS  (make security)
 #   release.yml  -> RELEASE_JOBS   (the image itself is built by build-push-action)
 export CI_JOBS       := check-workflows check-code check-image
-export SECURITY_JOBS := audit scan-published zizmor-sarif
+export SECURITY_JOBS := audit audit-npm scan-published zizmor-sarif
 export RELEASE_JOBS  := test-image
 
 # Run TARGETS with make -k (every failing check is reported, not only the
