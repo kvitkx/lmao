@@ -55,6 +55,9 @@ updates:
       default-days: 7
 
   # Frontend build tools: package.json and package-lock.json (Tailwind CLI).
+  # `make audit-npm` fails when a vulnerable package has a fix. Dependabot
+  # security updates open that pull request, and the cooldown below does not
+  # apply to them: only version updates wait.
   - package-ecosystem: "npm"
     directory: "/"
     patterns: ["*"]
