@@ -61,12 +61,15 @@ add commands to a workflow.
   and not listed; each has a one-line comment in `ci.mk`. The ones worth
   running by hand are `check-code`, `check-image` and `check-workflows` (the
   three CI jobs), `security`, `test-js`, `lint-python`, `lint-shell`,
-  `lint-docker` and `audit`. Describe a new target with a plain `#` comment,
+  `lint-docker`, `audit` and `audit-npm`. Describe a new target with a plain `#` comment,
   not `##>`: the marker is reserved for commands that `make help` shows.
 - The Security workflow does not run on pull requests: its result depends on
   the published image and today's advisories, not on the change. When you
   change `security.yml` or its scripts, run `make security`, then
   `gh workflow run security.yml --ref <branch>`.
+- A failing `audit-npm` means a vulnerable npm package has a fix: merge the
+  Dependabot security PR, or bump the package in `package.json` and regenerate
+  the lockfile (see below). Findings without a fix only warn.
 - A failing `scan-published` means the published image needs a new release
   (usually a base image fix that is already on `main`): run `make bump`.
 - `scan-image` sorts findings into *to fix* (the newest base image does not

@@ -50,9 +50,12 @@ fence longer than any backtick run inside them and quote the judge text.
 - Images and Actions are pinned by digest or SHA; dependencies are locked
   with hashes: Python in `uv.lock`, the front end (Tailwind CLI, Alpine, fonts)
   in `package-lock.json`. Nothing is loaded from a CDN at runtime.
-- CI runs Trivy on the published image, `pip-audit` on dependencies and
-  zizmor on workflows, with the results uploaded to code scanning; daily
-  scheduled scans cover the published image.
+- CI runs Trivy on the published image, `pip-audit` and `npm audit` on
+  dependencies and zizmor on workflows, with the results uploaded to code
+  scanning; daily scheduled scans cover the published image and both
+  lockfiles. `npm audit` fails only on HIGH or CRITICAL findings that have a
+  fix; Dependabot security updates open the pull request for them, without
+  the cooldown of version updates. Findings without a fix are a warning.
 - CodeQL analysis runs on pushes and pull requests (default setup), in
   addition to the SARIF scanners.
 - Release images are attested with build provenance; attestations live in
