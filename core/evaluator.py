@@ -20,7 +20,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 
-from .ollama_client import OllamaClient
 from .prompts import (
     GRADE_SCHEMA,
     GRADER_SYSTEM,
@@ -32,6 +31,7 @@ from .prompts import (
     build_summary_prompt,
     parse_grade,
 )
+from .provider import Provider
 from .scoring import (
     STATUS_GENERATION_ERROR,
     STATUS_JUDGE_ERROR,
@@ -172,17 +172,17 @@ class EvaluationPipeline:
     """Manages the lifecycle of an evaluation task.
 
     Attributes:
-        ollama (OllamaClient): An instance of the Ollama API client.
+        provider (Provider): The provider that serves every model of a run.
         history_dir (str): Directory where evaluation artifacts are stored.
     """
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, provider: Provider):
         """Initializes the EvaluationPipeline.
 
         Args:
-            ollama_client (OllamaClient): Client to interact with local models.
+            provider (Provider): Provider used to call the models.
         """
-        self.ollama = ollama_client
+        self.provider = provider
         self.history_dir = "history"
         os.makedirs(self.history_dir, exist_ok=True)
 
@@ -192,7 +192,7 @@ class EvaluationPipeline:
         try:
             yield
         finally:
-            self.ollama.unload(model)
+            self.provider.unload(model)
 
     def _remove_think_tags(self, text: str) -> str:
         """Removes <think>...</think> blocks from the model's response.
@@ -219,7 +219,7 @@ class EvaluationPipeline:
     def _judge_generate(
         self, judge: str, prompt: str, system_prompt: str, attempt=0, format=None
     ) -> dict:
-        return self.ollama.generate(
+        return self.provider.generate(
             judge,
             prompt,
             system_prompt=system_prompt,
@@ -259,7 +259,7 @@ class EvaluationPipeline:
             total=len(questions) * (1 + 2 * len(candidates)) + 1,
         )
         metrics = {model: _empty_metrics() for model in candidates}
-        sizes = self.ollama.get_model_sizes()
+        sizes = self.provider.get_model_sizes()
         footprints = {
             model: {
                 "size_bytes": sizes.get(model) or None,
@@ -433,7 +433,7 @@ class EvaluationPipeline:
                 entry = self._answer(run, model, question, metrics)
                 if not measured and entry["status"] != STATUS_GENERATION_ERROR:
                     measured = True
-                    loaded = self.ollama.get_loaded(model)
+                    loaded = self.provider.get_loaded(model)
                     if loaded:
                         footprint["memory_bytes"] = loaded["size"]
                         footprint["vram_bytes"] = loaded["size_vram"]
@@ -443,7 +443,7 @@ class EvaluationPipeline:
     def _answer(self, run: _Run, model: str, question: dict, metrics: dict) -> dict:
         run.emit("answer_start", PHASE_ANSWER, model, question["id"])
 
-        result = self.ollama.generate(
+        result = self.provider.generate(
             model,
             build_answer_prompt(question["question"]),
             think=False,

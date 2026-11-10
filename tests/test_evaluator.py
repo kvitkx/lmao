@@ -24,6 +24,7 @@ from core.prompts import (
     SUMMARY_SYSTEM,
     build_answer_prompt,
 )
+from core.provider import Provider
 
 TASK_ID = "run_test_20260101_000000"
 
@@ -808,3 +809,46 @@ def test_cloud_mode_saves_the_footprint_of_local_candidates():
         2,
         1,
     )
+
+
+# --- providers --------------------------------------------------------------
+
+
+class _RemoteOnly(Provider):
+    """Implements only what every provider must: no unload, sizes or memory."""
+
+    def __init__(self):
+        self.fake = FakeOllama()
+
+    def get_models(self):
+        return ["judge", "cand-a", "cand-b"]
+
+    def generate(
+        self,
+        model,
+        prompt,
+        system_prompt="",
+        format=None,
+        think=None,
+        options=None,
+        keep_alive=0,
+        timeout=None,
+    ):
+        return self.fake.generate(
+            model, prompt, system_prompt, format, think, options, keep_alive, timeout
+        )
+
+
+def test_pipeline_runs_with_a_provider_without_local_capabilities():
+    pipeline = EvaluationPipeline(_RemoteOnly())
+
+    events = run(pipeline)
+
+    assert events[-1]["type"] == "completed"
+    stats = summary_by_model(pipeline)["cand-a"]
+    assert (stats["size_bytes"], stats["memory_bytes"], stats["vram_bytes"]) == (
+        None,
+        None,
+        None,
+    )
+    assert results_by_model(pipeline)["cand-a"]["score"] == 80

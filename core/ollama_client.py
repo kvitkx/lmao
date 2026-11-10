@@ -8,12 +8,13 @@ import os
 
 import requests
 
+from .provider import GENERATE_TIMEOUT_SEC, Provider
+
 NS_PER_SEC = 1e9
-GENERATE_TIMEOUT_SEC = 600
 UNLOAD_TIMEOUT_SEC = 30
 
 
-class OllamaClient:
+class OllamaClient(Provider):
     """Client for communicating with the Ollama REST API.
 
     Attributes:
