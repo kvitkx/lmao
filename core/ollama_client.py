@@ -39,6 +39,46 @@ class OllamaClient:
             print(f"Error fetching models: {e}")
             return []
 
+    def get_model_sizes(self) -> dict:
+        """Retrieves the size on disk of every installed model.
+
+        Returns:
+            dict: Model name to size in bytes. Cloud models report 0.
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response.raise_for_status()
+            return {
+                model["name"]: model.get("size", 0)
+                for model in response.json().get("models", [])
+            }
+        except Exception as e:
+            print(f"Error fetching model sizes: {e}")
+            return {}
+
+    def get_loaded(self, model: str) -> dict | None:
+        """Reads the memory a loaded model takes.
+
+        Args:
+            model (str): The name of the model.
+
+        Returns:
+            dict | None: size (total) and size_vram in bytes, or None if the
+                model is not loaded locally (cloud models never are).
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/ps", timeout=5)
+            response.raise_for_status()
+            for item in response.json().get("models", []):
+                if model in (item.get("name"), item.get("model")):
+                    return {
+                        "size": item.get("size", 0),
+                        "size_vram": item.get("size_vram", 0),
+                    }
+        except requests.RequestException as e:
+            print(f"Error reading loaded models: {e}")
+        return None
+
     def generate(
         self,
         model: str,

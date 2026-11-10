@@ -48,7 +48,7 @@ def _failed(model):
 
 def _results():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "task_id": "run_x_20260101_000000",
         "judge_model": "judge",
         "mode": "local",
