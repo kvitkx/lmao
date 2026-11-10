@@ -30,6 +30,8 @@ def _entry(
     tps=50.0,
     cps=250.0,
     time_sec=2.0,
+    tokens=None,
+    chars=None,
 ):
     return {
         "status": status,
@@ -38,6 +40,8 @@ def _entry(
         "tps": tps,
         "cps": cps,
         "time_sec": time_sec,
+        "tokens": tokens,
+        "chars": chars,
     }
 
 
@@ -200,6 +204,50 @@ def test_summarize_without_entries_has_no_numbers():
     assert result["median_cps"] is None
     assert result["median_time_sec"] is None
 
+
+def test_summarize_reports_length_and_tokens_per_pass():
+    entries = [
+        _entry(score=90, tokens=100, chars=200),
+        _entry(score=50, tokens=300, chars=400),
+    ]
+
+    result = summarize_model("m", entries)
+
+    assert result["avg_chars"] == 300
+    assert result["tokens_per_pass"] == 400
+
+
+def test_tokens_per_pass_is_none_without_a_pass():
+    result = summarize_model("m", [_entry(score=10, tokens=100, chars=50)])
+
+    assert result["tokens_per_pass"] is None
+    assert result["avg_chars"] == 50
+
+
+def test_score_per_gb_uses_decimal_gigabytes():
+    result = summarize_model("m", _scored(80, 80), {"size_bytes": 2_000_000_000})
+
+    assert result["score_per_gb"] == 40.0
+    assert result["size_bytes"] == 2_000_000_000
+
+
+def test_footprint_is_optional():
+    result = summarize_model("m", _scored(80))
+
+    assert result["score_per_gb"] is None
+    assert result["avg_chars"] is None
+    assert result["tokens_per_pass"] is None
+    assert result["size_bytes"] is None
+    assert result["memory_bytes"] is None
+    assert result["vram_bytes"] is None
+
+
+def test_footprint_memory_is_passed_through():
+    footprint = {"size_bytes": 1, "memory_bytes": 3, "vram_bytes": 2}
+
+    result = summarize_model("m", _scored(80), footprint)
+
+    assert (result["memory_bytes"], result["vram_bytes"]) == (3, 2)
 
 # --- recommend --------------------------------------------------------------
 

@@ -82,6 +82,8 @@ class FakeOllama:
         references=None,
         summary=None,
         wait_for_grading=(),
+        sizes=None,
+        memory=None,
     ):
         self.answers = answers or {}
         self.grades = list(grades or [])
@@ -96,6 +98,9 @@ class FakeOllama:
         self.loads = {}
         self.unloaded = []
         self.max_loaded = 0
+        self.sizes = sizes or {}
+        self.memory = memory or {}
+        self.footprint_calls = []
         self.graded = threading.Event()
         self._lock = threading.Lock()
 
@@ -148,6 +153,13 @@ class FakeOllama:
             self.loaded.discard(model)
             self.unloaded.append(model)
         return True
+
+    def get_model_sizes(self):
+        return dict(self.sizes)
+
+    def get_loaded(self, model):
+        self.footprint_calls.append(model)
+        return self.memory.get(model)
 
     @staticmethod
     def _next(queue, default):
@@ -262,7 +274,7 @@ def test_full_run_emits_events_and_saves_results():
     assert events[-2]["progress"] == {"done": 6, "total": 6}
 
     results = load(pipeline, "evaluation_results.json")
-    assert results["schema_version"] == 2
+    assert results["schema_version"] == 3
     assert results["task_id"] == TASK_ID
     assert results["judge_model"] == "judge"
     assert results["mode"] == "local"
@@ -288,6 +300,8 @@ def test_full_run_emits_events_and_saves_results():
         "tps": 200.0,
         "cps": 12.0,
         "time_sec": 0.8,
+        "tokens": 100,
+        "chars": 6,
     }
     assert question["results"][1]["category"] == "instruction_violation"
 
@@ -734,3 +748,62 @@ def test_cloud_mode_reports_grading_failures():
 
     cand_a = results_by_model(pipeline)["cand-a"]
     assert (cand_a["status"], cand_a["error"]) == ("judge_error", "timeout")
+
+# --- tokens, length and memory ----------------------------------------------
+
+
+def test_answers_record_tokens_and_characters():
+    ollama = FakeOllama(answers={"cand-a": ok("hello", tokens=40)})
+    pipeline = EvaluationPipeline(ollama)
+
+    run(pipeline)
+
+    entry = results_by_model(pipeline)["cand-a"]
+    assert (entry["tokens"], entry["chars"]) == (40, 5)
+    assert summary_by_model(pipeline)["cand-a"]["avg_chars"] == 5
+
+
+def test_footprint_is_read_once_per_model_and_saved_in_the_summary():
+    ollama = FakeOllama(
+        sizes={"cand-a": 2_000_000_000},
+        memory={"cand-a": {"size": 3_000_000_000, "size_vram": 2_500_000_000}},
+    )
+    pipeline = EvaluationPipeline(ollama)
+
+    run(pipeline, two_questions())
+
+    assert ollama.footprint_calls == ["cand-a", "cand-b"]
+    stats = summary_by_model(pipeline)
+    assert stats["cand-a"]["size_bytes"] == 2_000_000_000
+    assert stats["cand-a"]["memory_bytes"] == 3_000_000_000
+    assert stats["cand-a"]["vram_bytes"] == 2_500_000_000
+    assert stats["cand-b"]["size_bytes"] is None
+    assert stats["cand-b"]["memory_bytes"] is None
+    assert stats["cand-b"]["score_per_gb"] is None
+
+
+def test_footprint_is_not_read_after_a_failed_answer():
+    ollama = FakeOllama(answers={"cand-a": fail("oom")})
+    pipeline = EvaluationPipeline(ollama)
+
+    run(pipeline)
+
+    assert ollama.footprint_calls == ["cand-b"]
+    assert summary_by_model(pipeline)["cand-a"]["memory_bytes"] is None
+
+
+def test_cloud_mode_saves_the_footprint_of_local_candidates():
+    ollama = FakeOllama(
+        sizes={"cand-a": 1_000_000_000},
+        memory={"cand-a": {"size": 2, "size_vram": 1}},
+    )
+    pipeline = EvaluationPipeline(ollama)
+
+    run(pipeline, make_payload(judge_cloud=True))
+
+    stats = summary_by_model(pipeline)["cand-a"]
+    assert (stats["size_bytes"], stats["memory_bytes"], stats["vram_bytes"]) == (
+        1_000_000_000,
+        2,
+        1,
+    )

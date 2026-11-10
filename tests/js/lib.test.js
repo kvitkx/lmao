@@ -621,7 +621,7 @@ test("verdictFigures gives four figures with their place in the run", () => {
 
 function runFixture() {
     return {
-        schema_version: 2,
+        schema_version: 3,
         judge_model: "j",
         mode: "local",
         judge_is_candidate: false,

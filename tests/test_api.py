@@ -35,7 +35,7 @@ def _parse_sse(response):
 def _run(judge="judge-model", models=("m1", "m2"), questions=2):
     """The parts of a schema v2 evaluation_results.json the API reads."""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "judge_model": judge,
         "questions_results": [
             {"id": f"q{number}", "results": []} for number in range(1, questions + 1)
@@ -397,7 +397,7 @@ def test_history_skips_legacy_corrupted_and_incomplete_entries(client):
     )
     _write_json(
         Path("history/run_v1_20260101_000000/evaluation_results.json"),
-        {**_run(), "schema_version": 1},
+        {**_run(), "schema_version": 2},
     )
     broken = Path("history/run_broken_20260101_000000/evaluation_results.json")
     broken.parent.mkdir(parents=True)

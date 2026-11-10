@@ -185,3 +185,43 @@ def test_unload_returns_false_on_error(mock_post):
     mock_post.side_effect = requests.ConnectionError("ollama is down")
 
     assert OllamaClient().unload("m") is False
+
+@patch("core.ollama_client.requests.get")
+def test_get_model_sizes_returns_bytes_by_name(mock_get):
+    mock_get.return_value = _response(
+        {"models": [{"name": "a:1b", "size": 100}, {"name": "b:cloud"}]}
+    )
+
+    assert OllamaClient().get_model_sizes() == {"a:1b": 100, "b:cloud": 0}
+    assert mock_get.call_args.args[0].endswith("/api/tags")
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_model_sizes_returns_empty_dict_on_error(mock_get):
+    mock_get.side_effect = requests.ConnectionError("ollama is down")
+
+    assert OllamaClient().get_model_sizes() == {}
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_loaded_returns_the_memory_of_the_model(mock_get):
+    mock_get.return_value = _response(
+        {"models": [{"name": "m", "model": "m", "size": 300, "size_vram": 200}]}
+    )
+
+    assert OllamaClient().get_loaded("m") == {"size": 300, "size_vram": 200}
+    assert mock_get.call_args.args[0].endswith("/api/ps")
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_loaded_returns_none_for_a_model_that_is_not_loaded(mock_get):
+    mock_get.return_value = _response({"models": []})
+
+    assert OllamaClient().get_loaded("m") is None
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_loaded_returns_none_on_error(mock_get):
+    mock_get.side_effect = requests.ConnectionError("ollama is down")
+
+    assert OllamaClient().get_loaded("m") is None

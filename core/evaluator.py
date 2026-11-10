@@ -41,7 +41,7 @@ from .scoring import (
     summarize_model,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MODE_LOCAL = "local"
 MODE_CLOUD = "cloud"
 
@@ -259,9 +259,20 @@ class EvaluationPipeline:
             total=len(questions) * (1 + 2 * len(candidates)) + 1,
         )
         metrics = {model: _empty_metrics() for model in candidates}
+        sizes = self.ollama.get_model_sizes()
+        footprints = {
+            model: {
+                "size_bytes": sizes.get(model) or None,
+                "memory_bytes": None,
+                "vram_bytes": None,
+            }
+            for model in candidates
+        }
 
         runner = self._run_cloud if cloud else self._run_local
-        summary = runner(run, judge, candidates, questions, metrics, base_rationale)
+        summary = runner(
+            run, judge, candidates, questions, metrics, footprints, base_rationale
+        )
 
         mode = MODE_CLOUD if cloud else MODE_LOCAL
         _write_json(
@@ -295,7 +306,7 @@ class EvaluationPipeline:
     # --- orchestration ------------------------------------------------------
 
     def _run_local(
-        self, run, judge, candidates, questions, metrics, base_rationale
+        self, run, judge, candidates, questions, metrics, footprints, base_rationale
     ) -> dict:
         """A, B, C and D strictly one after another, one model in VRAM at a time."""
         with self._loaded(judge):
@@ -303,7 +314,7 @@ class EvaluationPipeline:
                 self._make_reference(run, judge, question)
 
         for model in candidates:
-            self._answer_all(run, model, questions, metrics[model])
+            self._answer_all(run, model, questions, metrics[model], footprints[model])
 
         # Grading and the summary share one load of the judge. Grading goes
         # model by model, the same order as in cloud mode.
@@ -311,10 +322,10 @@ class EvaluationPipeline:
             for model in candidates:
                 for question, entry in self._entries_of(model, questions):
                     self._grade_entry(run, judge, question, base_rationale, entry)
-            return self._summarize(run, judge, questions, candidates)
+            return self._summarize(run, judge, questions, candidates, footprints)
 
     def _run_cloud(
-        self, run, judge, candidates, questions, metrics, base_rationale
+        self, run, judge, candidates, questions, metrics, footprints, base_rationale
     ) -> dict:
         """Judge calls run in a pool while the candidates generate one by one."""
         with ThreadPoolExecutor(max_workers=CLOUD_WORKERS) as pool:
@@ -339,14 +350,19 @@ class EvaluationPipeline:
 
             for model in candidates:
                 self._answer_all(
-                    run, model, questions, metrics[model], grade_when_answered
+                    run,
+                    model,
+                    questions,
+                    metrics[model],
+                    footprints[model],
+                    grade_when_answered,
                 )
 
             # Surface any exception raised in a worker thread.
             for future in [*references.values(), *gradings]:
                 future.result()
 
-        return self._summarize(run, judge, questions, candidates)
+        return self._summarize(run, judge, questions, candidates, footprints)
 
     @staticmethod
     def _entries_of(model: str, questions: list):
@@ -396,19 +412,31 @@ class EvaluationPipeline:
         model: str,
         questions: list,
         metrics: dict,
+        footprint: dict,
         on_answer: Callable | None = None,
     ) -> None:
         """One candidate answers every question with the model loaded once.
 
+        After the first answer that was generated, the memory the loaded model
+        takes is read once.
+
         Args:
+            footprint (dict): Updated in place with memory_bytes and vram_bytes.
             on_answer (Callable, optional): Called with the question and the
                 saved entry right after each answer.
         """
         run.emit("candidate_start", PHASE_ANSWER, model)
 
+        measured = False
         with self._loaded(model):
             for question in questions:
                 entry = self._answer(run, model, question, metrics)
+                if not measured and entry["status"] != STATUS_GENERATION_ERROR:
+                    measured = True
+                    loaded = self.ollama.get_loaded(model)
+                    if loaded:
+                        footprint["memory_bytes"] = loaded["size"]
+                        footprint["vram_bytes"] = loaded["size_vram"]
                 if on_answer:
                     on_answer(question, entry)
 
@@ -451,6 +479,8 @@ class EvaluationPipeline:
             "tps": None,
             "cps": None,
             "time_sec": None,
+            "tokens": None,
+            "chars": None,
         }
         if result["success"]:
             text, truncated = self._read_answer(result)
@@ -462,6 +492,8 @@ class EvaluationPipeline:
                 truncated=truncated,
                 done_reason=result["done_reason"],
                 tps=metrics["tokens_per_second"],
+                tokens=metrics["tokens_generated"],
+                chars=len(text),
                 # Characters of the cleaned answer, not tokens: tokenizers differ
                 # between models, so t/s does not compare across them.
                 cps=round(len(text) / eval_time, 2) if eval_time > 0 else None,
@@ -542,7 +574,7 @@ class EvaluationPipeline:
     # --- D: summary ---------------------------------------------------------
 
     def _summarize(
-        self, run: _Run, judge: str, questions: list, candidates: list
+        self, run: _Run, judge: str, questions: list, candidates: list, footprints: dict
     ) -> dict:
         run.emit("summary_start", PHASE_SUMMARY, judge)
 
@@ -557,10 +589,15 @@ class EvaluationPipeline:
                         "tps": entry["tps"],
                         "cps": entry["cps"],
                         "time_sec": entry["time_sec"],
+                        "tokens": entry["tokens"],
+                        "chars": entry["chars"],
                     }
                 )
 
-        models = [summarize_model(model, entries[model]) for model in candidates]
+        models = [
+            summarize_model(model, entries[model], footprints[model])
+            for model in candidates
+        ]
         recommendation = recommend(models)
 
         result = self._judge_generate(
