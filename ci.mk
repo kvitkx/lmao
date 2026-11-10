@@ -33,7 +33,7 @@ export TRIVY_IMAGE       := $(call tool_image,trivy)
 export REGISTRY_IMAGE    := $(call tool_image,registry)
 
 # Published image scanned by `make scan-published`. Override for forks.
-export PUBLISHED_IMAGE   ?= ghcr.io/ykvit/lmao
+export PUBLISHED_IMAGE   ?= ghcr.io/kvitkx/lmao
 
 # What each workflow runs, as `make report-TARGET`:
 #   ci.yml       -> CI_JOBS        (make ci)

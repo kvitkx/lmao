@@ -2,7 +2,7 @@
 
 **Local Model Assessment Operator.** Benchmark local LLMs with [Ollama](https://ollama.com): blind grading against a reference, plus speed, ending in a recommendation.
 
-Source code, documentation and issues: https://github.com/ykvit/lmao
+Source code, documentation and issues: https://github.com/kvitkx/lmao
 
 ## Quick start
 
@@ -87,22 +87,22 @@ Open **http://localhost:5000**. Stop with `docker compose down` (volumes with mo
 | `X` | The newest release of a major version (from `1.x` on) |
 | `X.Y.Z` | An exact release, for example `2.2.2` |
 
-Pre-releases (`X.Y.ZrcN` and similar) get only the exact tag. See the [releases](https://github.com/ykvit/lmao/releases).
+Pre-releases (`X.Y.ZrcN` and similar) get only the exact tag. See the [releases](https://github.com/kvitkx/lmao/releases).
 
-The same image (same digest) is also published to GHCR: `ghcr.io/ykvit/lmao`.
+The same image (same digest) is also published to GHCR: `ghcr.io/kvitkx/lmao`.
 
 ## Verify the image
 
 Every release is built once in GitHub Actions, scanned with Trivy and attested:
 
 ```bash
-gh attestation verify oci://docker.io/kvitkx/lmao:latest --repo ykvit/lmao
+gh attestation verify oci://docker.io/kvitkx/lmao:latest --repo kvitkx/lmao
 ```
 
 ## Security
 
-lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network, which is why the examples bind to `127.0.0.1`. Details and how to report a vulnerability: [SECURITY.md](https://github.com/ykvit/lmao/blob/main/SECURITY.md).
+lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network, which is why the examples bind to `127.0.0.1`. Details and how to report a vulnerability: [SECURITY.md](https://github.com/kvitkx/lmao/blob/main/SECURITY.md).
 
 ## License
 
-[MIT](https://github.com/ykvit/lmao/blob/main/LICENSE)
+[MIT](https://github.com/kvitkx/lmao/blob/main/LICENSE)

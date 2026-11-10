@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest release (`ghcr.io/ykvit/lmao:latest`) receives fixes.
+Only the latest release (`ghcr.io/kvitkx/lmao:latest`) receives fixes.
 
 ## Reporting a vulnerability
 
@@ -61,7 +61,7 @@ fence longer than any backtick run inside them and quote the judge text.
 - Release images are attested with build provenance; attestations live in
   the GitHub Attestations API only (no referrer manifests in GHCR). Anyone
   can verify a published image:
-  `gh attestation verify oci://ghcr.io/ykvit/lmao:latest --repo ykvit/lmao`
+  `gh attestation verify oci://ghcr.io/kvitkx/lmao:latest --repo kvitkx/lmao`
 - Releases are immutable: once published, their assets and tags cannot be
   modified or deleted.
 - Dependabot alerts, security updates and grouped version updates are
