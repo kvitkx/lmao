@@ -749,6 +749,7 @@ def test_cloud_mode_reports_grading_failures():
     cand_a = results_by_model(pipeline)["cand-a"]
     assert (cand_a["status"], cand_a["error"]) == ("judge_error", "timeout")
 
+
 # --- tokens, length and memory ----------------------------------------------
 
 

@@ -186,6 +186,7 @@ def test_unload_returns_false_on_error(mock_post):
 
     assert OllamaClient().unload("m") is False
 
+
 @patch("core.ollama_client.requests.get")
 def test_get_model_sizes_returns_bytes_by_name(mock_get):
     mock_get.return_value = _response(

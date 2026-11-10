@@ -249,6 +249,7 @@ def test_footprint_memory_is_passed_through():
 
     assert (result["memory_bytes"], result["vram_bytes"]) == (3, 2)
 
+
 # --- recommend --------------------------------------------------------------
 
 
