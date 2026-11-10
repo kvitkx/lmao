@@ -6,14 +6,14 @@
 
 Benchmark local LLMs with [Ollama](https://ollama.com): blind grading against a reference, plus speed, ending in a recommendation.
 
-[![Release](https://img.shields.io/github/v/release/ykvit/lmao?style=flat-square&logo=github&logoColor=f6f8f7&labelColor=000000&color=2a292e)](https://github.com/ykvit/lmao/releases)
+[![Release](https://img.shields.io/github/v/release/kvitkx/lmao?style=flat-square&logo=github&logoColor=f6f8f7&labelColor=000000&color=2a292e)](https://github.com/kvitkx/lmao/releases)
 ![Python](https://img.shields.io/badge/python-3.15-2a292e?style=flat-square&logo=python&logoColor=f6f8f7&labelColor=000000)
-![License: MIT](https://img.shields.io/github/license/ykvit/lmao?style=flat-square&logo=opensourceinitiative&logoColor=f6f8f7&labelColor=000000&color=2a292e)
-[![CI](https://img.shields.io/github/actions/workflow/status/ykvit/lmao/ci.yml?branch=main&style=flat-square&label=ci&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](.github/workflows/ci.yml)
-[![Security](https://img.shields.io/github/actions/workflow/status/ykvit/lmao/security.yml?branch=main&style=flat-square&label=security&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](https://github.com/ykvit/lmao/actions/workflows/security.yml)
+![License: MIT](https://img.shields.io/github/license/kvitkx/lmao?style=flat-square&logo=opensourceinitiative&logoColor=f6f8f7&labelColor=000000&color=2a292e)
+[![CI](https://img.shields.io/github/actions/workflow/status/kvitkx/lmao/ci.yml?branch=main&style=flat-square&label=ci&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](.github/workflows/ci.yml)
+[![Security](https://img.shields.io/github/actions/workflow/status/kvitkx/lmao/security.yml?branch=main&style=flat-square&label=security&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](https://github.com/kvitkx/lmao/actions/workflows/security.yml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square&logo=ruff&logoColor=f6f8f7&labelColor=000000&color=2a292e)](https://docs.astral.sh/ruff/)
-[![Release build](https://img.shields.io/github/actions/workflow/status/ykvit/lmao/release.yml?branch=main&style=flat-square&label=build&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](https://github.com/ykvit/lmao/actions/workflows/release.yml)
-[![ghcr.io](https://img.shields.io/badge/ghcr.io-ykvit%2Flmao-2a292e?style=flat-square&logo=docker&logoColor=f6f8f7&labelColor=000000)](https://github.com/ykvit/lmao/pkgs/container/lmao)
+[![Release build](https://img.shields.io/github/actions/workflow/status/kvitkx/lmao/release.yml?branch=main&style=flat-square&label=build&logo=githubactions&logoColor=f6f8f7&labelColor=000000)](https://github.com/kvitkx/lmao/actions/workflows/release.yml)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-kvitkx%2Flmao-2a292e?style=flat-square&logo=docker&logoColor=f6f8f7&labelColor=000000)](https://github.com/kvitkx/lmao/pkgs/container/lmao)
 [![Docker Hub](https://img.shields.io/badge/docker%20hub-kvitkx%2Flmao-2a292e?style=flat-square&logo=docker&logoColor=f6f8f7&labelColor=000000)](https://hub.docker.com/r/kvitkx/lmao)
 [![Ollama](https://img.shields.io/badge/llm%20runtime-Ollama-2a292e?style=flat-square&logo=ollama&logoColor=f6f8f7&labelColor=000000)](https://ollama.com)
 
@@ -50,7 +50,7 @@ Pick one way to run lmao.
 Requires Docker with Compose v2, GNU Make and Bash. NVIDIA Container Toolkit is needed only for GPU mode.
 
 ```bash
-git clone https://github.com/ykvit/lmao.git
+git clone https://github.com/kvitkx/lmao.git
 cd lmao
 
 make prod            # CPU
@@ -66,7 +66,7 @@ Stop with `make down ENV=prod`. Run `make help` to list all commands.
 
 ### With Docker
 
-The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/ykvit/lmao`. Both registries carry the same image (same digest). The Docker Hub page also has a Docker Compose example and the list of tags.
+The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/kvitkx/lmao`. Both registries carry the same image (same digest). The Docker Hub page also has a Docker Compose example and the list of tags.
 
 If Ollama runs on your machine:
 
@@ -83,16 +83,16 @@ Open **http://localhost:5000**. Stop with `docker stop lmao`.
 
 - `--add-host` is needed on Linux; Docker Desktop on macOS and Windows resolves `host.docker.internal` on its own.
 - On Linux, Ollama must accept connections from the Docker bridge: start it with `OLLAMA_HOST=0.0.0.0`. Keep that port closed to your network.
-- To pull from GHCR, use `ghcr.io/ykvit/lmao:latest` instead of `kvitkx/lmao:latest`.
-- Tags: `latest`, `X.Y` (for example `2.2`) and exact `X.Y.Z`. See the [releases](https://github.com/ykvit/lmao/releases).
-- Verify the image: `gh attestation verify oci://ghcr.io/ykvit/lmao:latest --repo ykvit/lmao` (for Docker Hub: `oci://docker.io/kvitkx/lmao:latest`)
+- To pull from GHCR, use `ghcr.io/kvitkx/lmao:latest` instead of `kvitkx/lmao:latest`.
+- Tags: `latest`, `X.Y` (for example `2.2`) and exact `X.Y.Z`. See the [releases](https://github.com/kvitkx/lmao/releases).
+- Verify the image: `gh attestation verify oci://ghcr.io/kvitkx/lmao:latest --repo kvitkx/lmao` (for Docker Hub: `oci://docker.io/kvitkx/lmao:latest`)
 
 ### With uv
 
 Requires [uv](https://docs.astral.sh/uv/) and a running Ollama. uv installs the right Python (3.15) for you. The stylesheet, Alpine and the fonts are built in Docker, so you also need Docker and GNU Make: the first `make run` builds them, later runs rebuild them only after a template, a script or `static/css/input.css` changes. Without Docker the page has no styles.
 
 ```bash
-git clone https://github.com/ykvit/lmao.git
+git clone https://github.com/kvitkx/lmao.git
 cd lmao
 
 make run
