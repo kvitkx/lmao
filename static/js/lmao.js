@@ -423,7 +423,7 @@ document.addEventListener("alpine:init", () => {
         buildPayload() {
             return {
                 judge: this.judge,
-                judge_cloud: this.judgeCloud,
+                judge_provider: this.judgeCloud ? "ollama_cloud" : "ollama",
                 candidates: [...this.selected],
                 base_rationale: this.baseRationale.trim(),
                 test_cases: this.cases.map((c) => payloadCase(c)),
@@ -474,7 +474,7 @@ document.addEventListener("alpine:init", () => {
                 status: "running",
                 steps,
                 pos,
-                cloud: payload.judge_cloud,
+                cloud: payload.judge_provider !== "ollama",
                 // Corrected by the first event that carries `progress`.
                 total: totalSteps(payload.test_cases.length, new Set(payload.candidates).size),
                 startedAt: now,

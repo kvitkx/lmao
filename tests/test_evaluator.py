@@ -76,6 +76,8 @@ class FakeOllama:
     proves that grading runs while candidates are still generating.
     """
 
+    truncates_prompts = True
+
     def __init__(
         self,
         answers=None,
@@ -187,13 +189,14 @@ def make_payload(**overrides):
     return payload
 
 
-def run(pipeline, payload=None):
+def run(pipeline, payload=None, judge_provider=None):
     """Runs the pipeline and returns the emitted events."""
     events = []
     pipeline.run_evaluation(
         TASK_ID,
         payload if payload is not None else make_payload(),
         lambda task_id, event: events.append(event),
+        judge_provider,
     )
     return events
 
@@ -279,6 +282,7 @@ def test_full_run_emits_events_and_saves_results():
     assert results["task_id"] == TASK_ID
     assert results["judge_model"] == "judge"
     assert results["mode"] == "local"
+    assert results["judge_provider"] == "ollama"
     assert results["judge_is_candidate"] is False
     assert "finished_at" in results
 
@@ -852,3 +856,51 @@ def test_pipeline_runs_with_a_provider_without_local_capabilities():
         None,
     )
     assert results_by_model(pipeline)["cand-a"]["score"] == 80
+
+
+# --- a judge on its own provider --------------------------------------------
+
+
+def test_an_openai_judge_serves_the_judge_calls_and_candidates_stay_local():
+    local = FakeOllama()
+    judge = FakeOllama()
+    pipeline = EvaluationPipeline(local)
+
+    events = run(pipeline, make_payload(judge_provider="openai"), judge)
+
+    assert events[-1]["type"] == "completed"
+    assert len(judge.reference_calls) == 1
+    assert len(judge.grading_calls) == 2
+    assert len(judge.summary_calls) == 1
+    assert judge.candidate_calls == []
+    assert local.reference_calls == []
+    assert local.grading_calls == []
+    assert local.summary_calls == []
+    assert len(local.candidate_calls) == 2
+    results = load(pipeline, "evaluation_results.json")
+    assert (results["mode"], results["judge_provider"]) == ("cloud", "openai")
+
+
+@pytest.mark.parametrize(
+    "kind, expected",
+    [("ollama", True), ("ollama_cloud", True), ("openai", False)],
+)
+def test_judge_is_a_candidate_only_when_both_use_the_same_provider(kind, expected):
+    pipeline = EvaluationPipeline(FakeOllama())
+    payload = make_payload(candidates=["judge", "cand-a"], judge_provider=kind)
+
+    run(pipeline, payload, FakeOllama() if kind == "openai" else None)
+
+    results = load(pipeline, "evaluation_results.json")
+    assert results["judge_is_candidate"] is expected
+
+
+def test_the_context_guard_applies_only_to_providers_that_truncate():
+    judge = FakeOllama(grades=[ok(grade_json(90), prompt_tokens=JUDGE_NUM_CTX)])
+    judge.truncates_prompts = False
+    pipeline = EvaluationPipeline(FakeOllama())
+
+    run(pipeline, make_payload(candidates=["cand-a"], judge_provider="openai"), judge)
+
+    cand_a = results_by_model(pipeline)["cand-a"]
+    assert (cand_a["status"], cand_a["score"]) == ("ok", 90)

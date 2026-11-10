@@ -21,6 +21,8 @@ class OllamaClient(Provider):
         base_url (str): The base URL of the Ollama service.
     """
 
+    truncates_prompts = True
+
     def __init__(self):
         """Initializes the OllamaClient using environment variables if present."""
         self.base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")

@@ -43,3 +43,8 @@ def test_optional_capabilities_have_safe_defaults():
 
 def test_ollama_client_is_a_provider():
     assert issubclass(OllamaClient, Provider)
+
+
+def test_only_a_local_ollama_truncates_prompts():
+    assert _Minimal().truncates_prompts is False
+    assert OllamaClient().truncates_prompts is True

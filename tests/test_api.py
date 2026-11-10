@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 import app as app_module
+from core.openai_client import OpenAIClient
 
 
 def _write_json(path, data):
@@ -138,10 +139,10 @@ def test_update_task_status_ignores_unknown_task():
 
 def test_run_task_runs_the_pipeline():
     with patch.object(app_module.pipeline, "run_evaluation") as run_evaluation:
-        app_module._run_task("t", {"judge": "j"})
+        app_module._run_task("t", {"judge": "j"}, "provider")
 
     run_evaluation.assert_called_once_with(
-        "t", {"judge": "j"}, app_module.update_task_status
+        "t", {"judge": "j"}, app_module.update_task_status, "provider"
     )
 
 
@@ -219,7 +220,8 @@ def test_evaluate_rejects_non_json_request(client):
         {"test_cases": [{"question": "Q", "tag": 5}]},
         {"test_cases": [{"question": "Q", "reference": None}]},
         {"base_rationale": 5},
-        {"judge_cloud": "yes"},
+        {"judge_provider": "yes"},
+        {"judge_provider": 5},
     ],
 )
 def test_evaluate_rejects_invalid_payload(client, overrides):
@@ -256,16 +258,69 @@ def test_evaluate_starts_background_task(client, installed_models):
     thread_cls.assert_called_once()
     kwargs = thread_cls.call_args.kwargs
     assert kwargs["target"] == app_module._run_task
-    assert kwargs["args"] == (task_id, payload)
+    assert kwargs["args"] == (task_id, payload, None)
     assert thread_cls.return_value.daemon is True
     thread_cls.return_value.start.assert_called_once_with()
 
 
-def test_evaluate_accepts_the_cloud_judge_flag(client, installed_models):
-    with patch.object(app_module.threading, "Thread"):
-        response = client.post("/api/evaluate", json=_payload(judge_cloud=True))
+def test_evaluate_accepts_the_ollama_cloud_judge(client, installed_models):
+    with patch.object(app_module.threading, "Thread") as thread_cls:
+        response = client.post(
+            "/api/evaluate", json=_payload(judge_provider="ollama_cloud")
+        )
 
     assert response.status_code == 202
+    assert thread_cls.call_args.kwargs["args"][2] is None
+
+
+def _save_connection(**overrides):
+    fields = {
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-secret-1234",
+        "model": "gpt-4.1-mini",
+    }
+    fields.update(overrides)
+    return app_module.connection_store.save(**fields)
+
+
+def test_evaluate_gives_an_openai_judge_its_saved_connection(client):
+    _save_connection()
+    payload = _payload(judge="gpt-4.1-mini", judge_provider="openai")
+
+    with (
+        patch.object(app_module.ollama_client, "get_models", return_value=["m"]),
+        patch.object(app_module.threading, "Thread") as thread_cls,
+    ):
+        response = client.post("/api/evaluate", json=payload)
+
+    assert response.status_code == 202
+    task_id, sent, judge_provider = thread_cls.call_args.kwargs["args"]
+    assert (task_id, sent) == (response.get_json()["task_id"], payload)
+    assert isinstance(judge_provider, OpenAIClient)
+    assert judge_provider.base_url == "https://api.example.com/v1"
+    assert judge_provider.api_key == "sk-secret-1234"
+
+
+def test_evaluate_rejects_an_openai_judge_without_a_connection(
+    client, installed_models
+):
+    response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "The OpenAI judge needs a saved connection."
+    }
+    assert app_module.TASKS == {}
+
+
+def test_evaluate_still_checks_the_candidates_of_an_openai_judge(client):
+    _save_connection()
+
+    with patch.object(app_module.ollama_client, "get_models", return_value=[]):
+        response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Models are not installed: m."}
 
 
 @pytest.mark.parametrize(

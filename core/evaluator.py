@@ -31,7 +31,7 @@ from .prompts import (
     build_summary_prompt,
     parse_grade,
 )
-from .provider import Provider
+from .provider import JUDGE_OLLAMA, JUDGE_OPENAI, Provider
 from .scoring import (
     STATUS_GENERATION_ERROR,
     STATUS_JUDGE_ERROR,
@@ -129,12 +129,17 @@ class _Run:
 
     Cloud mode reports from several threads, so the counter and the callback
     sit behind one lock and events stay in the same order as the progress.
+    It also carries the provider of the run's judge, which can differ from the
+    provider of the candidates.
     """
 
-    def __init__(self, task_id: str, callback: Callable, total: int):
+    def __init__(
+        self, task_id: str, callback: Callable, total: int, judge_provider: Provider
+    ):
         self.task_id = task_id
         self.callback = callback
         self.total = total
+        self.judge_provider = judge_provider
         self.done = 0
         self._lock = threading.Lock()
 
@@ -217,9 +222,15 @@ class EvaluationPipeline:
         return text, truncated
 
     def _judge_generate(
-        self, judge: str, prompt: str, system_prompt: str, attempt=0, format=None
+        self,
+        run: _Run,
+        judge: str,
+        prompt: str,
+        system_prompt: str,
+        attempt=0,
+        format=None,
     ) -> dict:
-        return self.provider.generate(
+        return run.judge_provider.generate(
             judge,
             prompt,
             system_prompt=system_prompt,
@@ -230,19 +241,26 @@ class EvaluationPipeline:
         )
 
     def run_evaluation(
-        self, task_id: str, payload: dict, update_status_cb: Callable
+        self,
+        task_id: str,
+        payload: dict,
+        update_status_cb: Callable,
+        judge_provider: Provider | None = None,
     ) -> None:
         """Executes the full evaluation process for a given payload.
 
         Args:
             task_id (str): The unique identifier for the current run.
             payload (dict): Configuration data from the UI (candidates, judge,
-                judge_cloud, base_rationale, test_cases with an optional
+                judge_provider, base_rationale, test_cases with an optional
                 reference each).
             update_status_cb (Callable): Pushes events to the app stream.
+            judge_provider (Provider, optional): Serves the judge. Defaults to
+                the provider of the candidates (the local Ollama).
         """
         judge = payload.get("judge")
-        cloud = bool(payload.get("judge_cloud"))
+        judge_kind = payload.get("judge_provider", JUDGE_OLLAMA)
+        cloud = judge_kind != JUDGE_OLLAMA
         candidates = list(dict.fromkeys(payload.get("candidates", [])))
         base_rationale = payload.get("base_rationale", "")
         questions = [
@@ -257,6 +275,9 @@ class EvaluationPipeline:
             task_id,
             update_status_cb,
             total=len(questions) * (1 + 2 * len(candidates)) + 1,
+            judge_provider=(
+                judge_provider if judge_provider is not None else self.provider
+            ),
         )
         metrics = {model: _empty_metrics() for model in candidates}
         sizes = self.provider.get_model_sizes()
@@ -290,8 +311,11 @@ class EvaluationPipeline:
                 "schema_version": SCHEMA_VERSION,
                 "task_id": task_id,
                 "judge_model": judge,
+                "judge_provider": judge_kind,
                 "mode": mode,
-                "judge_is_candidate": judge in candidates,
+                # An OpenAI judge lives at the API: it cannot be a local candidate.
+                "judge_is_candidate": judge_kind != JUDGE_OPENAI
+                and judge in candidates,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
                 "questions_results": questions,
                 "summary": summary,
@@ -378,7 +402,7 @@ class EvaluationPipeline:
         run.emit("reference_start", PHASE_REFERENCE, judge, question["id"])
 
         if question["reference"]["source"] != SOURCE_PROVIDED:
-            text = self._generate_reference(judge, question["question"])
+            text = self._generate_reference(run, judge, question["question"])
             if text:
                 question["reference"] = {"text": text, "source": SOURCE_GENERATED}
                 question["no_reference"] = False
@@ -392,11 +416,11 @@ class EvaluationPipeline:
             source=question["reference"]["source"],
         )
 
-    def _generate_reference(self, judge: str, question: str) -> str | None:
+    def _generate_reference(self, run: _Run, judge: str, question: str) -> str | None:
         """Returns a complete reference answer, or None after the last attempt."""
         for attempt in range(MAX_REFERENCE_ATTEMPTS):
             result = self._judge_generate(
-                judge, build_answer_prompt(question), REFERENCE_SYSTEM, attempt
+                run, judge, build_answer_prompt(question), REFERENCE_SYSTEM, attempt
             )
             if result["success"]:
                 text, truncated = self._read_answer(result)
@@ -519,7 +543,7 @@ class EvaluationPipeline:
             return
 
         run.emit("grading_start", PHASE_GRADING, entry["model_name"], question["id"])
-        grade, error = self._grade(judge, question, base_rationale, entry)
+        grade, error = self._grade(run, judge, question, base_rationale, entry)
         if grade:
             entry.update(grade)
         else:
@@ -535,7 +559,7 @@ class EvaluationPipeline:
         )
 
     def _grade(
-        self, judge: str, question: dict, base_rationale: str, entry: dict
+        self, run: _Run, judge: str, question: dict, base_rationale: str, entry: dict
     ) -> tuple[dict | None, str | None]:
         """Grades one answer. Returns (grade, None) or (None, error)."""
         prompt = build_grading_prompt(
@@ -554,14 +578,17 @@ class EvaluationPipeline:
                 system_prompt += f" Your previous reply was rejected: {error}"
 
             result = self._judge_generate(
-                judge, prompt, system_prompt, attempt, format=GRADE_SCHEMA
+                run, judge, prompt, system_prompt, attempt, format=GRADE_SCHEMA
             )
             if not result["success"]:
                 error = result["error"]
                 continue
 
             # Ollama silently cuts a prompt that does not fit the context window.
-            if result["prompt_eval_count"] >= JUDGE_NUM_CTX:
+            if (
+                run.judge_provider.truncates_prompts
+                and result["prompt_eval_count"] >= JUDGE_NUM_CTX
+            ):
                 return None, "Judge prompt does not fit the context window."
 
             try:
@@ -601,6 +628,7 @@ class EvaluationPipeline:
         recommendation = recommend(models)
 
         result = self._judge_generate(
+            run,
             judge,
             build_summary_prompt(models, recommendation),
             SUMMARY_SYSTEM,
