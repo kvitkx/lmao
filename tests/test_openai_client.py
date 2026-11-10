@@ -67,10 +67,9 @@ def test_base_url_loses_the_trailing_slash():
 
 
 def test_repr_hides_the_key():
-    text = repr(_client())
-
-    assert "sk-secret" not in text
-    assert "api.example.com" in text
+    assert repr(_client()) == (
+        "OpenAIClient(base_url='https://api.example.com/v1', api_key='***')"
+    )
 
 
 # --- get_models -------------------------------------------------------------
@@ -328,3 +327,23 @@ def test_generate_returns_error_on_connection_failure(mock_post):
     result = _client().generate("m", "hi")
 
     assert result == {"success": False, "error": "connection refused"}
+
+
+@patch("core.openai_client.requests.get")
+def test_get_models_does_not_log_the_exception_text(mock_get, capsys):
+    mock_get.side_effect = requests.ConnectionError("failed with sk-secret-1234")
+
+    assert _client().get_models() == []
+
+    output = capsys.readouterr().out
+    assert "sk-secret" not in output
+    assert "ConnectionError" in output
+
+
+@patch("core.openai_client.requests.post")
+def test_generate_hides_the_key_if_the_server_echoes_it(mock_post):
+    mock_post.return_value = _error("Bad key sk-secret-1234 given", status=401)
+
+    result = _client().generate("m", "hi")
+
+    assert result == {"success": False, "error": "401: Bad key *** given"}

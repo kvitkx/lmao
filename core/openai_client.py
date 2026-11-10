@@ -88,6 +88,10 @@ class OpenAIClient(Provider):
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _redact(self, text: str) -> str:
+        """Hides the API key in text that is shown to the user or stored."""
+        return text.replace(self.api_key, "***") if self.api_key else text
+
     def get_models(self) -> list:
         """Retrieves the ids of the models the API serves.
 
@@ -103,7 +107,8 @@ class OpenAIClient(Provider):
             response.raise_for_status()
             return [model["id"] for model in response.json().get("data", [])]
         except Exception as e:
-            print(f"Error fetching models: {e}")
+            # Only the type: the text of an exception is not ours to trust.
+            print(f"Error fetching models: {type(e).__name__}")
             return []
 
     def generate(
@@ -149,7 +154,7 @@ class OpenAIClient(Provider):
             data = self._post_chat(payload, timeout)
             return _result(data, time.monotonic() - started)
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": self._redact(str(e))}
 
     def _response_format(self, format: str | dict | None) -> dict | None:
         if format is None:
