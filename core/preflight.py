@@ -70,8 +70,9 @@ def _grade_reply(result: dict, provider: Provider) -> tuple[str, str]:
         return STATE_ERROR, result["error"]
     try:
         parse_grade(result["response_text"])
-    except GradeError as e:
-        return STATE_ERROR, f"the reply is not a valid grade: {e}"
+    except GradeError:
+        # The reason stays out of the response: it is derived from an exception.
+        return STATE_ERROR, "the reply is not a valid grade"
     if getattr(provider, "json_schema", True) is False:
         return STATE_DONE, "plain JSON object: the server rejected the schema"
     return STATE_DONE, "schema accepted"
