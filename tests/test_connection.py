@@ -82,7 +82,13 @@ def test_load_returns_none_without_a_file(store):
 def test_save_writes_the_file_for_the_owner_only(store):
     saved = store.save(URL, KEY, "gpt-4.1-mini")
 
-    assert saved == {"base_url": URL, "api_key": KEY, "model": "gpt-4.1-mini"}
+    assert saved == {
+        "base_url": URL,
+        "api_key": KEY,
+        "model": "gpt-4.1-mini",
+        "price_in": None,
+        "price_out": None,
+    }
     assert store.load() == saved
     assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
 
@@ -186,7 +192,13 @@ def test_load_defaults_a_missing_model(store):
     with open(store.path, "w", encoding="utf-8") as f:
         json.dump({"base_url": URL, "api_key": KEY}, f)
 
-    assert store.load() == {"base_url": URL, "api_key": KEY, "model": ""}
+    assert store.load() == {
+        "base_url": URL,
+        "api_key": KEY,
+        "model": "",
+        "price_in": None,
+        "price_out": None,
+    }
 
 
 # --- delete -----------------------------------------------------------------
@@ -207,7 +219,13 @@ def test_delete_removes_the_connection_and_is_safe_twice(store):
 def test_public_view_never_contains_the_key():
     view = public_view({"base_url": URL, "api_key": KEY, "model": "m"})
 
-    assert view == {"base_url": URL, "model": "m", "key_last4": "1234"}
+    assert view == {
+        "base_url": URL,
+        "model": "m",
+        "price_in": None,
+        "price_out": None,
+        "key_last4": "1234",
+    }
     assert "sk-secret" not in json.dumps(view)
 
 
@@ -219,3 +237,83 @@ def test_public_view_hides_a_short_key_completely():
 
 def test_public_view_of_no_connection_is_none():
     assert public_view(None) is None
+
+
+# --- prices -----------------------------------------------------------------
+
+
+def test_prices_are_saved_and_loaded(store):
+    saved = store.save(URL, KEY, "m", price_in=0.4, price_out=1.6)
+
+    assert (saved["price_in"], saved["price_out"]) == (0.4, 1.6)
+    assert store.load() == saved
+
+
+def test_integer_and_zero_prices_become_floats(store):
+    saved = store.save(URL, KEY, price_in=0, price_out=2)
+
+    assert (saved["price_in"], saved["price_out"]) == (0.0, 2.0)
+    assert isinstance(saved["price_in"], float)
+    assert isinstance(saved["price_out"], float)
+
+
+def test_saving_without_prices_clears_them_but_keeps_the_key(store):
+    store.save(URL, KEY, price_in=1, price_out=2)
+
+    saved = store.save(URL, None)
+
+    assert (saved["price_in"], saved["price_out"]) == (None, None)
+    assert saved["api_key"] == KEY
+
+
+@pytest.mark.parametrize(
+    "bad", [-1, "5", True, [1], float("nan"), float("inf"), 10_001]
+)
+def test_save_rejects_an_unusable_price(store, bad):
+    with pytest.raises(InvalidConnection) as error:
+        store.save(URL, KEY, price_in=bad, price_out=1)
+
+    assert error.value.code == "price_invalid"
+    assert store.load() is None
+
+
+@pytest.mark.parametrize("pair", [(1, None), (None, 1)])
+def test_the_prices_come_as_a_pair(store, pair):
+    with pytest.raises(InvalidConnection, match="both"):
+        store.save(URL, KEY, price_in=pair[0], price_out=pair[1])
+
+    assert store.load() is None
+
+
+def test_load_ignores_damaged_prices(store):
+    os.makedirs(os.path.dirname(store.path))
+    with open(store.path, "w", encoding="utf-8") as f:
+        json.dump({"base_url": URL, "api_key": KEY, "price_in": "x", "price_out": 2}, f)
+
+    assert store.load() == {
+        "base_url": URL,
+        "api_key": KEY,
+        "model": "",
+        "price_in": None,
+        "price_out": None,
+    }
+
+
+def test_public_view_contains_the_prices_but_not_the_key():
+    view = public_view(
+        {
+            "base_url": URL,
+            "api_key": KEY,
+            "model": "m",
+            "price_in": 1.0,
+            "price_out": 2.0,
+        }
+    )
+
+    assert view == {
+        "base_url": URL,
+        "model": "m",
+        "price_in": 1.0,
+        "price_out": 2.0,
+        "key_last4": "1234",
+    }
