@@ -42,6 +42,9 @@ from .scoring import (
 )
 
 SCHEMA_VERSION = 3
+# Everything the server stores lives under one directory: one Docker volume.
+DATA_DIR = "data"
+HISTORY_DIR = os.path.join(DATA_DIR, "history")
 MODE_LOCAL = "local"
 MODE_CLOUD = "cloud"
 
@@ -188,7 +191,7 @@ class EvaluationPipeline:
             provider (Provider): Provider used to call the models.
         """
         self.provider = provider
-        self.history_dir = "history"
+        self.history_dir = HISTORY_DIR
         os.makedirs(self.history_dir, exist_ok=True)
 
     @contextmanager

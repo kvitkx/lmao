@@ -31,7 +31,6 @@ static/fonts/
 !.env.example
 
 # Application State & Logs
-history/
 data/
 *.log
 

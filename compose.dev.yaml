@@ -10,7 +10,7 @@ services:
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
-      # The whole project, including ./history (dev evaluation history).
+      # The whole project, including ./data (dev run history and connection).
       - .:/app
     depends_on:
       # The first stylesheet exists before the page is served.

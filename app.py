@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
-from core.connection import ConnectionStore
-from core.evaluator import SCHEMA_VERSION, EvaluationPipeline
+from core.connection import ConnectionStore, InvalidConnection, public_view
+from core.evaluator import DATA_DIR, SCHEMA_VERSION, EvaluationPipeline
 from core.export import to_csv, to_markdown
 from core.ollama_client import OllamaClient
 from core.openai_client import OpenAIClient
@@ -35,7 +35,7 @@ ollama_client = OllamaClient()
 pipeline = EvaluationPipeline(ollama_client)
 
 # The saved connection holds an API key: nothing but this store reads the file.
-connection_store = ConnectionStore(os.path.join("data", "connection.json"))
+connection_store = ConnectionStore(os.path.join(DATA_DIR, "connection.json"))
 
 _SAFE_TAG_RE = re.compile(r"[^a-zA-Z0-9_-]")
 _OPTIONAL_TEXT_FIELDS = ("tag", "specific_rationale", "reference")
@@ -402,6 +402,51 @@ def export_results(task_id: str):
     response.headers["Content-Disposition"] = f'attachment; filename="{task_id}.{fmt}"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route("/api/connection", methods=["GET"])
+def get_connection():
+    """Returns the saved connection to an OpenAI-compatible API.
+
+    The key is never part of the response: only the base URL, the model and the
+    last four characters of the key.
+
+    Returns:
+        Response: {"connection": {base_url, model, key_last4}} or
+            {"connection": null}.
+    """
+    return jsonify({"connection": public_view(connection_store.load())}), 200
+
+
+@app.route("/api/connection", methods=["PUT"])
+def put_connection():
+    """Saves the connection.
+
+    Expects base_url, model (optional) and api_key. An empty api_key keeps the
+    saved key, but only while the base URL stays the same.
+
+    Returns:
+        Response: The saved connection as in GET, or a 400 response with the
+            reason.
+    """
+    data = request.json
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    try:
+        saved = connection_store.save(
+            data.get("base_url"), data.get("api_key"), data.get("model")
+        )
+    except InvalidConnection as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"connection": public_view(saved)}), 200
+
+
+@app.route("/api/connection", methods=["DELETE"])
+def delete_connection():
+    """Removes the saved connection (and with it the key)."""
+    connection_store.delete()
+    return jsonify({"connection": None}), 200
 
 
 @app.route("/health")

@@ -12,7 +12,7 @@ from app import app as flask_app
 def isolated_state(tmp_path, monkeypatch):
     """Runs every test in an empty working directory with no leftover tasks.
 
-    The app and the pipeline read and write the relative ``history/`` folder,
+    The app and the pipeline read and write the relative ``data/`` folder,
     and ``TASKS`` is module-level state.
     """
     monkeypatch.chdir(tmp_path)

@@ -217,10 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# history
-history/*
-
-# saved connection (contains the API key)
+# server state: run history and the saved connection (contains the API key)
 data/*
 
 # CI reports
