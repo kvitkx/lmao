@@ -15,7 +15,7 @@ docker run -d --name lmao \
   -p 127.0.0.1:5000:5000 \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
   --add-host=host.docker.internal:host-gateway \
-  -v lmao_history:/app/history \
+  -v lmao_data:/app/data \
   kvitkx/lmao:latest
 ```
 
@@ -23,7 +23,7 @@ Open **http://localhost:5000**. Stop with `docker stop lmao`.
 
 - `--add-host` is needed on Linux. Docker Desktop on macOS and Windows resolves `host.docker.internal` on its own.
 - On Linux, Ollama must accept connections from the Docker bridge: start it with `OLLAMA_HOST=0.0.0.0`. Keep that port closed to your network.
-- Results of every run are stored in the `lmao_history` volume (`/app/history`).
+- The run history and the saved connection are stored in the `lmao_data` volume (`/app/data`).
 
 ## Docker Compose
 
@@ -39,7 +39,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
-      - lmao_history:/app/history
+      - lmao_data:/app/data
     depends_on:
       ollama:
         condition: service_healthy
@@ -67,7 +67,7 @@ services:
     #           capabilities: [gpu]
 
 volumes:
-  lmao_history:
+  lmao_data:
   ollama_data:
 ```
 

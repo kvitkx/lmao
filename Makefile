@@ -104,7 +104,7 @@ css: static/css/app.css
 clean: ##> Remove reports and caches.
 	scripts/dev/clean.sh
 
-reset: ##> Clean + remove containers and prod history (models are kept).
+reset: ##> Clean + remove containers, prod history and the saved connection (models are kept).
 	scripts/dev/clean.sh --volumes
 
 ##@ Release

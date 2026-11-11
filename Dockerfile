@@ -87,8 +87,8 @@ COPY --from=assets-out / /app/static/
 COPY templates/ /app/templates/
 COPY app.py /app/
 
-RUN mkdir -p /app/history && \
-    chown appuser:appuser /app/history
+RUN mkdir -p /app/data && \
+    chown appuser:appuser /app/data
 
 ENV HOME=/home/appuser
 

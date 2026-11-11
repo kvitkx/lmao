@@ -10,9 +10,20 @@ from abc import ABC, abstractmethod
 
 GENERATE_TIMEOUT_SEC = 600
 
+# Where the judge of a run is served. `ollama` is the local Ollama (one model in
+# memory at a time); the other two grade in parallel.
+JUDGE_OLLAMA = "ollama"
+JUDGE_OLLAMA_CLOUD = "ollama_cloud"
+JUDGE_OPENAI = "openai"
+JUDGE_PROVIDERS = (JUDGE_OLLAMA, JUDGE_OLLAMA_CLOUD, JUDGE_OPENAI)
+
 
 class Provider(ABC):
     """Base class of every model provider."""
+
+    # True if the provider silently cuts a prompt that does not fit the context
+    # window (a local Ollama does). A remote API rejects such a prompt instead.
+    truncates_prompts = False
 
     @abstractmethod
     def get_models(self) -> list:

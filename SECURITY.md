@@ -13,8 +13,8 @@ impact. Reports are handled on a best-effort basis.
 ## Security model
 
 lmao is a local tool for one trusted user. It has no authentication: anyone who
-can reach its port can run evaluations, read the history and use your Ollama
-models.
+can reach its port can run evaluations, read the history, use your Ollama
+models and use the saved API key (the key itself is never returned).
 
 - Compose binds the app to `127.0.0.1` only (`make check` enforces it). Do not
   expose the app or Ollama (`11434`) to a network without a reverse proxy or VPN
@@ -27,11 +27,17 @@ models.
 - **Cloud judge (off by default):** questions, criteria, reference answers and
   all candidate answers are sent to Ollama's cloud service. Do not use it with
   confidential data.
+- **OpenAI-compatible judge (off by default):** the same data goes to the API
+  you configure. Its key is saved on the server in `data/connection.json`
+  (mode `0600`, next to the history) as plain text, because the app has no
+  secret to encrypt it with. The key is never returned to the browser and never
+  written to logs or run results. Changing the base URL requires entering the
+  key again, so a request cannot send a saved key to another host.
 - **Page assets:** the page loads no scripts, styles or fonts from other hosts.
   The browser talks only to the app.
-- **History:** every run is saved as JSON in `history/` (a Docker volume in
-  prod) with your questions and the model answers. `make reset` removes the
-  prod volume.
+- **History:** every run is saved as JSON in `data/history/` (the `app_data`
+  Docker volume in prod) with your questions and the model answers. `make reset`
+  removes the prod volume.
 
 ## Untrusted model output
 

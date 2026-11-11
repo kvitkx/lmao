@@ -16,9 +16,17 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
-from core.evaluator import SCHEMA_VERSION, EvaluationPipeline
+from core.connection import (
+    ERROR_TEXTS,
+    ConnectionStore,
+    InvalidConnection,
+    public_view,
+)
+from core.evaluator import DATA_DIR, SCHEMA_VERSION, EvaluationPipeline
 from core.export import to_csv, to_markdown
 from core.ollama_client import OllamaClient
+from core.openai_client import OpenAIClient
+from core.provider import JUDGE_OLLAMA, JUDGE_OPENAI, JUDGE_PROVIDERS
 
 load_dotenv()
 
@@ -30,6 +38,9 @@ TASKS = {}
 
 ollama_client = OllamaClient()
 pipeline = EvaluationPipeline(ollama_client)
+
+# The saved connection holds an API key: nothing but this store reads the file.
+connection_store = ConnectionStore(os.path.join(DATA_DIR, "connection.json"))
 
 _SAFE_TAG_RE = re.compile(r"[^a-zA-Z0-9_-]")
 _OPTIONAL_TEXT_FIELDS = ("tag", "specific_rationale", "reference")
@@ -97,8 +108,8 @@ def _validate_payload(data: dict) -> str | None:
         for field in _OPTIONAL_TEXT_FIELDS
     ):
         return "Text fields must be strings."
-    if not isinstance(data.get("judge_cloud", False), bool):
-        return "Field 'judge_cloud' must be a boolean."
+    if data.get("judge_provider", JUDGE_OLLAMA) not in JUDGE_PROVIDERS:
+        return f"Field 'judge_provider' must be one of: {', '.join(JUDGE_PROVIDERS)}."
     return None
 
 
@@ -117,14 +128,14 @@ def update_task_status(task_id: str, payload: dict) -> None:
             TASKS[task_id]["status"] = payload.get("type")
 
 
-def _run_task(task_id: str, payload: dict) -> None:
+def _run_task(task_id: str, payload: dict, judge_provider=None) -> None:
     """Runs the pipeline in a worker thread and reports a crash to the stream.
 
     Without this, an exception would end the thread silently and the SSE stream
     would wait forever for a final event.
     """
     try:
-        pipeline.run_evaluation(task_id, payload, update_task_status)
+        pipeline.run_evaluation(task_id, payload, update_task_status, judge_provider)
     except Exception as e:
         update_task_status(
             task_id, {"type": "error", "message": f"Evaluation failed: {e}"}
@@ -218,9 +229,10 @@ def start_evaluation():
     """Starts a new asynchronous evaluation task.
 
     Expects a JSON payload with judge, candidates, an optional base_rationale,
-    an optional judge_cloud flag (parallel grading by a cloud judge) and a list
-    of test_cases (question, optional tag, specific_rationale and reference).
-    Every model must be installed in Ollama.
+    an optional judge_provider (ollama, ollama_cloud or openai; the last two
+    grade in parallel) and a list of test_cases (question, optional tag,
+    specific_rationale and reference). Every model must be installed in Ollama,
+    except an OpenAI judge, which needs a saved connection instead.
 
     Returns:
         Response: A JSON response containing the generated task_id and status,
@@ -234,12 +246,18 @@ def start_evaluation():
     if error:
         return jsonify({"error": error}), 400
 
+    judge_provider = None
+    local_models = [data["judge"], *data["candidates"]]
+    if data.get("judge_provider") == JUDGE_OPENAI:
+        connection = connection_store.load()
+        if connection is None:
+            return jsonify({"error": "The OpenAI judge needs a saved connection."}), 400
+        judge_provider = OpenAIClient(connection["base_url"], connection["api_key"])
+        # The judge lives at the API, so only the candidates must be installed.
+        local_models = data["candidates"]
+
     installed = ollama_client.get_models()
-    missing = [
-        model
-        for model in dict.fromkeys([data["judge"], *data["candidates"]])
-        if model not in installed
-    ]
+    missing = [model for model in dict.fromkeys(local_models) if model not in installed]
     if missing:
         return jsonify(
             {"error": f"Models are not installed: {', '.join(missing)}."}
@@ -256,7 +274,7 @@ def start_evaluation():
     }
 
     # Start the evaluation pipeline in a background thread.
-    thread = threading.Thread(target=_run_task, args=(task_id, data))
+    thread = threading.Thread(target=_run_task, args=(task_id, data, judge_provider))
     thread.daemon = True
     thread.start()
 
@@ -389,6 +407,51 @@ def export_results(task_id: str):
     response.headers["Content-Disposition"] = f'attachment; filename="{task_id}.{fmt}"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route("/api/connection", methods=["GET"])
+def get_connection():
+    """Returns the saved connection to an OpenAI-compatible API.
+
+    The key is never part of the response: only the base URL, the model and the
+    last four characters of the key.
+
+    Returns:
+        Response: {"connection": {base_url, model, key_last4}} or
+            {"connection": null}.
+    """
+    return jsonify({"connection": public_view(connection_store.load())}), 200
+
+
+@app.route("/api/connection", methods=["PUT"])
+def put_connection():
+    """Saves the connection.
+
+    Expects base_url, model (optional) and api_key. An empty api_key keeps the
+    saved key, but only while the base URL stays the same.
+
+    Returns:
+        Response: The saved connection as in GET, or a 400 response with the
+            reason.
+    """
+    data = request.json
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    try:
+        saved = connection_store.save(
+            data.get("base_url"), data.get("api_key"), data.get("model")
+        )
+    except InvalidConnection as e:
+        return jsonify({"error": ERROR_TEXTS[e.code]}), 400
+    return jsonify({"connection": public_view(saved)}), 200
+
+
+@app.route("/api/connection", methods=["DELETE"])
+def delete_connection():
+    """Removes the saved connection (and with it the key)."""
+    connection_store.delete()
+    return jsonify({"connection": None}), 200
 
 
 @app.route("/health")

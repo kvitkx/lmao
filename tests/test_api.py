@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 import app as app_module
+from core.openai_client import OpenAIClient
 
 
 def _write_json(path, data):
@@ -138,10 +139,10 @@ def test_update_task_status_ignores_unknown_task():
 
 def test_run_task_runs_the_pipeline():
     with patch.object(app_module.pipeline, "run_evaluation") as run_evaluation:
-        app_module._run_task("t", {"judge": "j"})
+        app_module._run_task("t", {"judge": "j"}, "provider")
 
     run_evaluation.assert_called_once_with(
-        "t", {"judge": "j"}, app_module.update_task_status
+        "t", {"judge": "j"}, app_module.update_task_status, "provider"
     )
 
 
@@ -219,7 +220,8 @@ def test_evaluate_rejects_non_json_request(client):
         {"test_cases": [{"question": "Q", "tag": 5}]},
         {"test_cases": [{"question": "Q", "reference": None}]},
         {"base_rationale": 5},
-        {"judge_cloud": "yes"},
+        {"judge_provider": "yes"},
+        {"judge_provider": 5},
     ],
 )
 def test_evaluate_rejects_invalid_payload(client, overrides):
@@ -256,16 +258,69 @@ def test_evaluate_starts_background_task(client, installed_models):
     thread_cls.assert_called_once()
     kwargs = thread_cls.call_args.kwargs
     assert kwargs["target"] == app_module._run_task
-    assert kwargs["args"] == (task_id, payload)
+    assert kwargs["args"] == (task_id, payload, None)
     assert thread_cls.return_value.daemon is True
     thread_cls.return_value.start.assert_called_once_with()
 
 
-def test_evaluate_accepts_the_cloud_judge_flag(client, installed_models):
-    with patch.object(app_module.threading, "Thread"):
-        response = client.post("/api/evaluate", json=_payload(judge_cloud=True))
+def test_evaluate_accepts_the_ollama_cloud_judge(client, installed_models):
+    with patch.object(app_module.threading, "Thread") as thread_cls:
+        response = client.post(
+            "/api/evaluate", json=_payload(judge_provider="ollama_cloud")
+        )
 
     assert response.status_code == 202
+    assert thread_cls.call_args.kwargs["args"][2] is None
+
+
+def _save_connection(**overrides):
+    fields = {
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-secret-1234",
+        "model": "gpt-4.1-mini",
+    }
+    fields.update(overrides)
+    return app_module.connection_store.save(**fields)
+
+
+def test_evaluate_gives_an_openai_judge_its_saved_connection(client):
+    _save_connection()
+    payload = _payload(judge="gpt-4.1-mini", judge_provider="openai")
+
+    with (
+        patch.object(app_module.ollama_client, "get_models", return_value=["m"]),
+        patch.object(app_module.threading, "Thread") as thread_cls,
+    ):
+        response = client.post("/api/evaluate", json=payload)
+
+    assert response.status_code == 202
+    task_id, sent, judge_provider = thread_cls.call_args.kwargs["args"]
+    assert (task_id, sent) == (response.get_json()["task_id"], payload)
+    assert isinstance(judge_provider, OpenAIClient)
+    assert judge_provider.base_url == "https://api.example.com/v1"
+    assert judge_provider.api_key == "sk-secret-1234"
+
+
+def test_evaluate_rejects_an_openai_judge_without_a_connection(
+    client, installed_models
+):
+    response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "The OpenAI judge needs a saved connection."
+    }
+    assert app_module.TASKS == {}
+
+
+def test_evaluate_still_checks_the_candidates_of_an_openai_judge(client):
+    _save_connection()
+
+    with patch.object(app_module.ollama_client, "get_models", return_value=[]):
+        response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Models are not installed: m."}
 
 
 @pytest.mark.parametrize(
@@ -280,6 +335,122 @@ def test_evaluate_uses_default_tag_when_none_is_usable(
 
     assert response.status_code == 202
     assert re.fullmatch(r"run_run_\d{8}_\d{6}", response.get_json()["task_id"])
+
+
+# --- /api/connection --------------------------------------------------------
+
+
+def test_connection_is_empty_by_default(client):
+    response = client.get("/api/connection")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"connection": None}
+
+
+def test_put_connection_saves_it_and_never_returns_the_key(client):
+    body = {
+        "base_url": "https://api.example.com/v1/",
+        "api_key": "sk-secret-1234",
+        "model": "gpt-4.1-mini",
+    }
+
+    put = client.put("/api/connection", json=body)
+    get = client.get("/api/connection")
+
+    expected = {
+        "connection": {
+            "base_url": "https://api.example.com/v1",
+            "model": "gpt-4.1-mini",
+            "key_last4": "1234",
+        }
+    }
+    assert put.status_code == 200
+    assert put.get_json() == expected
+    assert get.get_json() == expected
+    assert b"sk-secret" not in put.data
+    assert b"sk-secret" not in get.data
+    assert app_module.connection_store.load()["api_key"] == "sk-secret-1234"
+
+
+def test_put_connection_without_a_key_keeps_the_saved_one(client):
+    _save_connection()
+
+    response = client.put(
+        "/api/connection",
+        json={"base_url": "https://api.example.com/v1", "model": "other"},
+    )
+
+    assert response.status_code == 200
+    saved = app_module.connection_store.load()
+    assert (saved["api_key"], saved["model"]) == ("sk-secret-1234", "other")
+
+
+def test_put_connection_with_a_new_url_needs_the_key_again(client):
+    _save_connection()
+
+    response = client.put(
+        "/api/connection", json={"base_url": "https://evil.example.com/v1"}
+    )
+
+    assert response.status_code == 400
+    assert "again" in response.get_json()["error"]
+    saved = app_module.connection_store.load()
+    assert saved["base_url"] == "https://api.example.com/v1"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"base_url": "ftp://api.example.com", "api_key": "sk-secret-1234"},
+        {"base_url": "https://api.example.com/v1"},
+        {"base_url": "https://api.example.com/v1", "api_key": 5},
+    ],
+)
+def test_put_connection_rejects_invalid_fields(client, body):
+    response = client.put("/api/connection", json=body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+    assert app_module.connection_store.load() is None
+
+
+def test_put_connection_rejects_a_non_object_and_non_json(client):
+    array = client.put("/api/connection", json=[1])
+    text = client.put("/api/connection", data="not json")
+
+    assert array.status_code == 400
+    assert array.get_json() == {"error": "Invalid JSON payload"}
+    assert text.status_code == 415
+
+
+def test_delete_connection_removes_it(client):
+    _save_connection()
+
+    first = client.delete("/api/connection")
+    second = client.delete("/api/connection")
+
+    assert first.status_code == second.status_code == 200
+    assert first.get_json() == {"connection": None}
+    assert app_module.connection_store.load() is None
+
+
+def test_the_connection_and_the_history_share_one_directory():
+    connection_dir = Path(app_module.connection_store.path).parent
+
+    assert connection_dir == Path(app_module.pipeline.history_dir).parent
+
+
+def test_put_connection_returns_the_text_of_the_error(client):
+    response = client.put(
+        "/api/connection",
+        json={"base_url": "ftp://api.example.com", "api_key": "sk-secret-1234"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Field 'base_url' must start with http:// or https://."
+    }
 
 
 # --- /api/stream ------------------------------------------------------------
@@ -348,7 +519,7 @@ def test_history_is_empty_without_history_directory(client):
 
 def test_history_lists_run_metadata(client):
     _write_json(
-        Path("history/run_python_test_20260101_120000/evaluation_results.json"),
+        Path("data/history/run_python_test_20260101_120000/evaluation_results.json"),
         _run(),
     )
 
@@ -368,7 +539,7 @@ def test_history_lists_run_metadata(client):
 
 def test_history_is_sorted_newest_first(client):
     for task_id in ("run_a_20260101_000000", "run_a_20260102_000000"):
-        _write_json(Path("history") / task_id / "evaluation_results.json", _run())
+        _write_json(Path("data/history") / task_id / "evaluation_results.json", _run())
 
     response = client.get("/api/history")
 
@@ -379,8 +550,10 @@ def test_history_is_sorted_newest_first(client):
 
 
 def test_history_copes_with_oddly_named_runs(client):
-    _write_json(Path("history/weird/evaluation_results.json"), _run())
-    _write_json(Path("history/run_x_notadate_nottime/evaluation_results.json"), _run())
+    _write_json(Path("data/history/weird/evaluation_results.json"), _run())
+    _write_json(
+        Path("data/history/run_x_notadate_nottime/evaluation_results.json"), _run()
+    )
 
     runs = {run["task_id"]: run for run in client.get("/api/history").get_json()}
 
@@ -392,18 +565,18 @@ def test_history_copes_with_oddly_named_runs(client):
 
 def test_history_skips_legacy_corrupted_and_incomplete_entries(client):
     _write_json(
-        Path("history/run_old_20260101_000000/evaluation_results.json"),
+        Path("data/history/run_old_20260101_000000/evaluation_results.json"),
         {"questions_results": []},
     )
     _write_json(
-        Path("history/run_v1_20260101_000000/evaluation_results.json"),
+        Path("data/history/run_v1_20260101_000000/evaluation_results.json"),
         {**_run(), "schema_version": 2},
     )
-    broken = Path("history/run_broken_20260101_000000/evaluation_results.json")
+    broken = Path("data/history/run_broken_20260101_000000/evaluation_results.json")
     broken.parent.mkdir(parents=True)
     broken.write_text("{not json", encoding="utf-8")
-    Path("history/run_empty_20260101_000000").mkdir()
-    Path("history/readme.txt").write_text("not a run", encoding="utf-8")
+    Path("data/history/run_empty_20260101_000000").mkdir()
+    Path("data/history/readme.txt").write_text("not a run", encoding="utf-8")
 
     response = client.get("/api/history")
 
@@ -430,7 +603,7 @@ def test_results_returns_404_when_run_is_missing(client):
 
 def test_results_returns_the_run_with_metrics(client):
     task_id = "run_x_20260101_000000"
-    run_dir = Path("history") / task_id
+    run_dir = Path("data/history") / task_id
     data = _run()
     _write_json(run_dir / "evaluation_results.json", data)
     _write_json(
@@ -449,7 +622,7 @@ def test_results_returns_the_run_with_metrics(client):
 
 def test_results_work_without_technical_metrics(client):
     task_id = "run_x_20260101_000000"
-    _write_json(Path("history") / task_id / "evaluation_results.json", _run())
+    _write_json(Path("data/history") / task_id / "evaluation_results.json", _run())
 
     response = client.get(f"/api/results/{task_id}")
 
@@ -460,7 +633,7 @@ def test_results_work_without_technical_metrics(client):
 def test_results_hide_legacy_runs(client):
     task_id = "run_x_20260101_000000"
     _write_json(
-        Path("history") / task_id / "evaluation_results.json",
+        Path("data/history") / task_id / "evaluation_results.json",
         {"questions_results": []},
     )
 
@@ -490,7 +663,7 @@ def _save_run(task_id="run_x_20260101_000000"):
             "time_sec": 1.0,
         }
     ]
-    run_dir = Path("history") / task_id
+    run_dir = Path("data/history") / task_id
     _write_json(run_dir / "evaluation_results.json", run)
     _write_json(
         run_dir / "technical_metrics.json",
@@ -571,7 +744,7 @@ def test_export_rejects_unsafe_task_id(client):
 def test_export_returns_404_for_missing_and_legacy_runs(client):
     task_id = "run_old_20260101_000000"
     _write_json(
-        Path("history") / task_id / "evaluation_results.json",
+        Path("data/history") / task_id / "evaluation_results.json",
         {"questions_results": []},
     )
 

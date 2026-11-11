@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Remove generated reports and caches.
-# With --volumes also remove containers and Compose volumes (prod history!).
+# With --volumes also remove containers and Compose volumes (prod history and
+# the saved connection!).
 # The models volume `ollama` is external: Compose never removes it.
 set -Eeuo pipefail
 # shellcheck source=../lib.sh
@@ -15,8 +16,8 @@ case "${1:-}" in
 esac
 
 if [[ "$remove_volumes" == 1 ]]; then
-    warn "Removing containers and Compose volumes, including prod evaluation history."
-    log "Preserved: the external Ollama volume (models) and ./history (dev history)."
+    warn "Removing containers and Compose volumes, including prod evaluation history and the saved connection."
+    log "Preserved: the external Ollama volume (models) and ./data (dev history and connection)."
 
     for env in dev prod; do
         docker compose \

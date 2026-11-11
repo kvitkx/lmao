@@ -11,7 +11,7 @@ services:
     environment:
       - FLASK_DEBUG=0
     volumes:
-      - history_data:/app/history
+      - app_data:/app/data
 
 volumes:
-  history_data:
+  app_data:

@@ -12,6 +12,7 @@ export type Category =
 export type Status = "ok" | "truncated" | "generation_error" | "judge_error";
 export type ReferenceSource = "generated" | "provided" | "none";
 export type Mode = "local" | "cloud";
+export type JudgeProvider = "ollama" | "ollama_cloud" | "openai";
 export type Confidence = "high" | "low";
 export type RecommendationRule =
     | "fastest_above_threshold"
@@ -104,6 +105,8 @@ export interface Results {
     schema_version: 3;
     task_id: string;
     judge_model: string;
+    /** Where the judge ran. `mode` is "cloud" for every value but "ollama". */
+    judge_provider: JudgeProvider;
     mode: Mode;
     judge_is_candidate: boolean;
     finished_at: string;

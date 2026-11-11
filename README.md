@@ -75,7 +75,7 @@ docker run -d --name lmao \
   -p 127.0.0.1:5000:5000 \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
   --add-host=host.docker.internal:host-gateway \
-  -v lmao_history:/app/history \
+  -v lmao_data:/app/data \
   kvitkx/lmao:latest
 ```
 
@@ -100,9 +100,9 @@ make run
 
 Open **http://localhost:5000**. If Ollama is not on `http://localhost:11434`, set `OLLAMA_BASE_URL` (see `.env.example`).
 
-### Where results are stored
+### Where data is stored
 
-Every run is saved in `./history` (make dev, uv), in the `history_data` Docker volume (make prod) or in the volume you mounted at `/app/history` (Docker).
+The server keeps everything it stores (the run history and the saved connection) in one folder, `data/`: `./data` (make dev, uv), the `app_data` Docker volume (make prod) or the volume you mounted at `/app/data` (Docker).
 
 ## Development
 
