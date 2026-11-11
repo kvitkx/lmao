@@ -7,12 +7,14 @@ the only form of the connection that an API response may contain.
 """
 
 import json
+import math
 import os
 from urllib.parse import urlsplit
 
 MAX_URL_LENGTH = 200
 MAX_KEY_LENGTH = 500
 MAX_MODEL_LENGTH = 200
+MAX_PRICE = 10_000  # per million tokens
 
 
 # Why a connection is refused. An API response carries one of these texts, never
@@ -29,6 +31,11 @@ ERROR_TEXTS = {
     "key_required": "Field 'api_key' is required.",
     "key_again": "Enter the API key again: the base URL changed.",
     "model_invalid": "Field 'model' must be a model name.",
+    "price_invalid": (
+        f"Fields 'price_in' and 'price_out' must be numbers from 0 to {MAX_PRICE} "
+        "per million tokens."
+    ),
+    "price_pair": "Set both 'price_in' and 'price_out', or neither.",
 }
 
 
@@ -94,6 +101,25 @@ def _clean_model(value) -> str:
     return value.strip()
 
 
+def _clean_price(value) -> float | None:
+    """Returns a price per million tokens, or None if none was given."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidConnection("price_invalid")
+    if not math.isfinite(value) or not 0 <= value <= MAX_PRICE:
+        raise InvalidConnection("price_invalid")
+    return float(value)
+
+
+def _stored_price(value) -> float | None:
+    """A price read from the file: a damaged one counts as missing."""
+    try:
+        return _clean_price(value)
+    except InvalidConnection:
+        return None
+
+
 def public_view(connection: dict | None) -> dict | None:
     """The only form of the connection an API response may contain.
 
@@ -101,8 +127,9 @@ def public_view(connection: dict | None) -> dict | None:
         connection (dict | None): The result of `ConnectionStore.load()`.
 
     Returns:
-        dict | None: base_url, model and key_last4 (the last four characters
-            of the key, empty for a short key), or None without a connection.
+        dict | None: base_url, model, price_in, price_out (per million tokens,
+            or None) and key_last4 (the last four characters of the key, empty
+            for a short key), or None without a connection.
     """
     if connection is None:
         return None
@@ -111,6 +138,8 @@ def public_view(connection: dict | None) -> dict | None:
     return {
         "base_url": connection["base_url"],
         "model": connection["model"],
+        "price_in": connection.get("price_in"),
+        "price_out": connection.get("price_out"),
         "key_last4": key[-4:] if len(key) >= 8 else "",
     }
 
@@ -129,8 +158,8 @@ class ConnectionStore:
         """Reads the connection.
 
         Returns:
-            dict | None: base_url, api_key and model, or None if the file is
-                missing or damaged.
+            dict | None: base_url, api_key, model, price_in and price_out
+                (None when not set), or None if the file is missing or damaged.
         """
         try:
             with open(self.path, "r", encoding="utf-8") as f:
@@ -149,28 +178,43 @@ class ConnectionStore:
             return None
         if not (isinstance(api_key, str) and api_key):
             return None
+
+        price_in = _stored_price(data.get("price_in"))
+        price_out = _stored_price(data.get("price_out"))
+        if price_in is None or price_out is None:
+            price_in = price_out = None
         return {
             "base_url": base_url,
             "api_key": api_key,
             "model": model if isinstance(model, str) else "",
+            "price_in": price_in,
+            "price_out": price_out,
         }
 
-    def save(self, base_url, api_key=None, model=None) -> dict:
+    def save(
+        self, base_url, api_key=None, model=None, price_in=None, price_out=None
+    ) -> dict:
         """Validates and saves the connection.
 
         An empty `api_key` keeps the saved key, but only for the same base URL:
-        a key must never follow a changed URL to another host.
+        a key must never follow a changed URL to another host. The other
+        optional fields are replaced: a missing one is cleared. The prices are
+        per million tokens and come as a pair or not at all.
 
         Raises:
             InvalidConnection: If a field is not acceptable or the key is
                 missing.
 
         Returns:
-            dict: The saved base_url, api_key and model.
+            dict: The saved base_url, api_key, model, price_in and price_out.
         """
         url = normalize_url(base_url)
         key = _clean_key(api_key)
         model_name = _clean_model(model)
+        price_in = _clean_price(price_in)
+        price_out = _clean_price(price_out)
+        if (price_in is None) != (price_out is None):
+            raise InvalidConnection("price_pair")
 
         if not key:
             current = self.load()
@@ -180,7 +224,13 @@ class ConnectionStore:
                 raise InvalidConnection("key_again")
             key = current["api_key"]
 
-        connection = {"base_url": url, "api_key": key, "model": model_name}
+        connection = {
+            "base_url": url,
+            "api_key": key,
+            "model": model_name,
+            "price_in": price_in,
+            "price_out": price_out,
+        }
         self._write(connection)
         return connection
 

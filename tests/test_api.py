@@ -361,6 +361,8 @@ def test_put_connection_saves_it_and_never_returns_the_key(client):
         "connection": {
             "base_url": "https://api.example.com/v1",
             "model": "gpt-4.1-mini",
+            "price_in": None,
+            "price_out": None,
             "key_last4": "1234",
         }
     }
@@ -451,6 +453,171 @@ def test_put_connection_returns_the_text_of_the_error(client):
     assert response.get_json() == {
         "error": "Field 'base_url' must start with http:// or https://."
     }
+
+
+def test_put_connection_saves_the_prices(client):
+    body = {
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-secret-1234",
+        "price_in": 0.4,
+        "price_out": 1.6,
+    }
+
+    response = client.put("/api/connection", json=body)
+
+    assert response.status_code == 200
+    connection = response.get_json()["connection"]
+    assert (connection["price_in"], connection["price_out"]) == (0.4, 1.6)
+    assert client.get("/api/connection").get_json()["connection"] == connection
+
+
+@pytest.mark.parametrize(
+    "prices",
+    [
+        {"price_in": 1},
+        {"price_in": -1, "price_out": 1},
+        {"price_in": "1", "price_out": 1},
+    ],
+)
+def test_put_connection_rejects_bad_prices(client, prices):
+    body = {
+        "base_url": "https://api.example.com/v1",
+        "api_key": "sk-secret-1234",
+        **prices,
+    }
+
+    response = client.put("/api/connection", json=body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+    assert app_module.connection_store.load() is None
+
+
+# --- /api/connection/test ---------------------------------------------------
+
+PREFLIGHT_REPORT = {"ok": True, "checks": []}
+
+
+def test_connection_test_needs_a_saved_connection(client):
+    response = client.post("/api/connection/test")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "There is no saved connection to test."}
+
+
+def test_connection_test_needs_a_model(client):
+    _save_connection(model="")
+
+    response = client.post("/api/connection/test")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Choose a model to test."}
+
+
+def test_connection_test_runs_the_preflight_on_the_saved_connection(client):
+    _save_connection()
+
+    with patch.object(
+        app_module, "run_preflight", return_value=PREFLIGHT_REPORT
+    ) as preflight:
+        response = client.post("/api/connection/test")
+
+    assert response.status_code == 200
+    assert response.get_json() == PREFLIGHT_REPORT
+    provider, model = preflight.call_args.args
+    assert isinstance(provider, OpenAIClient)
+    assert provider.base_url == "https://api.example.com/v1"
+    assert provider.api_key == "sk-secret-1234"
+    assert model == "gpt-4.1-mini"
+
+
+def test_connection_test_takes_the_model_from_the_request(client):
+    _save_connection()
+
+    with patch.object(
+        app_module, "run_preflight", return_value=PREFLIGHT_REPORT
+    ) as preflight:
+        client.post("/api/connection/test", json={"model": " other "})
+
+    assert preflight.call_args.args[1] == "other"
+
+
+@pytest.mark.parametrize("body", [[1], {"model": 5}])
+def test_connection_test_rejects_a_bad_body(client, body):
+    _save_connection()
+
+    response = client.post("/api/connection/test", json=body)
+
+    assert response.status_code == 400
+
+
+# --- /api/budget ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"judge": None},
+        {"candidates": []},
+        {"test_cases": []},
+        {"judge_provider": "yes"},
+    ],
+)
+def test_budget_rejects_an_invalid_payload(client, overrides):
+    response = client.post("/api/budget", json=_payload(**overrides))
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
+def test_budget_rejects_an_empty_payload(client):
+    response = client.post("/api/budget", json={})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid JSON payload"}
+
+
+def test_budget_counts_calls_and_tokens_for_a_local_judge(client):
+    response = client.post("/api/budget", json=_payload())
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["judge_calls"] == {
+        "references": 1,
+        "grades": 1,
+        "summary": 1,
+        "total": 3,
+    }
+    assert body["tokens"]["total"]["low"] > 0
+    assert body["leaves_machine"] is False
+    assert body["cost"] is None
+
+
+def test_budget_prices_an_openai_judge_from_the_saved_connection(client):
+    _save_connection(price_in=2.0, price_out=8.0)
+
+    body = client.post("/api/budget", json=_payload(judge_provider="openai")).get_json()
+
+    assert body["leaves_machine"] is True
+    assert 0 < body["cost"]["low"] <= body["cost"]["high"]
+
+
+def test_budget_has_no_cost_without_saved_prices(client):
+    _save_connection()
+
+    body = client.post("/api/budget", json=_payload(judge_provider="openai")).get_json()
+
+    assert body["leaves_machine"] is True
+    assert body["cost"] is None
+
+
+def test_budget_has_no_cost_for_the_ollama_cloud_judge(client):
+    body = client.post(
+        "/api/budget", json=_payload(judge_provider="ollama_cloud")
+    ).get_json()
+
+    assert body["leaves_machine"] is True
+    assert body["cost"] is None
 
 
 # --- /api/stream ------------------------------------------------------------

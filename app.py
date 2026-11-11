@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
+from core.budget import cost_of, estimate
 from core.connection import (
     ERROR_TEXTS,
     ConnectionStore,
@@ -26,6 +27,7 @@ from core.evaluator import DATA_DIR, SCHEMA_VERSION, EvaluationPipeline
 from core.export import to_csv, to_markdown
 from core.ollama_client import OllamaClient
 from core.openai_client import OpenAIClient
+from core.preflight import run_preflight
 from core.provider import JUDGE_OLLAMA, JUDGE_OPENAI, JUDGE_PROVIDERS
 
 load_dotenv()
@@ -427,8 +429,10 @@ def get_connection():
 def put_connection():
     """Saves the connection.
 
-    Expects base_url, model (optional) and api_key. An empty api_key keeps the
-    saved key, but only while the base URL stays the same.
+    Expects base_url and api_key, and optionally model, price_in and price_out
+    (prices per million tokens, both or neither). An empty api_key keeps the
+    saved key, but only while the base URL stays the same. A missing optional
+    field is cleared.
 
     Returns:
         Response: The saved connection as in GET, or a 400 response with the
@@ -440,7 +444,11 @@ def put_connection():
 
     try:
         saved = connection_store.save(
-            data.get("base_url"), data.get("api_key"), data.get("model")
+            data.get("base_url"),
+            data.get("api_key"),
+            data.get("model"),
+            data.get("price_in"),
+            data.get("price_out"),
         )
     except InvalidConnection as e:
         return jsonify({"error": ERROR_TEXTS[e.code]}), 400
@@ -452,6 +460,71 @@ def delete_connection():
     """Removes the saved connection (and with it the key)."""
     connection_store.delete()
     return jsonify({"connection": None}), 200
+
+
+@app.route("/api/connection/test", methods=["POST"])
+def check_connection():
+    """Runs the preflight checks against the saved connection.
+
+    The key never comes from the request: the checks use the saved connection,
+    so the form saves first and then tests. The body is optional; `model`
+    overrides the saved default model.
+
+    Returns:
+        Response: {"ok": bool, "checks": [...]} (see core/preflight.py), or a
+            400 response when there is no connection or no model.
+    """
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    connection = connection_store.load()
+    if connection is None:
+        return jsonify({"error": "There is no saved connection to test."}), 400
+
+    model = data.get("model") or connection["model"]
+    if not isinstance(model, str) or not model.strip():
+        return jsonify({"error": "Choose a model to test."}), 400
+
+    provider = OpenAIClient(connection["base_url"], connection["api_key"])
+    return jsonify(run_preflight(provider, model.strip())), 200
+
+
+@app.route("/api/budget", methods=["POST"])
+def get_budget():
+    """Estimates the judge's work for a run, before it starts.
+
+    Takes the same payload as /api/evaluate. Judge calls are counted; tokens
+    are a low/high range. The cost is set only for an OpenAI judge whose saved
+    connection has prices.
+
+    Returns:
+        Response: judge_calls, tokens, sent_chars, leaves_machine (prompts go
+            to a remote judge) and cost (low/high, or null); or a 400 response
+            describing what is wrong with the payload.
+    """
+    data = request.json
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    error = _validate_payload(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    result = estimate(data)
+    kind = data.get("judge_provider", JUDGE_OLLAMA)
+
+    cost = None
+    if kind == JUDGE_OPENAI:
+        connection = connection_store.load()
+        if connection is not None:
+            cost = cost_of(
+                result["tokens"], connection["price_in"], connection["price_out"]
+            )
+
+    return jsonify(
+        {**result, "leaves_machine": kind != JUDGE_OLLAMA, "cost": cost}
+    ), 200
 
 
 @app.route("/health")

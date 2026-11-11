@@ -62,6 +62,7 @@ KEEP_ALIVE = "10m"
 # Small models can loop forever; the cap keeps one bad answer from stalling a run.
 CANDIDATE_OPTIONS = {"num_predict": 1000}
 JUDGE_NUM_CTX = 8192
+JUDGE_NUM_PREDICT = 1000
 JUDGE_SEED = 42
 MAX_REFERENCE_ATTEMPTS = 2
 MAX_GRADE_ATTEMPTS = 3
@@ -83,7 +84,7 @@ def _judge_options(attempt: int = 0) -> dict:
         "temperature": 0,
         "seed": JUDGE_SEED + attempt,
         "num_ctx": JUDGE_NUM_CTX,
-        "num_predict": 1000,
+        "num_predict": JUDGE_NUM_PREDICT,
     }
 
 
