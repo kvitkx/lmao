@@ -441,6 +441,18 @@ def test_the_connection_and_the_history_share_one_directory():
     assert connection_dir == Path(app_module.pipeline.history_dir).parent
 
 
+def test_put_connection_returns_the_text_of_the_error(client):
+    response = client.put(
+        "/api/connection",
+        json={"base_url": "ftp://api.example.com", "api_key": "sk-secret-1234"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Field 'base_url' must start with http:// or https://."
+    }
+
+
 # --- /api/stream ------------------------------------------------------------
 
 

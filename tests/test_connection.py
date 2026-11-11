@@ -9,6 +9,7 @@ import stat
 import pytest
 
 from core.connection import (
+    ERROR_TEXTS,
     ConnectionStore,
     InvalidConnection,
     normalize_url,
@@ -61,6 +62,14 @@ def test_normalize_url_accepts_http_urls(value, expected):
 def test_normalize_url_rejects_everything_else(value):
     with pytest.raises(InvalidConnection):
         normalize_url(value)
+
+
+def test_an_error_carries_a_code_and_its_text():
+    with pytest.raises(InvalidConnection) as error:
+        normalize_url("ftp://api.example.com")
+
+    assert error.value.code == "url_scheme"
+    assert str(error.value) == ERROR_TEXTS["url_scheme"]
 
 
 # --- save and load ----------------------------------------------------------

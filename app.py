@@ -16,7 +16,12 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
-from core.connection import ConnectionStore, InvalidConnection, public_view
+from core.connection import (
+    ERROR_TEXTS,
+    ConnectionStore,
+    InvalidConnection,
+    public_view,
+)
 from core.evaluator import DATA_DIR, SCHEMA_VERSION, EvaluationPipeline
 from core.export import to_csv, to_markdown
 from core.ollama_client import OllamaClient
@@ -438,7 +443,7 @@ def put_connection():
             data.get("base_url"), data.get("api_key"), data.get("model")
         )
     except InvalidConnection as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": ERROR_TEXTS[e.code]}), 400
     return jsonify({"connection": public_view(saved)}), 200
 
 

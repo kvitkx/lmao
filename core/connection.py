@@ -15,8 +15,33 @@ MAX_KEY_LENGTH = 500
 MAX_MODEL_LENGTH = 200
 
 
+# Why a connection is refused. An API response carries one of these texts, never
+# the text of an exception.
+ERROR_TEXTS = {
+    "url_required": "Field 'base_url' must be a URL.",
+    "url_too_long": "Field 'base_url' is too long.",
+    "url_invalid": "Field 'base_url' is not a valid URL.",
+    "url_scheme": "Field 'base_url' must start with http:// or https://.",
+    "url_parts": "Field 'base_url' must not contain credentials, a query or a fragment.",
+    "key_type": "Field 'api_key' must be a string.",
+    "key_too_long": "Field 'api_key' is too long.",
+    "key_characters": "Field 'api_key' contains characters that are not allowed.",
+    "key_required": "Field 'api_key' is required.",
+    "key_again": "Enter the API key again: the base URL changed.",
+    "model_invalid": "Field 'model' must be a model name.",
+}
+
+
 class InvalidConnection(ValueError):
-    """Raised when the connection fields cannot be saved."""
+    """Raised when the connection fields cannot be saved.
+
+    Attributes:
+        code (str): A key of `ERROR_TEXTS`.
+    """
+
+    def __init__(self, code: str):
+        super().__init__(ERROR_TEXTS[code])
+        self.code = code
 
 
 def normalize_url(value) -> str:
@@ -27,24 +52,22 @@ def normalize_url(value) -> str:
             carries credentials, a query or a fragment.
     """
     if not isinstance(value, str) or not value.strip():
-        raise InvalidConnection("Field 'base_url' must be a URL.")
+        raise InvalidConnection("url_required")
 
     url = value.strip().rstrip("/")
     if len(url) > MAX_URL_LENGTH:
-        raise InvalidConnection("Field 'base_url' is too long.")
+        raise InvalidConnection("url_too_long")
 
     try:
         parts = urlsplit(url)
         _ = parts.port  # a bad port number raises ValueError here
     except ValueError:
-        raise InvalidConnection("Field 'base_url' is not a valid URL.") from None
+        raise InvalidConnection("url_invalid") from None
 
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise InvalidConnection("Field 'base_url' must start with http:// or https://.")
+        raise InvalidConnection("url_scheme")
     if "@" in parts.netloc or parts.query or parts.fragment:
-        raise InvalidConnection(
-            "Field 'base_url' must not contain credentials, a query or a fragment."
-        )
+        raise InvalidConnection("url_parts")
     return url
 
 
@@ -53,15 +76,13 @@ def _clean_key(value) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
-        raise InvalidConnection("Field 'api_key' must be a string.")
+        raise InvalidConnection("key_type")
 
     key = value.strip()
     if len(key) > MAX_KEY_LENGTH:
-        raise InvalidConnection("Field 'api_key' is too long.")
+        raise InvalidConnection("key_too_long")
     if key and not (key.isascii() and key.isprintable() and " " not in key):
-        raise InvalidConnection(
-            "Field 'api_key' contains characters that are not allowed."
-        )
+        raise InvalidConnection("key_characters")
     return key
 
 
@@ -69,7 +90,7 @@ def _clean_model(value) -> str:
     if value is None:
         return ""
     if not isinstance(value, str) or len(value.strip()) > MAX_MODEL_LENGTH:
-        raise InvalidConnection("Field 'model' must be a model name.")
+        raise InvalidConnection("model_invalid")
     return value.strip()
 
 
@@ -154,11 +175,9 @@ class ConnectionStore:
         if not key:
             current = self.load()
             if current is None:
-                raise InvalidConnection("Field 'api_key' is required.")
+                raise InvalidConnection("key_required")
             if current["base_url"] != url:
-                raise InvalidConnection(
-                    "Enter the API key again: the base URL changed."
-                )
+                raise InvalidConnection("key_again")
             key = current["api_key"]
 
         connection = {"base_url": url, "api_key": key, "model": model_name}
