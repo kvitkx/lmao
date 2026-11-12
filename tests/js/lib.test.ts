@@ -1,9 +1,13 @@
-"use strict";
+import assert from "node:assert/strict";
+import test from "node:test";
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import * as lib from "../../frontend/lib.ts";
 
-const lib = require("../../static/js/lib.js");
+// Parsed blocks and trees are read field by field below: `any` keeps the
+// assertions short, the shapes themselves are checked by lib.ts.
+const md = (text: unknown, options?: { bareFence?: boolean }): any[] =>
+    lib.parseMarkdown(text, options);
+const tree = (blocks: unknown): any => lib.markdownTree(blocks as lib.MdBlock[]);
 
 // --- names ----------------------------------------------------------------
 
@@ -117,8 +121,8 @@ test("loadGroup tells which model has to be loaded", () => {
 
 // --- model groups ---------------------------------------------------------
 
-function setRow(steps, key, fields) {
-    Object.assign(steps.find((s) => s.key === key), fields);
+function setRow(steps: lib.Step[], key: string, fields: Partial<lib.Step>) {
+    Object.assign(steps.find((s) => s.key === key)!, fields);
 }
 
 test("modelGroups splits a phase by model in row order, flat for the judge phases", () => {
@@ -283,6 +287,47 @@ test("competitionRanks shares ranks and skips failed answers", () => {
     assert.deepEqual(lib.competitionRanks([90, 90, 70, null]), [1, 1, 3, null]);
 });
 
+// --- matrix columns -------------------------------------------------------
+
+test("columnsThatFit fills the width and leaves room for one counter", () => {
+    // 254 (model) + 48 per question + 48 for the counter
+    assert.equal(lib.columnsThatFit(1094, 30), 16);
+    assert.equal(lib.columnsThatFit(1374, 30), 22);
+    assert.equal(lib.columnsThatFit(2494, 30), 30);
+});
+
+test("columnsThatFit shows everything that fits without a counter", () => {
+    assert.equal(lib.columnsThatFit(1094, 17), 17);
+    assert.equal(lib.columnsThatFit(1094, 10), 10);
+    assert.equal(lib.columnsThatFit(1094, 18), 16);
+});
+
+test("columnsThatFit copes with no room and no questions", () => {
+    assert.equal(lib.columnsThatFit(200, 30), 0);
+    assert.equal(lib.columnsThatFit(NaN, 30), 0);
+    assert.equal(lib.columnsThatFit(1094, 0), 0);
+    assert.equal(lib.columnsThatFit(310, 30), 1);
+});
+
+test("columnWindow shows everything when it fits", () => {
+    assert.deepEqual(lib.columnWindow(10, 10, 4), { start: 0, end: 10, before: 0, after: 0 });
+    assert.deepEqual(lib.columnWindow(10, 16, 4), { start: 0, end: 10, before: 0, after: 0 });
+    assert.deepEqual(lib.columnWindow(0, 16, 0), { start: 0, end: 0, before: 0, after: 0 });
+});
+
+test("columnWindow sticks to the edges and gives up a column for a second counter", () => {
+    assert.deepEqual(lib.columnWindow(30, 16, 0), { start: 0, end: 16, before: 0, after: 14 });
+    assert.deepEqual(lib.columnWindow(30, 16, 29), { start: 14, end: 30, before: 14, after: 0 });
+    assert.deepEqual(lib.columnWindow(30, 16, 15), { start: 8, end: 23, before: 8, after: 7 });
+});
+
+test("columnWindow follows manual paging and clamps it", () => {
+    assert.deepEqual(lib.columnWindow(30, 16, 0, 5), { start: 5, end: 20, before: 5, after: 10 });
+    assert.deepEqual(lib.columnWindow(30, 16, 0, 99), { start: 14, end: 30, before: 14, after: 0 });
+    assert.deepEqual(lib.columnWindow(30, 16, 0, -3), { start: 0, end: 16, before: 0, after: 14 });
+    assert.deepEqual(lib.columnWindow(30, 0, 3), { start: 0, end: 0, before: 0, after: 30 });
+});
+
 // --- markdown -------------------------------------------------------------
 
 test("parseInline splits bold and code", () => {
@@ -301,7 +346,7 @@ test("parseInline splits bold and code", () => {
 });
 
 test("parseMarkdown: heading, paragraph, CRLF", () => {
-    const blocks = lib.parseMarkdown("# Title\r\n\r\ntext one\r\ntext two");
+    const blocks = md("# Title\r\n\r\ntext one\r\ntext two");
 
     assert.equal(blocks[0].type, "heading");
     assert.equal(blocks[0].level, 1);
@@ -311,33 +356,33 @@ test("parseMarkdown: heading, paragraph, CRLF", () => {
 });
 
 test("parseMarkdown: lists", () => {
-    const [bullets] = lib.parseMarkdown("- a\n- b");
-    const [ordered] = lib.parseMarkdown("3. x\n4. y");
+    const [bullets] = md("- a\n- b");
+    const [ordered] = md("3. x\n4. y");
 
     assert.equal(bullets.type, "list");
     assert.equal(bullets.ordered, false);
     assert.equal(bullets.items.length, 2);
     assert.equal(ordered.ordered, true);
     assert.equal(ordered.start, 3);
-    assert.equal(lib.parseMarkdown("- a\n1. b").length, 2);
+    assert.equal(md("- a\n1. b").length, 2);
 });
 
 test("parseMarkdown: code fences", () => {
-    assert.deepEqual(lib.parseMarkdown("```js\nconst a = 1;\n```"), [
+    assert.deepEqual(md("```js\nconst a = 1;\n```"), [
         { type: "code", lang: "js", text: "const a = 1;" },
     ]);
-    assert.deepEqual(lib.parseMarkdown("```\ncode"), [{ type: "code", lang: "", text: "code" }]);
+    assert.deepEqual(md("```\ncode"), [{ type: "code", lang: "", text: "code" }]);
 });
 
 test("parseMarkdown unwraps a markdown fence, and a bare one only on request", () => {
-    assert.equal(lib.parseMarkdown("```markdown\n# T\n```")[0].type, "heading");
-    assert.equal(lib.parseMarkdown("```\n# T\n```")[0].type, "code");
-    assert.equal(lib.parseMarkdown("```\n# T\n```", { bareFence: true })[0].type, "heading");
+    assert.equal(md("```markdown\n# T\n```")[0].type, "heading");
+    assert.equal(md("```\n# T\n```")[0].type, "code");
+    assert.equal(md("```\n# T\n```", { bareFence: true })[0].type, "heading");
 });
 
 test("parseMarkdown: tables with and without a header", () => {
-    const [withHead] = lib.parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |");
-    const [noHead] = lib.parseMarkdown("| 1 | 2 |\n| 3 | 4 |");
+    const [withHead] = md("| a | b |\n|---|---|\n| 1 | 2 |");
+    const [noHead] = md("| 1 | 2 |\n| 3 | 4 |");
 
     assert.equal(withHead.type, "table");
     assert.equal(withHead.head.length, 2);
@@ -348,38 +393,40 @@ test("parseMarkdown: tables with and without a header", () => {
 });
 
 test("parseMarkdown: rule and empty input", () => {
-    assert.deepEqual(lib.parseMarkdown("---"), [{ type: "rule" }]);
-    assert.deepEqual(lib.parseMarkdown(null), []);
+    assert.deepEqual(md("---"), [{ type: "rule" }]);
+    assert.deepEqual(md(null), []);
 });
 
 test("parseMarkdown keeps HTML as text", () => {
-    const [block] = lib.parseMarkdown("<script>alert(1)</script>");
+    const [block] = md("<script>alert(1)</script>");
 
     assert.equal(block.type, "paragraph");
     assert.equal(block.inlines[0].text, "<script>alert(1)</script>");
 });
 
-function collectTags(node, tags = []) {
+function collectTags(node: lib.TreeNode, tags: string[] = []): string[] {
     if (typeof node === "string") return tags;
     tags.push(node.tag);
     node.children.forEach((child) => collectTags(child, tags));
     return tags;
 }
 
-function textOf(node) {
+function textOf(node: lib.TreeNode): string {
     return typeof node === "string" ? node : node.children.map(textOf).join("");
 }
 
 test("markdownTree: one wrapped block per parsed block, inline styles kept", () => {
-    const tree = lib.markdownTree(lib.parseMarkdown("# T\n\ntext **b** `c`"));
-    const [heading, paragraph] = tree.children.map((block) => block.children[0]);
+    const root = tree(md("# T\n\ntext **b** `c`"));
+    const [heading, paragraph] = root.children.map((block: any) => block.children[0]);
 
-    assert.equal(tree.tag, "div");
-    assert.equal(tree.children.length, 2);
+    assert.equal(root.tag, "div");
+    assert.equal(root.children.length, 2);
     assert.equal(heading.cls, "text-fg break-words text-subheading");
     assert.equal(textOf(heading), "T");
     assert.deepEqual(
-        paragraph.children.map((c) => (typeof c === "string" ? c : [c.tag, c.cls, textOf(c)])),
+        paragraph.children.map((c: any) =>
+            typeof c === "string" ? c : [c.tag, c.cls, textOf(c)],
+        ),
         [
             "text ",
             ["span", "text-fg", "b"],
@@ -387,39 +434,38 @@ test("markdownTree: one wrapped block per parsed block, inline styles kept", () 
             ["span", "font-mono text-fg bg-bg px-4", "c"],
         ],
     );
-    assert.equal(lib.markdownTree([]).children.length, 0);
-    assert.equal(lib.markdownTree(null).children.length, 0);
+    assert.equal(tree([]).children.length, 0);
+    assert.equal(tree(null).children.length, 0);
 });
 
 test("markdownTree: lists keep their numbers and bullets", () => {
-    const marker = (text) =>
-        lib
-            .markdownTree(lib.parseMarkdown(text))
-            .children[0].children[0].children.map((li) => textOf(li.children[0]));
+    const marker = (text: string): string[] =>
+        tree(md(text)).children[0].children[0].children.map((li: any) =>
+            textOf(li.children[0]),
+        );
 
     assert.deepEqual(marker("3. x\n4. y"), ["3.", "4."]);
     assert.deepEqual(marker("- a\n- b"), ["–", "–"]);
 });
 
 test("markdownTree: code keeps its text and an optional language tag", () => {
-    const code = (text) =>
-        lib.markdownTree(lib.parseMarkdown(text)).children[0].children[0];
+    const code = (text: string): any => tree(md(text)).children[0].children[0];
     const withLang = code("```js\nconst a = 1;\n```");
     const noLang = code("```\nx\n```");
 
     assert.deepEqual(
-        withLang.children.map((c) => c.tag),
+        withLang.children.map((c: any) => c.tag),
         ["div", "pre"],
     );
     assert.equal(textOf(withLang.children[1]), "const a = 1;");
     assert.deepEqual(
-        noLang.children.map((c) => c.tag),
+        noLang.children.map((c: any) => c.tag),
         ["pre"],
     );
 });
 
 test("markdownTree: a table has a header only with a separator row", () => {
-    const tags = (text) => collectTags(lib.markdownTree(lib.parseMarkdown(text)));
+    const tags = (text: string): string[] => collectTags(tree(md(text)));
 
     assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("thead"));
     assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("th"));
@@ -428,15 +474,13 @@ test("markdownTree: a table has a header only with a separator row", () => {
 });
 
 test("markdownTree never turns model text into elements", () => {
-    const tree = lib.markdownTree(
-        lib.parseMarkdown(
-            "<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n```html\n<b>x</b>\n```",
-        ),
+    const root = tree(
+        md("<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n```html\n<b>x</b>\n```"),
     );
 
-    assert.ok(collectTags(tree).every((tag) => ["div", "p", "pre", "span"].includes(tag)));
-    assert.ok(textOf(tree).includes("<script>alert(1)</script>"));
-    assert.ok(textOf(tree).includes("<b>x</b>"));
+    assert.ok(collectTags(root).every((tag) => ["div", "p", "pre", "span"].includes(tag)));
+    assert.ok(textOf(root).includes("<script>alert(1)</script>"));
+    assert.ok(textOf(root).includes("<b>x</b>"));
 });
 
 test("answerBlocks parses an answer once", () => {
@@ -446,7 +490,7 @@ test("answerBlocks parses an answer once", () => {
 });
 
 test("shortenNames replaces the longest name first", () => {
-    const blocks = lib.parseMarkdown("m-long and m");
+    const blocks = md("m-long and m");
 
     lib.shortenNames(blocks, { m: "x", "m-long": "y" });
 
@@ -567,8 +611,8 @@ test("buildChart plots models with a mean and c/s and lists the rest", () => {
         chart.yTicks.map((t) => t.text),
         ["0", "25", "50", "75", "100"],
     );
-    assert.equal(chart.mid.cpsText, "median 75 c/s");
-    assert.equal(chart.mid.scoreText, "median 75");
+    assert.equal(chart.mid!.cpsText, "median 75 c/s");
+    assert.equal(chart.mid!.scoreText, "median 75");
     assert.equal(chart.points[0].title, "a: mean score 90 · 50 c/s");
 });
 
@@ -619,7 +663,7 @@ test("verdictFigures gives four figures with their place in the run", () => {
 
 // --- buildReport ----------------------------------------------------------
 
-function runFixture() {
+function runFixture(): any {
     return {
         schema_version: 3,
         judge_model: "j",
@@ -743,7 +787,7 @@ test("buildReport: answer blocks are parsed lazily and once", () => {
     const [a] = report.models;
     const [card] = report.questionCards;
     const fromModel = a.entries[0];
-    const fromQuestion = card.entries.find((e) => e.model === "a");
+    const fromQuestion = card.entries.find((e) => e.model === "a")!;
 
     assert.equal(typeof fromModel.answerBlocks, "function");
     assert.equal(fromModel.answerBlocks()[0].type, "paragraph");
@@ -805,7 +849,7 @@ test("buildReport: anchors link the comparison table to the 03 cards", () => {
     // a cell, its per-model block and its per-question block share one id
     assert.equal(a.cells[0].anchor, answerA);
     assert.equal(a.entries[0].anchor, answerA);
-    assert.equal(card.entries.find((e) => e.model === "a").anchor, answerA);
+    assert.equal(card.entries.find((e) => e.model === "a")!.anchor, answerA);
     // a failed cell still points to its eval block
     assert.equal(b.cells[0].anchor, lib.domId("answer", "b", "q1"));
 
@@ -855,14 +899,14 @@ const FORM_STATE = {
     ],
 };
 
-function rejects(text, message) {
+function rejects(text: string, message: string) {
     assert.throws(
         () => lib.parseCasesFile(text),
-        (e) => e instanceof lib.CasesFileError && e.message === message,
+        (e: unknown) => e instanceof lib.CasesFileError && e.message === message
     );
 }
 
-function fileOf(testCases, extra = {}) {
+function fileOf(testCases: unknown, extra: Record<string, unknown> = {}) {
     return JSON.stringify({ version: 1, test_cases: testCases, ...extra });
 }
 

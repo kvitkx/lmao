@@ -1,14 +1,26 @@
 // Pure helpers. No DOM, no Alpine: tested with `node --test` (tests/js/).
 
+import type {
+    ApiResults,
+    Entry,
+    ModelMetrics,
+    ModelStats,
+    Question,
+    Recommendation,
+    Reference,
+} from "../types/results.js";
+
+// --- names ----------------------------------------------------------------
+
 // 'hf.co/openbmb/MiniCPM5-2B-GGUF:Q4_K_M' -> 'openbmb/MiniCPM5-2B'
 // The full name stays in `title` attributes and in the archive meta.
-function shortName(name) {
+export function shortName(name: unknown): string {
     if (typeof name !== "string") return "";
     return name.replace(/^hf\.co\//, "").replace(/-GGUF:[^:\s]+$/i, "");
 }
 
 // 'x-GGUF:Q4_K_M' -> 'Q4_K_M', 'llama3:8b' -> '8b', 'llama3' -> 'latest'
-function variantOf(name) {
+export function variantOf(name: string): string {
     const quant = /-GGUF:([^:\s]+)$/i.exec(name);
     if (quant) return quant[1];
     const tag = /:([^:/\s]+)$/.exec(name);
@@ -18,16 +30,20 @@ function variantOf(name) {
 // Display names for a set of models: { fullName: displayName }.
 // Names whose short form collides get the quantisation as a suffix
 // ('foo · Q4_K_M' / 'foo · Q8_0'); if that is still ambiguous, the full name.
-function shortNames(names) {
-    const unique = [...new Set((names || []).filter((n) => typeof n === "string" && n))];
-    const groups = new Map();
+export function shortNames(names: unknown): Record<string, string> {
+    const list: unknown[] = Array.isArray(names) ? names : [];
+    const unique = [
+        ...new Set(list.filter((n): n is string => typeof n === "string" && n !== "")),
+    ];
+    const groups = new Map<string, string[]>();
     unique.forEach((name) => {
         const short = shortName(name);
-        if (!groups.has(short)) groups.set(short, []);
-        groups.get(short).push(name);
+        const group = groups.get(short);
+        if (group) group.push(name);
+        else groups.set(short, [name]);
     });
 
-    const out = {};
+    const out: Record<string, string> = {};
     groups.forEach((group, short) => {
         if (group.length === 1) {
             out[group[0]] = short;
@@ -43,45 +59,76 @@ function shortNames(names) {
 }
 
 // 0 -> '01', 11 -> '12'
-function pad2(index) {
+export function pad2(index: number): string {
     return String(index + 1).padStart(2, "0");
 }
 
 // --- running screen -------------------------------------------------------
 
+export type StepState = "queued" | "running" | "done" | "error" | "skipped";
+
+export interface Step {
+    key: string;
+    phase: string;
+    model: string;
+    question: string | null;
+    label: string;
+    state: StepState;
+    meta: string;
+    startedAt: number | null; // client clock, for the live timer
+    startTs: number | null; // server timestamp, for the final duration
+    endTs: number | null; // server timestamp, for the phase duration
+    loading: boolean; // first call of a model load group: the load notice may apply
+    announced: boolean; // the load notice was already announced to screen readers
+}
+
 // Same key on both sides: built from the SSE event fields (phase, model, question).
 // reference: model = judge; summary: question = null.
-function stepKey(phase, model, question) {
+export function stepKey(
+    phase: string,
+    model: string | null | undefined,
+    question: string | null | undefined,
+): string {
     return `${phase}:${model ?? ""}:${question ?? ""}`;
 }
 
 // Total steps as the backend counts them: Q * (1 + 2M) + 1 (M = unique candidates).
-function totalSteps(questionCount, candidateCount) {
+export function totalSteps(questionCount: number, candidateCount: number): number {
     return questionCount * (1 + 2 * candidateCount) + 1;
 }
 
 // All rows of a run in the `queued` state, built from the request payload.
 // `names` is the map from shortNames(); missing names fall back to shortName().
-function buildSteps(judge, candidates, questionCount, names = {}) {
-    const display = (m) => names[m] || shortName(m);
+export function buildSteps(
+    judge: string,
+    candidates: string[],
+    questionCount: number,
+    names: Record<string, string> = {},
+): Step[] {
+    const display = (m: string) => names[m] || shortName(m);
     const ids = Array.from({ length: questionCount }, (_, i) => `q${i + 1}`);
     const unique = [...new Set(candidates)];
-    const row = (phase, model, question, label) => ({
+    const row = (
+        phase: string,
+        model: string,
+        question: string | null,
+        label: string,
+    ): Step => ({
         key: stepKey(phase, model, question),
         phase,
         model,
         question,
         label,
-        state: "queued", // queued | running | done | error | skipped
+        state: "queued",
         meta: "",
-        startedAt: null, // client clock, for the live timer
-        startTs: null, // server timestamp, for the final duration
-        endTs: null, // server timestamp, for the phase duration
-        loading: false, // first call of a model load group: the load notice may apply
-        announced: false, // the load notice was already announced to screen readers
+        startedAt: null,
+        startTs: null,
+        endTs: null,
+        loading: false,
+        announced: false,
     });
 
-    const steps = [];
+    const steps: Step[] = [];
     ids.forEach((q) => steps.push(row("reference", judge, q, `reference ${q}`)));
     unique.forEach((m) =>
         ids.forEach((q) => steps.push(row("answer", m, q, `${display(m)} · ${q}`))),
@@ -97,23 +144,37 @@ function buildSteps(judge, candidates, questionCount, names = {}) {
 
 // The model that has to be loaded for a step, or null when it is not local.
 // Judge: loaded once for the references, once for grading + summary.
-function loadGroup(phase, model, cloud) {
+export function loadGroup(phase: string, model: string, cloud: boolean): string | null {
     if (phase === "answer") return `cand:${model}`;
     if (cloud) return null;
     return phase === "reference" ? "judge-1" : "judge-2";
 }
 
+export type GroupState = "queued" | "running" | "done";
+
+export interface ModelGroup {
+    model: string;
+    rows: Step[];
+    total: number;
+    ok: number;
+    errors: number;
+    skipped: number;
+    state: GroupState;
+    side: string;
+}
+
 // Rows of one phase grouped by model, in row order. Reference and summary have
 // one group (the judge). The state is derived from the rows, so no new events.
-function modelGroups(steps, phase) {
-    const groups = new Map();
+export function modelGroups(steps: Step[], phase: string): ModelGroup[] {
+    const groups = new Map<string, Step[]>();
     for (const s of steps) {
         if (s.phase !== phase) continue;
-        if (!groups.has(s.model)) groups.set(s.model, []);
-        groups.get(s.model).push(s);
+        const rows = groups.get(s.model);
+        if (rows) rows.push(s);
+        else groups.set(s.model, [s]);
     }
     return [...groups].map(([model, rows]) => {
-        const count = (state) => rows.filter((r) => r.state === state).length;
+        const count = (state: StepState) => rows.filter((r) => r.state === state).length;
         const ok = count("done");
         const errors = count("error");
         const skipped = count("skipped");
@@ -121,13 +182,13 @@ function modelGroups(steps, phase) {
         const finished = ok + errors + skipped;
 
         // Between two rows of one model nothing runs for a moment: still running.
-        let state = "queued";
+        let state: GroupState = "queued";
         if (count("running") || (finished > 0 && finished < total)) state = "running";
         else if (finished === total) state = "done";
 
         // Wall clock from the first start to the last end (server timestamps).
-        const starts = rows.map((r) => r.startTs).filter((t) => t !== null);
-        const ends = rows.map((r) => r.endTs).filter((t) => t !== null);
+        const starts = rows.map((r) => r.startTs).filter((t): t is number => t !== null);
+        const ends = rows.map((r) => r.endTs).filter((t): t is number => t !== null);
         const span =
             state === "done" && starts.length && ends.length
                 ? fmtSpan((Math.max(...ends) - Math.min(...starts)) / 1000)
@@ -142,13 +203,36 @@ function modelGroups(steps, phase) {
     });
 }
 
+export interface PhaseGroup {
+    phase: string;
+    title: string;
+    short?: string;
+}
+
+export type PhaseFigures = PhaseGroup & {
+    total: number;
+    finished: number;
+    errors: number;
+    state: GroupState;
+    side: string;
+    pct: number;
+};
+
 // The figures of every phase from one pass over the rows. `groups` is the list
 // of phases ({ phase, ...labels }); the result is keyed by phase.
 // Duration = wall clock from the first start to the last end (server
 // timestamps), so parallel calls are not added up. Error and skipped rows are
 // finished too; errors are counted separately.
-function phaseStats(steps, groups) {
-    const acc = new Map(
+export function phaseStats(steps: Step[], groups: PhaseGroup[]): Record<string, PhaseFigures> {
+    interface Acc {
+        total: number;
+        open: number;
+        running: number;
+        errors: number;
+        first: number;
+        last: number;
+    }
+    const acc = new Map<string, Acc>(
         groups.map((g) => [
             g.phase,
             { total: 0, open: 0, running: 0, errors: 0, first: Infinity, last: -Infinity },
@@ -165,11 +249,11 @@ function phaseStats(steps, groups) {
         if (s.endTs !== null) a.last = Math.max(a.last, s.endTs);
     }
 
-    const out = {};
+    const out: Record<string, PhaseFigures> = {};
     for (const g of groups) {
-        const { total, open, running, errors, first, last } = acc.get(g.phase);
+        const { total, open, running, errors, first, last } = acc.get(g.phase)!;
         const finished = total - open;
-        let state = "queued";
+        let state: GroupState = "queued";
         if (running) state = "running";
         else if (total && !open) state = "done";
 
@@ -193,12 +277,12 @@ function phaseStats(steps, groups) {
 }
 
 // Empty for missing, broken or negative durations (clock skew, lost start event).
-function fmtSeconds(sec) {
+export function fmtSeconds(sec: unknown): string {
     return typeof sec === "number" && isFinite(sec) && sec >= 0 ? `${sec.toFixed(1)} s` : "";
 }
 
 // 151 -> '02:31'
-function fmtClock(sec) {
+export function fmtClock(sec: number): string {
     const total = Math.max(0, Math.floor(sec));
     const mm = String(Math.floor(total / 60)).padStart(2, "0");
     const ss = String(total % 60).padStart(2, "0");
@@ -206,9 +290,54 @@ function fmtClock(sec) {
 }
 
 // Phase duration: '41.2 s' under a minute, '05:12' above.
-function fmtSpan(sec) {
+export function fmtSpan(sec: unknown): string {
     if (typeof sec !== "number" || !isFinite(sec) || sec < 0) return "";
     return sec < 60 ? `${sec.toFixed(1)} s` : fmtClock(sec);
+}
+
+// --- matrix columns ---------------------------------------------------------
+
+// Sizes of the matrix, in px (see the Figma frames of the running screen and
+// of results/answers): the model column, one question column, a counter.
+export const MATRIX_NAME_WIDTH = 254;
+export const MATRIX_CELL_WIDTH = 48;
+export const MATRIX_COUNTER_WIDTH = 48;
+
+// How many question columns fit into a matrix `width` px wide. Everything fits:
+// all `total`. Otherwise one counter takes the room of a column.
+export function columnsThatFit(width: number, total: number): number {
+    const room = width - MATRIX_NAME_WIDTH;
+    if (!(room >= MATRIX_CELL_WIDTH) || !(total > 0)) return 0;
+    if (Math.floor(room / MATRIX_CELL_WIDTH) >= total) return total;
+    return Math.max(1, Math.floor((room - MATRIX_COUNTER_WIDTH) / MATRIX_CELL_WIDTH));
+}
+
+export interface ColumnWindow {
+    start: number; // first visible question (0-based)
+    end: number; // one past the last visible question
+    before: number; // hidden on the left: the `‹ N` counter
+    after: number; // hidden on the right: the `N ›` counter
+}
+
+// The visible window of question columns. `fit` comes from columnsThatFit().
+// The window is centred on `anchor` (the question in progress) unless `start`
+// is given (manual paging). With a counter on both edges one more column of the
+// room is taken, so the window gets one column shorter.
+export function columnWindow(
+    total: number,
+    fit: number,
+    anchor: number,
+    start: number | null = null,
+): ColumnWindow {
+    if (!(total > 0)) return { start: 0, end: 0, before: 0, after: 0 };
+    if (fit >= total) return { start: 0, end: total, before: 0, after: 0 };
+    if (!(fit > 0)) return { start: 0, end: 0, before: 0, after: total };
+
+    const wanted = start ?? anchor - Math.floor((fit - 1) / 2);
+    const first = Math.max(0, Math.min(total - fit, wanted));
+    let end = first + fit;
+    if (first > 0 && end < total) end -= 1;
+    return { start: first, end, before: first, after: total - end };
 }
 
 // --- dom anchors ----------------------------------------------------------
@@ -218,7 +347,7 @@ function fmtSpan(sec) {
 // with the same slug ('a:b' and 'a/b') still get different ids.
 // domId('answer', 'hf.co/o/m-GGUF:Q4_K_M', 'q1')
 //   -> 'answer-hf-co-o-m-gguf-q4_k_m-q1-<hash>'
-function domId(prefix, ...parts) {
+export function domId(prefix: string, ...parts: unknown[]): string {
     const raw = parts.map((p) => String(p ?? "")).join("\n");
     let hash = 0x811c9dc5;
     for (let i = 0; i < raw.length; i += 1) {
@@ -235,12 +364,12 @@ function domId(prefix, ...parts) {
 // --- results --------------------------------------------------------------
 
 // UI labels for the stable ids stored in the results.
-const RULE_LABELS = {
+const RULE_LABELS: Record<string, string> = {
     fastest_above_threshold: "the fastest model among those with a high pass rate",
     highest_median: "the highest median score (no model reached the pass-rate threshold)",
     none_graded: "no answers could be graded",
 };
-const CATEGORY_LABELS = {
+const CATEGORY_LABELS: Record<string, string> = {
     perfect: "perfect solution",
     acceptable: "generally acceptable",
     instruction_violation: "violation of instructions",
@@ -251,28 +380,48 @@ const CATEGORY_LABELS = {
 const NO_REFERENCE = "excluded from the scores";
 
 // A run file the UI cannot read: the message is shown to the user as is.
-class ReportFormatError extends Error {}
+export class ReportFormatError extends Error {}
 
-function fmtNum(value) {
+export function fmtNum(value: number | null | undefined): string {
     return value === null || value === undefined ? "–" : String(value);
 }
 
 // Score as a 0..100 number for bars and scales, or null.
-function clampScore(value) {
-    return typeof value === "number" && isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+export function clampScore(value: unknown): number | null {
+    return typeof value === "number" && isFinite(value)
+        ? Math.max(0, Math.min(100, value))
+        : null;
 }
+
+// --- markdown -------------------------------------------------------------
+
+export interface Inline {
+    text: string;
+    bold: boolean;
+    code: boolean;
+}
+
+export type MdBlock =
+    | { type: "heading"; level: number; inlines: Inline[] }
+    | { type: "paragraph"; inlines: Inline[] }
+    | { type: "list"; ordered: boolean; start: number; items: Inline[][] }
+    | { type: "code"; lang: string; text: string }
+    | { type: "table"; head: Inline[][]; rows: Inline[][][] }
+    | { type: "rule" };
 
 // Markdown -> blocks. Nothing here touches the DOM: the template renders the
 // blocks with x-text, so no HTML from a model is ever injected or executed.
 // Blocks: heading, paragraph, list (- * + and 1.), code (``` fences), table, rule.
 // Inline: **bold**, `code`. Everything else (links, italics, HTML) stays text.
-function parseInline(text) {
-    const parts = [];
+export function parseInline(text: string): Inline[] {
+    const parts: Inline[] = [];
     const re = /`([^`]+)`|\*\*(.+?)\*\*/g;
     let last = 0;
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = re.exec(text))) {
-        if (match.index > last) parts.push({ text: text.slice(last, match.index), bold: false, code: false });
+        if (match.index > last) {
+            parts.push({ text: text.slice(last, match.index), bold: false, code: false });
+        }
         if (match[1] !== undefined) parts.push({ text: match[1], bold: false, code: true });
         else parts.push({ text: match[2], bold: true, code: false });
         last = match.index + match[0].length;
@@ -283,7 +432,7 @@ function parseInline(text) {
 
 // Models often wrap the whole text in ```markdown ... ```. Unwrap it;
 // with `bareToo` also a fence without a language (the judge summary).
-function unwrapFence(text, bareToo) {
+function unwrapFence(text: string, bareToo?: boolean): string {
     const match = /^\s*```([\w-]*)[^\n]*\n([\s\S]*?)\n?```\s*$/.exec(text);
     if (!match) return text;
     const lang = match[1].toLowerCase();
@@ -291,7 +440,7 @@ function unwrapFence(text, bareToo) {
 }
 
 // '| a | b |' -> ['a', 'b']
-function tableCells(line) {
+function tableCells(line: string): Inline[][] {
     return line
         .trim()
         .replace(/^\|/, "")
@@ -300,13 +449,28 @@ function tableCells(line) {
         .map((cell) => parseInline(cell.trim()));
 }
 
-function parseMarkdown(text, options = {}) {
+interface ListState {
+    ordered: boolean;
+    start: number;
+    items: Inline[][];
+}
+
+interface CodeState {
+    lang: string;
+    lines: string[];
+}
+
+export function parseMarkdown(
+    text: unknown,
+    options: { bareFence?: boolean } = {},
+): MdBlock[] {
     const source = unwrapFence(String(text || "").replace(/\r\n?/g, "\n"), options.bareFence);
-    const blocks = [];
-    let paragraph = [];
-    let list = null;
-    let table = null;
-    let code = null;
+    const blocks: MdBlock[] = [];
+    let paragraph: string[] = [];
+    // `as`: the flush helpers below assign these, which the flow analysis cannot see.
+    let list = null as ListState | null;
+    let table = null as string[] | null;
+    let code = null as CodeState | null;
 
     const flushParagraph = () => {
         if (paragraph.length) {
@@ -323,9 +487,14 @@ function parseMarkdown(text, options = {}) {
     const flushTable = () => {
         if (table) {
             // a header row needs the |---| separator; otherwise every row is data
-            const hasHead = table.length > 1 && /^\s*\|?[\s:|-]+\|?\s*$/.test(table[1]) && table[1].includes("-");
+            const hasHead =
+                table.length > 1 && /^\s*\|?[\s:|-]+\|?\s*$/.test(table[1]) && table[1].includes("-");
             const rows = table.filter((_, i) => !(hasHead && i === 1)).map(tableCells);
-            blocks.push({ type: "table", head: hasHead ? rows[0] : [], rows: hasHead ? rows.slice(1) : rows });
+            blocks.push({
+                type: "table",
+                head: hasHead ? rows[0] : [],
+                rows: hasHead ? rows.slice(1) : rows,
+            });
             table = null;
         }
     };
@@ -367,7 +536,7 @@ function parseMarkdown(text, options = {}) {
         }
         flushTable();
 
-        let match;
+        let match: RegExpExecArray | null;
         if ((match = /^(#{1,6})\s+(.*)$/.exec(line))) {
             flushParagraph();
             flushList();
@@ -383,7 +552,9 @@ function parseMarkdown(text, options = {}) {
         } else if ((match = /^(\d+)[.)]\s+(.*)$/.exec(line))) {
             flushParagraph();
             if (list && !list.ordered) flushList();
-            (list ??= { ordered: true, start: Number(match[1]), items: [] }).items.push(parseInline(match[2]));
+            (list ??= { ordered: true, start: Number(match[1]), items: [] }).items.push(
+                parseInline(match[2]),
+            );
         } else {
             flushList();
             paragraph.push(line);
@@ -398,14 +569,28 @@ function parseMarkdown(text, options = {}) {
 // --- markdown view --------------------------------------------------------
 
 // Blocks of parseMarkdown() -> a plain element tree: a string is a text node,
-// an object is { tag, cls, attrs, children }. lmao.js builds the DOM from it
+// an object is { tag, cls, attrs, children }. lmao.ts builds the DOM from it
 // with createElement and text nodes only, so nothing from a model is parsed
 // as HTML.
-function treeNode(tag, cls = "", children = [], attrs = {}) {
+export interface TreeElement {
+    tag: string;
+    cls: string;
+    attrs: Record<string, string>;
+    children: TreeNode[];
+}
+
+export type TreeNode = string | TreeElement;
+
+function treeNode(
+    tag: string,
+    cls = "",
+    children: TreeNode[] = [],
+    attrs: Record<string, string> = {},
+): TreeElement {
     return { tag, cls, attrs, children };
 }
 
-function mdInline(parts) {
+function mdInline(parts: Inline[]): TreeNode[] {
     return parts.map((p) => {
         if (p.code) return treeNode("span", "font-mono text-fg bg-bg px-4", [p.text]);
         if (p.bold) return treeNode("span", "text-fg", [p.text]);
@@ -413,7 +598,7 @@ function mdInline(parts) {
     });
 }
 
-function mdBlock(b) {
+function mdBlock(b: MdBlock): TreeElement {
     switch (b.type) {
         case "heading":
             return treeNode(
@@ -440,7 +625,7 @@ function mdBlock(b) {
                 ),
             );
         case "code": {
-            const parts = [];
+            const parts: TreeNode[] = [];
             if (b.lang) {
                 parts.push(
                     treeNode(
@@ -460,19 +645,19 @@ function mdBlock(b) {
             return treeNode("div", "flex flex-col", parts);
         }
         case "table": {
-            const th = (cell) =>
+            const th = (cell: Inline[]) =>
                 treeNode(
                     "th",
                     "px-12 py-6 border border-line font-light text-fg align-top",
                     mdInline(cell),
                 );
-            const td = (cell) =>
+            const td = (cell: Inline[]) =>
                 treeNode(
                     "td",
                     "px-12 py-6 border border-line text-fg-muted align-top",
                     mdInline(cell),
                 );
-            const parts = [];
+            const parts: TreeNode[] = [];
             if (b.head.length) {
                 parts.push(treeNode("thead", "", [treeNode("tr", "", b.head.map(th))]));
             }
@@ -489,12 +674,10 @@ function mdBlock(b) {
         }
         case "rule":
             return treeNode("div", "border-t border-line");
-        default:
-            return treeNode("div");
     }
 }
 
-function markdownTree(blocks) {
+export function markdownTree(blocks: MdBlock[] | null | undefined): TreeElement {
     return treeNode(
         "div",
         "min-w-0 flex flex-col gap-12",
@@ -503,23 +686,40 @@ function markdownTree(blocks) {
 }
 
 // An answer appears in both views: parse it once.
-const blockCache = new WeakMap();
-function answerBlocks(result) {
-    if (!blockCache.has(result)) blockCache.set(result, parseMarkdown(result.answer || ""));
-    return blockCache.get(result);
+const blockCache = new WeakMap<object, MdBlock[]>();
+export function answerBlocks(result: { answer?: string }): MdBlock[] {
+    let blocks = blockCache.get(result);
+    if (!blocks) {
+        blocks = parseMarkdown(result.answer || "");
+        blockCache.set(result, blocks);
+    }
+    return blocks;
 }
 
-function isFailed(result) {
+export function isFailed(result: { status?: string }): boolean {
     return result.status === "generation_error" || result.status === "judge_error";
 }
 
-function questionLabel(question) {
+export function questionLabel(question: { id: string; tag?: string }): string {
     const tag =
-        question.tag && String(question.tag).toLowerCase() !== question.id ? ` · ${question.tag}` : "";
+        question.tag && String(question.tag).toLowerCase() !== question.id
+            ? ` · ${question.tag}`
+            : "";
     return `${question.id}${tag}`;
 }
 
-function matrixCell(question, result) {
+export interface MatrixCell {
+    text: string;
+    warn: boolean;
+    muted: boolean;
+    title: string;
+    bar: number | null;
+}
+
+export function matrixCell(
+    question: Pick<Question, "no_reference">,
+    result: Partial<Entry>,
+): MatrixCell {
     if (result.status === "generation_error") {
         return { text: "err", warn: true, muted: false, title: result.error || "", bar: null };
     }
@@ -538,10 +738,28 @@ function matrixCell(question, result) {
     };
 }
 
-function evalEntry(question, result, index) {
+export interface EvalEntry {
+    qid: string;
+    anchor: string;
+    index: number;
+    label: string;
+    question: string;
+    error: boolean;
+    score: number | null;
+    scoreText: string;
+    caption: string;
+    category: string;
+    comment: string;
+    answer: string;
+    // A function: the Markdown is parsed when the answer is opened, not for every answer of the run.
+    answerBlocks: () => MdBlock[];
+    notes: string[];
+}
+
+function evalEntry(question: Question, result: Entry, index: number): EvalEntry {
     const generationFailed = result.status === "generation_error";
     const failed = isFailed(result);
-    const notes = [];
+    const notes: string[] = [];
     if (result.truncated) notes.push("truncated answer: it cannot count as a pass");
     if (question.no_reference) notes.push(`no reference answer: ${NO_REFERENCE}`);
 
@@ -555,29 +773,53 @@ function evalEntry(question, result, index) {
         score: failed ? null : clampScore(result.score),
         scoreText: failed ? "err" : fmtNum(result.score),
         caption: failed ? (generationFailed ? "generation failed" : "grading failed") : "/ 100",
-        category: failed ? "" : CATEGORY_LABELS[result.category] || result.category || "",
+        category: failed
+            ? ""
+            : (result.category && CATEGORY_LABELS[result.category]) || result.category || "",
         comment: failed ? result.error || "" : result.comment || "",
         answer: result.answer || "",
-        // A function: the Markdown is parsed when the answer is opened, not for every answer of the run.
         answerBlocks: () => answerBlocks(result),
         notes,
     };
 }
 
 // Competition ranking (1, 1, 3): equal scores share a rank, null (failed) is not ranked.
-function competitionRanks(scores) {
+export function competitionRanks(scores: (number | null)[]): (number | null)[] {
     return scores.map((score) =>
         score === null ? null : 1 + scores.filter((other) => other !== null && other > score).length,
     );
 }
 
-function pad2digits(number) {
+function pad2digits(number: number): string {
     return String(number).padStart(2, "0");
 }
 
+export type QuestionEntry = EvalEntry & {
+    model: string;
+    short: string;
+    rank: number | null;
+    rankText: string;
+    order: number;
+};
+
+export interface QuestionCard {
+    id: string;
+    anchor: string;
+    label: string;
+    question: string;
+    metricsLine: string;
+    entries: QuestionEntry[];
+    marks: { score: number; many: boolean; title: string }[];
+    spread: string;
+}
+
 // One card per question: the answers of all models, best first, failed ones last.
-function buildQuestionCard(question, summaryModels, display) {
-    const rows = [];
+function buildQuestionCard(
+    question: Question,
+    summaryModels: ModelStats[],
+    display: (model: string) => string,
+): QuestionCard {
+    const rows: { stats: ModelStats; result: Entry; order: number }[] = [];
     summaryModels.forEach((stats, order) => {
         const result = (question.results || []).find((r) => r.model_name === stats.model);
         if (result) rows.push({ stats, result, order });
@@ -587,7 +829,7 @@ function buildQuestionCard(question, summaryModels, display) {
         rows.map(({ result }) => (isFailed(result) ? null : (result.score ?? null))),
     );
 
-    const entries = rows.map(({ stats, result, order }, i) => ({
+    const entries: QuestionEntry[] = rows.map(({ stats, result, order }, i) => ({
         ...evalEntry(question, result, order),
         model: stats.model,
         short: display(stats.model),
@@ -595,27 +837,31 @@ function buildQuestionCard(question, summaryModels, display) {
         rankText:
             ranks[i] === null
                 ? "not ranked"
-                : `rank ${pad2digits(ranks[i])} / ${pad2digits(rows.length)}`,
+                : `rank ${pad2digits(ranks[i] as number)} / ${pad2digits(rows.length)}`,
         order,
     }));
     entries.sort(
         (a, b) =>
-            (a.rank === null) - (b.rank === null) || (a.rank ?? 0) - (b.rank ?? 0) || a.order - b.order,
+            Number(a.rank === null) - Number(b.rank === null) ||
+            (a.rank ?? 0) - (b.rank ?? 0) ||
+            a.order - b.order,
     );
 
     // Score scale: one mark per distinct score; several models on one score = a tall tick.
     const graded = entries.filter((e) => e.score !== null);
-    const byScore = new Map();
+    const byScore = new Map<number, string[]>();
     graded.forEach((e) => {
-        if (!byScore.has(e.score)) byScore.set(e.score, []);
-        byScore.get(e.score).push(e.short);
+        const score = e.score as number;
+        const names = byScore.get(score);
+        if (names) names.push(e.short);
+        else byScore.set(score, [e.short]);
     });
     const marks = [...byScore].map(([score, names]) => ({
         score,
         many: names.length > 1,
         title: `${score}: ${names.join(", ")}`,
     }));
-    const scores = graded.map((e) => e.score);
+    const scores = graded.map((e) => e.score as number);
     let spread = "";
     if (scores.length === 1) spread = `one graded answer · ${scores[0]}`;
     else if (scores.length > 1) spread = `range ${Math.min(...scores)}–${Math.max(...scores)}`;
@@ -635,42 +881,67 @@ function buildQuestionCard(question, summaryModels, display) {
 
 // --- archive --------------------------------------------------------------
 
+export interface HistoryRun {
+    task_id: string;
+    tag_name: string;
+    timestamp: string;
+    models_tested: number;
+    questions_count: number;
+    judge_model: string;
+}
+
 // Run time in ms: the id ends with YYYYMMDD_HHMMSS; the timestamp field is the fallback.
-function runTime(run) {
+export function runTime(run: Partial<HistoryRun> | null | undefined): number {
     const match = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(run?.task_id || "");
     if (match) {
         const [, y, mo, d, h, mi, s] = match.map(Number);
         return new Date(y, mo - 1, d, h, mi, s).getTime();
     }
-    const parsed = Date.parse(run?.timestamp);
+    const parsed = Date.parse(run?.timestamp ?? "");
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // Newest first. Stable: runs with the same time keep the API order.
-function sortHistory(runs) {
-    return [...(Array.isArray(runs) ? runs : [])].sort((a, b) => runTime(b) - runTime(a));
+export function sortHistory(runs: unknown): HistoryRun[] {
+    const list = (Array.isArray(runs) ? runs : []) as HistoryRun[];
+    return [...list].sort((a, b) => runTime(b) - runTime(a));
 }
 
 // --- answers by category -------------------------------------------------
 
-const CATEGORY_ORDER = ["perfect", "acceptable", "instruction_violation", "broken_logic", "garbage"];
+const CATEGORY_ORDER: string[] = [
+    "perfect",
+    "acceptable",
+    "instruction_violation",
+    "broken_logic",
+    "garbage",
+];
+
+export interface Distribution {
+    n: number;
+    rows: { label: string; count: number; warn: boolean; pct: number; text: string }[];
+}
 
 // One row per judge category (always, also with 0, so cards compare),
 // then uncategorised and errors only when they occur.
-function buildDistribution(results) {
+export function buildDistribution(
+    results: { status?: string; category?: string | null }[],
+): Distribution {
     const n = results.length;
-    const counts = {};
+    const counts: Record<string, number> = {};
     let other = 0;
     let generation = 0;
     let judge = 0;
     results.forEach((r) => {
+        const category = r.category;
         if (r.status === "generation_error") generation += 1;
         else if (r.status === "judge_error") judge += 1;
-        else if (CATEGORY_ORDER.includes(r.category)) counts[r.category] = (counts[r.category] || 0) + 1;
-        else other += 1;
+        else if (category && CATEGORY_ORDER.includes(category)) {
+            counts[category] = (counts[category] || 0) + 1;
+        } else other += 1;
     });
 
-    const row = (label, count, warn = false) => {
+    const row = (label: string, count: number, warn = false) => {
         const pct = n ? Math.round((100 * count) / n) : 0;
         return { label, count, warn, pct, text: `${count} · ${pct}%` };
     };
@@ -683,32 +954,66 @@ function buildDistribution(results) {
 
 // --- chart: mean score against median chars/s ----------------------------
 
-function median(values) {
+export function median(values: number[]): number | null {
     const sorted = [...values].sort((a, b) => a - b);
     const n = sorted.length;
     if (!n) return null;
     return n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
 }
 
-function round1(value) {
+export function round1(value: number): number {
     return Math.round(value * 10) / 10;
 }
 
 // 1 / 2 / 5 x 10^n, so ticks read as round numbers.
-function niceStep(range, count) {
+export function niceStep(range: number, count: number): number {
     const raw = range / count;
     const pow = 10 ** Math.floor(Math.log10(raw));
     const n = raw / pow;
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
 }
 
+export interface ChartPoint {
+    model: string;
+    short: string;
+    score: number;
+    cps: number;
+    best: boolean;
+    left: number;
+    top: number;
+    flip: boolean;
+    leading: boolean;
+    title: string;
+}
+
+export interface Chart {
+    points: ChartPoint[];
+    missing: string[];
+    xTicks: { text: string; pos: number }[];
+    yTicks: { text: string; pos: number }[];
+    pareto: string;
+    mid: {
+        left: number;
+        bottom: number;
+        flipX: boolean;
+        flipY: boolean;
+        cpsText: string;
+        scoreText: string;
+    } | null;
+    label: string;
+}
+
 // Positions are percentages of the plot box: left = x, top = 100 - y.
 // The quadrant is bounded by the medians of the plotted models: "faster and
 // better than half of this run". Pareto front: no other model is both faster
 // and better.
-function buildChart(summaryModels, display, recommended) {
-    const points = [];
-    const missing = [];
+export function buildChart(
+    summaryModels: Pick<ModelStats, "model" | "mean" | "median_cps">[],
+    display: (model: string) => string,
+    recommended: string | null | undefined,
+): Chart {
+    const base: { model: string; short: string; score: number; cps: number; best: boolean }[] = [];
+    const missing: string[] = [];
     summaryModels.forEach((stats) => {
         const score = clampScore(stats.mean);
         const cps =
@@ -717,19 +1022,19 @@ function buildChart(summaryModels, display, recommended) {
                 : null;
         const short = display(stats.model);
         if (score === null || cps === null) missing.push(short);
-        else points.push({ model: stats.model, short, score, cps, best: stats.model === recommended });
+        else base.push({ model: stats.model, short, score, cps, best: stats.model === recommended });
     });
-    if (!points.length) {
-        return { points, missing, xTicks: [], yTicks: [], pareto: "", mid: null, label: "" };
+    if (!base.length) {
+        return { points: [], missing, xTicks: [], yTicks: [], pareto: "", mid: null, label: "" };
     }
 
-    const maxCps = Math.max(...points.map((p) => p.cps));
+    const maxCps = Math.max(...base.map((p) => p.cps));
     const span = maxCps > 0 ? maxCps * 1.05 : 1;
     const step = niceStep(span, 4);
     const tickCount = Math.max(1, Math.ceil(span / step));
     const xMax = step * tickCount;
     const digits = step < 1 ? 1 : 0;
-    const xPos = (v) => (100 * v) / xMax;
+    const xPos = (v: number) => (100 * v) / xMax;
     const xTicks = Array.from({ length: tickCount + 1 }, (_, i) => ({
         text: (i * step).toFixed(digits),
         pos: xPos(i * step),
@@ -737,19 +1042,23 @@ function buildChart(summaryModels, display, recommended) {
     // Fixed 0..100: charts of different runs stay comparable.
     const yTicks = [0, 25, 50, 75, 100].map((v) => ({ text: String(v), pos: 100 - v }));
 
-    const midCps = median(points.map((p) => p.cps));
-    const midScore = median(points.map((p) => p.score));
-    points.forEach((p) => {
-        p.left = xPos(p.cps);
-        p.top = 100 - p.score;
-        p.flip = p.left > 70; // label on the left near the right edge
-        p.leading = p.cps >= midCps && p.score >= midScore;
-        p.title = `${p.short}: mean score ${p.score} · ${round1(p.cps)} c/s`;
+    const midCps = median(base.map((p) => p.cps)) as number;
+    const midScore = median(base.map((p) => p.score)) as number;
+    const points: ChartPoint[] = base.map((p) => {
+        const left = xPos(p.cps);
+        return {
+            ...p,
+            left,
+            top: 100 - p.score,
+            flip: left > 70, // label on the left near the right edge
+            leading: p.cps >= midCps && p.score >= midScore,
+            title: `${p.short}: mean score ${p.score} · ${round1(p.cps)} c/s`,
+        };
     });
 
     // Walk from the fastest; a point is on the front when it beats every faster one.
     const byCps = [...points].sort((a, b) => b.cps - a.cps || b.score - a.score);
-    const front = [];
+    const front: ChartPoint[] = [];
     let best = -Infinity;
     byCps.forEach((p) => {
         if (p.score > best) {
@@ -782,12 +1091,25 @@ function buildChart(summaryModels, display, recommended) {
 
 // --- summary --------------------------------------------------------------
 
+export interface RankInfo {
+    rank: number;
+    n: number;
+    best: number;
+}
+
 // Rank of one model among all for a stats key; null when it has no value.
-function rankOf(summaryModels, model, key, higherIsBetter) {
+export function rankOf(
+    summaryModels: Partial<ModelStats>[],
+    model: string,
+    key: string,
+    higherIsBetter: boolean,
+): RankInfo | null {
+    const read = (m: Partial<ModelStats>) => (m as Record<string, unknown>)[key];
     const values = summaryModels
-        .map((m) => m[key])
-        .filter((v) => typeof v === "number" && isFinite(v));
-    const own = summaryModels.find((m) => m.model === model)?.[key];
+        .map(read)
+        .filter((v): v is number => typeof v === "number" && isFinite(v));
+    const found = summaryModels.find((m) => m.model === model);
+    const own = found ? read(found) : undefined;
     if (typeof own !== "number" || !isFinite(own) || !values.length) return null;
     const better = values.filter((v) => (higherIsBetter ? v > own : v < own)).length;
     return {
@@ -797,12 +1119,20 @@ function rankOf(summaryModels, model, key, higherIsBetter) {
     };
 }
 
+export interface Figure {
+    label: string;
+    value: string;
+    unit: string;
+    caption: string;
+}
+
 // Four key figures of the recommended model, each with its place in the run.
-function verdictFigures(summaryModels, model) {
+export function verdictFigures(summaryModels: Partial<ModelStats>[], model: string): Figure[] {
     const s = summaryModels.find((m) => m.model === model);
     if (!s) return [];
-    const num = (v) => (typeof v === "number" && isFinite(v) ? String(round1(v)) : "–");
-    const caption = (r, fmt) => {
+    const num = (v: unknown) =>
+        typeof v === "number" && isFinite(v) ? String(round1(v)) : "–";
+    const caption = (r: RankInfo | null, fmt: (v: number) => string) => {
         if (!r) return "";
         if (r.rank === 1) return r.n > 1 ? `best of ${r.n}` : "only model";
         return `#${r.rank} of ${r.n} · best ${fmt(r.best)}`;
@@ -818,7 +1148,10 @@ function verdictFigures(summaryModels, model) {
             label: "pass rate",
             value: s.pass_rate == null ? "–" : String(Math.round(s.pass_rate * 100)),
             unit: "%",
-            caption: caption(rankOf(summaryModels, model, "pass_rate", true), (v) => `${Math.round(v * 100)}%`),
+            caption: caption(
+                rankOf(summaryModels, model, "pass_rate", true),
+                (v) => `${Math.round(v * 100)}%`,
+            ),
         },
         {
             label: "speed",
@@ -830,55 +1163,108 @@ function verdictFigures(summaryModels, model) {
             label: "median time",
             value: num(s.median_time_sec),
             unit: "s",
-            caption: caption(rankOf(summaryModels, model, "median_time_sec", false), (v) => `${num(v)} s`),
+            caption: caption(
+                rankOf(summaryModels, model, "median_time_sec", false),
+                (v) => `${num(v)} s`,
+            ),
         },
     ];
 }
 
 // The judge writes full model names; show the same short names as the rest of the UI.
 // Longest first, so a name that contains another one is replaced as a whole.
-function shortenNames(blocks, names) {
+export function shortenNames(blocks: MdBlock[], names: Record<string, string>): MdBlock[] {
     const pairs = Object.entries(names)
         .filter(([full, short]) => full !== short)
         .sort((a, b) => b[0].length - a[0].length);
     if (!pairs.length) return blocks;
-    const fix = (parts) =>
+    const fix = (parts: Inline[]) =>
         parts.forEach((p) => {
             pairs.forEach(([full, short]) => {
                 if (p.text.includes(full)) p.text = p.text.split(full).join(short);
             });
         });
     blocks.forEach((b) => {
-        if (b.inlines) fix(b.inlines);
-        if (b.items) b.items.forEach(fix);
-        if (b.head) b.head.forEach(fix);
-        if (b.rows) b.rows.forEach((row) => row.forEach(fix));
+        if (b.type === "heading" || b.type === "paragraph") fix(b.inlines);
+        else if (b.type === "list") b.items.forEach(fix);
+        else if (b.type === "table") {
+            b.head.forEach(fix);
+            b.rows.forEach((row) => row.forEach(fix));
+        }
     });
     return blocks;
 }
 
+export type ReportCell = MatrixCell & { anchor: string | null };
+
+export interface ReportModel {
+    model: string;
+    anchor: string;
+    short: string;
+    mean: string;
+    median: string;
+    passRate: string;
+    cps: string;
+    tps: string;
+    time: string;
+    cells: ReportCell[];
+    entries: EvalEntry[];
+    distribution: Distribution;
+    metricsLine: string;
+}
+
+export interface ReportReference {
+    id: string;
+    title: string;
+    question: string;
+    text: string;
+    // Parsed when the reference is opened.
+    blocks: () => MdBlock[];
+}
+
+export interface Report {
+    meta: string;
+    verdict: {
+        model: string | null;
+        short: string;
+        label: string;
+        rule: string;
+        figures: Figure[];
+    };
+    notes: string[];
+    summaryBlocks: MdBlock[];
+    chart: Chart;
+    grid: string;
+    questionHeads: { id: string; title: string; anchor: string }[];
+    models: ReportModel[];
+    questionCards: QuestionCard[];
+    references: ReportReference[];
+}
+
 // Everything the results screen shows, computed once per opened run.
 // Throws ReportFormatError for files the UI cannot read (older schema).
-function buildReport(data) {
+export function buildReport(raw: unknown): Readonly<Report> {
+    const probe = raw as Partial<ApiResults> | null;
     if (
-        !data ||
-        !Array.isArray(data.questions_results) ||
-        !data.summary ||
-        !Array.isArray(data.summary.models)
+        !probe ||
+        !Array.isArray(probe.questions_results) ||
+        !probe.summary ||
+        !Array.isArray(probe.summary.models)
     ) {
         throw new ReportFormatError("this run was saved in an older format and cannot be shown.");
     }
+    const data = probe as ApiResults;
 
     const questions = data.questions_results;
     const summary = data.summary;
-    const rec = summary.recommendation || {};
-    const metrics = data.metrics || {};
+    const rec: Partial<Recommendation> = summary.recommendation || {};
+    const metrics: Record<string, Partial<ModelMetrics>> = data.metrics || {};
     const summaryModels = summary.models.filter((s) => s && typeof s.model === "string");
 
     const names = shortNames([...summaryModels.map((s) => s.model), rec.model]);
-    const display = (m) => names[m] || shortName(m);
+    const display = (m: string) => names[m] || shortName(m);
 
-    const notes = [];
+    const notes: string[] = [];
     if (data.judge_is_candidate) {
         notes.push("the judge is also a candidate: its own score may be biased.");
     }
@@ -890,10 +1276,10 @@ function buildReport(data) {
         notes.push("low confidence: too few graded questions.");
     }
 
-    const models = summaryModels.map((stats) => {
-        const cells = [];
-        const entries = [];
-        const results = [];
+    const models: ReportModel[] = summaryModels.map((stats) => {
+        const cells: ReportCell[] = [];
+        const entries: EvalEntry[] = [];
+        const results: Entry[] = [];
         questions.forEach((question, index) => {
             const result = (question.results || []).find((r) => r.model_name === stats.model);
             if (!result) {
@@ -960,7 +1346,7 @@ function buildReport(data) {
             model: rec.model || null,
             short: rec.model ? display(rec.model) : "",
             label: rec.model ? "recommended" : "no recommendation",
-            rule: RULE_LABELS[rec.rule] || rec.rule || "",
+            rule: (rec.rule && RULE_LABELS[rec.rule]) || rec.rule || "",
             figures: rec.model ? verdictFigures(summaryModels, rec.model) : [],
         },
         notes,
@@ -976,14 +1362,13 @@ function buildReport(data) {
         models,
         questionCards: questions.map((q) => buildQuestionCard(q, summaryModels, display)),
         references: questions.map((q) => {
-            const ref = q.reference || {};
-            let blocks = null;
+            const ref: Partial<Reference> = q.reference || {};
+            let blocks: MdBlock[] | null = null;
             return {
                 id: q.id,
                 title: `${q.id} · ${q.tag || "–"} · ${ref.source || "none"}`,
                 question: q.question || "",
                 text: ref.text || "",
-                // Parsed when the reference is opened.
                 blocks: () => (blocks ??= parseMarkdown(ref.text || "")),
             };
         }),
@@ -995,21 +1380,48 @@ function buildReport(data) {
 // The file holds the setup form the way /api/evaluate takes it:
 // {"version": 1, "base_rationale": "...",
 //  "test_cases": [{tag, question, specific_rationale, reference}]}
-const CASES_FILE_VERSION = 1;
-const CASES_MAX_BYTES = 256 * 1024;
-const CASES_MAX_COUNT = 200;
-const CASES_TOO_LARGE = "the file is too large (max 256 KB).";
-const CASE_OPTIONAL_FIELDS = ["tag", "specific_rationale", "reference"];
+export const CASES_FILE_VERSION = 1;
+export const CASES_MAX_BYTES = 256 * 1024;
+export const CASES_MAX_COUNT = 200;
+export const CASES_TOO_LARGE = "the file is too large (max 256 KB).";
+const CASE_OPTIONAL_FIELDS = ["tag", "specific_rationale", "reference"] as const;
 
 // A file the UI cannot import: the message is shown to the user as is.
-class CasesFileError extends Error {}
+export class CasesFileError extends Error {}
 
-// Form case { tag, question, rationale, reference } -> the case of the payload
-// and of the file. Empty optional fields are left out: the backend would keep
-// an empty tag as the tag instead of using its default.
-function payloadCase(c) {
-    const text = (value) => String(value ?? "").trim();
-    const optional = (key, value) => (text(value) ? { [key]: text(value) } : {});
+// A case of the setup form.
+export interface FormCase {
+    id?: number;
+    tag?: string;
+    question?: string;
+    rationale?: string;
+    reference?: string;
+    open?: boolean;
+}
+
+// A case as the file and the /api/evaluate payload have it.
+export interface PayloadCase {
+    tag?: string;
+    question: string;
+    specific_rationale?: string;
+    reference?: string;
+}
+
+// A case read from a file: every optional field is there, maybe empty.
+export interface RawCase {
+    question: string;
+    tag: string;
+    specific_rationale: string;
+    reference: string;
+}
+
+// Form case -> the case of the payload and of the file. Empty optional fields
+// are left out: the backend would keep an empty tag as the tag instead of
+// using its default.
+export function payloadCase(c: FormCase): PayloadCase {
+    const text = (value: unknown) => String(value ?? "").trim();
+    const optional = (key: string, value: unknown) =>
+        text(value) ? { [key]: text(value) } : {};
     return {
         ...optional("tag", c.tag),
         question: text(c.question),
@@ -1018,8 +1430,8 @@ function payloadCase(c) {
     };
 }
 
-// File case -> form fields. lmao.js adds `id` and `open` (caseCounter lives there).
-function caseFields(raw) {
+// File case -> form fields. lmao.ts adds `id` and `open` (caseCounter lives there).
+export function caseFields(raw: RawCase): Required<Omit<FormCase, "id" | "open">> {
     return {
         tag: raw.tag,
         question: raw.question,
@@ -1029,14 +1441,24 @@ function caseFields(raw) {
 }
 
 // A case with nothing typed in it (the initial empty case).
-function isBlankCase(c) {
-    return !["tag", "question", "rationale", "reference"].some((key) =>
+export function isBlankCase(c: FormCase): boolean {
+    return !(["tag", "question", "rationale", "reference"] as const).some((key) =>
         String(c[key] ?? "").trim(),
     );
 }
 
+function isBlankQuestion(c: FormCase): boolean {
+    return !String(c.question ?? "").trim();
+}
+
 // Cases without a question are skipped: the importer would reject them.
-function buildCasesFile({ baseRationale, cases }) {
+export function buildCasesFile({
+    baseRationale,
+    cases,
+}: {
+    baseRationale: string;
+    cases: FormCase[];
+}): string {
     const file = {
         version: CASES_FILE_VERSION,
         base_rationale: String(baseRationale ?? "").trim(),
@@ -1045,20 +1467,16 @@ function buildCasesFile({ baseRationale, cases }) {
     return `${JSON.stringify(file, null, 2)}\n`;
 }
 
-function isBlankQuestion(c) {
-    return !String(c.question ?? "").trim();
-}
-
 // Text of a file -> { baseRationale, cases }. The cases are raw: they keep the
 // file's field names (specific_rationale), see caseFields(). Unknown fields are
 // ignored, null counts as a missing optional field. Throws CasesFileError.
-function parseCasesFile(text) {
+export function parseCasesFile(text: unknown): { baseRationale: string; cases: RawCase[] } {
     const source = String(text ?? "").replace(/^\uFEFF/, "");
     if (new TextEncoder().encode(source).length > CASES_MAX_BYTES) {
         throw new CasesFileError(CASES_TOO_LARGE);
     }
 
-    let data;
+    let data: unknown;
     try {
         data = JSON.parse(source);
     } catch {
@@ -1067,16 +1485,17 @@ function parseCasesFile(text) {
     if (!data || typeof data !== "object" || Array.isArray(data)) {
         throw new CasesFileError("the file must contain a JSON object.");
     }
-    if (data.version !== CASES_FILE_VERSION) {
+    const file = data as Record<string, unknown>;
+    if (file.version !== CASES_FILE_VERSION) {
         throw new CasesFileError(`unsupported file version: expected ${CASES_FILE_VERSION}.`);
     }
 
-    const baseRationale = data.base_rationale ?? "";
+    const baseRationale = file.base_rationale ?? "";
     if (typeof baseRationale !== "string") {
         throw new CasesFileError('"base_rationale" must be a string.');
     }
 
-    const list = data.test_cases;
+    const list = file.test_cases;
     if (!Array.isArray(list) || list.length === 0) {
         throw new CasesFileError("the file has no test cases.");
     }
@@ -1084,80 +1503,28 @@ function parseCasesFile(text) {
         throw new CasesFileError(`too many test cases (max ${CASES_MAX_COUNT}).`);
     }
 
-    const cases = list.map((item, index) => {
+    const cases = list.map((item: unknown, index: number): RawCase => {
         const label = `case ${pad2(index)}`;
         if (!item || typeof item !== "object" || Array.isArray(item)) {
             throw new CasesFileError(`${label}: must be an object.`);
         }
-        if (typeof item.question !== "string") {
+        const fields = item as Record<string, unknown>;
+        if (typeof fields.question !== "string") {
             throw new CasesFileError(`${label}: "question" must be a string.`);
         }
-        if (!item.question.trim()) {
+        if (!fields.question.trim()) {
             throw new CasesFileError(`${label}: the question is empty.`);
         }
-        const out = { question: item.question };
+        const out: Record<string, string> = { question: fields.question };
         for (const key of CASE_OPTIONAL_FIELDS) {
-            const value = item[key] ?? "";
+            const value = fields[key] ?? "";
             if (typeof value !== "string") {
                 throw new CasesFileError(`${label}: "${key}" must be a string.`);
             }
             out[key] = value;
         }
-        return out;
+        return out as unknown as RawCase;
     });
 
     return { baseRationale, cases };
-}
-
-// Lets `node --test` load this file. In the browser `module` does not exist
-// and the functions above stay plain globals.
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = {
-        CASES_FILE_VERSION,
-        CASES_MAX_BYTES,
-        CASES_MAX_COUNT,
-        CASES_TOO_LARGE,
-        CasesFileError,
-        ReportFormatError,
-        answerBlocks,
-        buildCasesFile,
-        buildChart,
-        buildDistribution,
-        buildReport,
-        buildSteps,
-        caseFields,
-        clampScore,
-        competitionRanks,
-        domId,
-        fmtClock,
-        fmtNum,
-        fmtSeconds,
-        fmtSpan,
-        isBlankCase,
-        isFailed,
-        loadGroup,
-        matrixCell,
-        markdownTree,
-        modelGroups,
-        median,
-        niceStep,
-        pad2,
-        parseCasesFile,
-        parseInline,
-        parseMarkdown,
-        payloadCase,
-        phaseStats,
-        questionLabel,
-        rankOf,
-        round1,
-        runTime,
-        shortName,
-        shortNames,
-        shortenNames,
-        sortHistory,
-        stepKey,
-        totalSteps,
-        variantOf,
-        verdictFigures,
-    };
 }

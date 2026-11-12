@@ -1,9 +1,112 @@
-// Alpine state of the whole page. Registered on 'alpine:init'; this file is
-// deferred before Alpine itself (see templates/base.html).
+// Alpine state of the whole page. Registered on 'alpine:init'; this module is
+// loaded before Alpine itself (see templates/base.html).
+
+import type { ApiResults } from "../types/results.js";
+import {
+    CASES_MAX_BYTES,
+    CASES_MAX_COUNT,
+    CASES_TOO_LARGE,
+    CasesFileError,
+    ReportFormatError,
+    buildCasesFile,
+    buildReport,
+    buildSteps,
+    caseFields,
+    fmtClock,
+    fmtSeconds,
+    isBlankCase,
+    loadGroup,
+    markdownTree,
+    modelGroups,
+    pad2,
+    parseCasesFile,
+    payloadCase,
+    phaseStats,
+    shortName,
+    shortNames,
+    sortHistory,
+    stepKey,
+    totalSteps,
+    type FormCase,
+    type HistoryRun,
+    type MdBlock,
+    type ModelGroup,
+    type PayloadCase,
+    type PhaseFigures,
+    type PhaseGroup,
+    type Report,
+    type Step,
+    type TreeNode,
+} from "./lib.ts";
+
+// One event of /api/stream/<task_id>, see DESIGN.md (data contract).
+interface SseEvent {
+    type?: string;
+    phase?: string;
+    model?: string | null;
+    question?: string | null;
+    progress?: { done: number; total: number };
+    timestamp?: string;
+    success?: boolean;
+    error?: string | null;
+    source?: string;
+    message?: string;
+}
+
+interface RunState {
+    id: string | null;
+    status: "idle" | "running" | "done" | "error";
+    steps: Step[];
+    pos: Record<string, number>; // step key -> index in `steps` (a lookup through the proxy stays reactive)
+    seen: Record<string, boolean>; // load groups and phases that already had a first call
+    cloud: boolean;
+    done: number;
+    total: number;
+    startedAt: number | null;
+    endedAt: number | null;
+    now: number;
+    error: string;
+    expanded: Record<string, boolean>; // phase -> true/false, set by the user; default: folded when done without errors
+    openModels: Record<string, boolean>; // "phase:model" -> true/false, set by the user; default: open while running
+    phases: Record<string, PhaseFigures>; // phase -> figures, see updatePhases()
+}
+
+// A case of the setup form: every field is there.
+interface TestCase extends FormCase {
+    id: number;
+    tag: string;
+    question: string;
+    rationale: string;
+    reference: string;
+    open: boolean;
+}
+
+interface EvaluatePayload {
+    judge: string;
+    judge_provider: string;
+    candidates: string[];
+    base_rationale: string;
+    test_cases: PayloadCase[];
+}
+
+interface TopStatus {
+    tone: string;
+    dot: boolean;
+    go: boolean;
+    text: string;
+}
+
+interface ChecklistRow {
+    key: string;
+    label: string;
+    state: string;
+    meta: string;
+}
+
 document.addEventListener("alpine:init", () => {
     // Builds DOM from the tree of markdownTree(): createElement and text nodes
     // only, so a model answer is never parsed as HTML.
-    const buildNode = (node) => {
+    const buildNode = (node: TreeNode): Node => {
         if (typeof node === "string") return document.createTextNode(node);
         const element = document.createElement(node.tag);
         if (node.cls) element.className = node.cls;
@@ -18,29 +121,31 @@ document.addEventListener("alpine:init", () => {
     Alpine.directive("md", (root, { expression }, { effect, evaluateLater }) => {
         const read = evaluateLater(expression);
         effect(() =>
-            read((blocks) => root.replaceChildren(buildNode(markdownTree(blocks)))),
+            read((blocks: unknown) =>
+                root.replaceChildren(buildNode(markdownTree(blocks as MdBlock[]))),
+            ),
         );
     });
 
     let caseCounter = 0;
     let openToken = 0; // ignores a late response of a superseded results request
     // Not reactive on purpose: one run at a time.
-    let source = null; // EventSource
-    let timer = null; // setInterval id
-    let loadWatch = []; // rows that may still show the load notice
+    let source: EventSource | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let loadWatch: Step[] = []; // rows that may still show the load notice
 
     const SLOW_LOAD_MS = 8000;
 
     // `short` is the label of the progress segment (a quarter of the width).
-    const PHASE_GROUPS = [
+    const PHASE_GROUPS: (PhaseGroup & { short: string })[] = [
         { phase: "reference", title: "01 reference answers", short: "01 reference" },
         { phase: "answer", title: "02 candidate answers", short: "02 answers" },
         { phase: "grading", title: "03 grading", short: "03 grading" },
         { phase: "summary", title: "04 summary", short: "04 summary" },
     ];
 
-    // `fields`: values of an imported case (see caseFields in lib.js).
-    const newCase = (fields = {}) => ({
+    // `fields`: values of an imported case (see caseFields in lib.ts).
+    const newCase = (fields: Partial<TestCase> = {}): TestCase => ({
         id: ++caseCounter,
         tag: "",
         question: "",
@@ -50,12 +155,12 @@ document.addEventListener("alpine:init", () => {
         ...fields,
     });
 
-    const freshRun = () => ({
+    const freshRun = (): RunState => ({
         id: null,
-        status: "idle", // idle | running | done | error
+        status: "idle",
         steps: [],
-        pos: {}, // step key -> index in `steps` (a lookup through the proxy stays reactive)
-        seen: {}, // load groups and phases that already had a first call
+        pos: {},
+        seen: {},
         cloud: false,
         done: 0,
         total: 0,
@@ -63,10 +168,12 @@ document.addEventListener("alpine:init", () => {
         endedAt: null,
         now: 0,
         error: "",
-        expanded: {}, // phase -> true/false, set by the user; default: folded when done without errors
-        openModels: {}, // "phase:model" -> true/false, set by the user; default: open while running
-        phases: phaseStats([], PHASE_GROUPS), // phase -> figures, see updatePhases()
+        expanded: {},
+        openModels: {},
+        phases: phaseStats([], PHASE_GROUPS),
     });
+
+    const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
     Alpine.data("lmao", () => ({
         setupOpen: true,
@@ -78,61 +185,66 @@ document.addEventListener("alpine:init", () => {
 
         phaseGroups: PHASE_GROUPS,
 
-        models: [],
-        names: {}, // full model name -> display name (see shortNames)
+        models: [] as string[],
+        names: {} as Record<string, string>, // full model name -> display name (see shortNames)
         modelsLoaded: false,
         judge: "",
         judgeCloud: false,
-        selected: [],
+        selected: [] as string[],
         baseRationale: "",
-        cases: [newCase()],
+        cases: [newCase()] as TestCase[],
         formError: "",
         casesError: "", // import / export of test cases
         submitting: false,
 
-        history: [],
+        history: [] as HistoryRun[],
         historyLoaded: false,
         historyError: "",
-        activeRunId: null,
+        activeRunId: null as string | null,
         resultsError: "",
-        openAnswers: {}, // eval block anchor -> true: its answer text is rendered
+        openAnswers: {} as Record<string, boolean>, // eval block anchor -> true: its answer text is rendered
         run: freshRun(),
-        results: null,
-        report: null,
+        results: null as ApiResults | null,
+        report: null as Report | null,
 
         announcement: "", // text of the page live region
         // Clipboard API exists only in a secure context (localhost / https).
         canCopy: Boolean(window.isSecureContext && navigator.clipboard),
-        init() {
-            this.loadModels();
-            this.loadHistory();
+
+        init(): void {
+            void this.loadModels();
+            void this.loadHistory();
+        },
+
+        // Templates read it as `pad2(i)`: modules have no globals.
+        pad2(index: number): string {
+            return pad2(index);
         },
 
         // A run is in progress: the form and the archive are locked, on every
         // screen (the wordmark can lead away from the running screen).
-        get busy() {
+        get busy(): boolean {
             return this.run.status === "running";
         },
 
-        get runTitle() {
+        get runTitle(): string | null {
             const run = this.history.find((r) => r.task_id === this.activeRunId);
             return run ? run.tag_name : this.activeRunId;
         },
 
-        get pct() {
-            return this.run.total
-                ? Math.round((100 * this.run.done) / this.run.total)
-                : 0;
+        get pct(): number {
+            return this.run.total ? Math.round((100 * this.run.done) / this.run.total) : 0;
         },
 
-        get elapsed() {
-            if (!this.run.startedAt) return 0;
-            return Math.max(0, ((this.run.endedAt ?? this.run.now) - this.run.startedAt) / 1000);
+        get elapsed(): number {
+            const started = this.run.startedAt;
+            if (!started) return 0;
+            return Math.max(0, ((this.run.endedAt ?? this.run.now) - started) / 1000);
         },
 
         // Centre of the topbar. Built from the existing state only.
         // `go`: the run is in progress but another screen is shown.
-        get topStatus() {
+        get topStatus(): TopStatus {
             if (this.run.status === "running") {
                 return {
                     tone: "text-fg",
@@ -164,59 +276,60 @@ document.addEventListener("alpine:init", () => {
 
         // One segment per phase, filled from the rows themselves: phases fill
         // independently (a cloud judge grades while local candidates still answer).
-        get phaseProgress() {
+        get phaseProgress(): PhaseFigures[] {
             return this.phaseGroups.map((g) => this.run.phases[g.phase]);
         },
 
         // Recomputed once per event, not on every read: the template reads
         // these figures many times per row.
-        updatePhases() {
+        updatePhases(): void {
             this.run.phases = phaseStats(this.run.steps, this.phaseGroups);
         },
 
-        phaseOf(phase) {
+        phaseOf(phase: string): PhaseFigures {
             return this.run.phases[phase];
         },
 
         // A finished phase folds into its header. Phases with errors stay open
         // unless the user folds them.
-        isCollapsed(phase) {
+        isCollapsed(phase: string): boolean {
             const p = this.phaseOf(phase);
             if (p.state !== "done") return false;
             return !(this.run.expanded[phase] ?? p.errors > 0);
         },
 
-        togglePhase(phase) {
+        togglePhase(phase: string): void {
             this.run.expanded[phase] = this.isCollapsed(phase);
         },
 
         // Answer and grading are listed per model; reference and summary are
         // one judge and stay flat (no group header).
-        isGrouped(phase) {
+        isGrouped(phase: string): boolean {
             return phase === "answer" || phase === "grading";
         },
 
-        modelGroups(phase) {
+        modelGroups(phase: string): ModelGroup[] {
             return modelGroups(this.run.steps, phase);
         },
 
         // Only the model that works now is open. Errors do not open a group
         // (the run would jump around): they show as `! N err` in its header.
-        isModelOpen(phase, group) {
+        isModelOpen(phase: string, group: ModelGroup): boolean {
             if (!this.isGrouped(phase)) return true;
             return this.run.openModels[`${phase}:${group.model}`] ?? group.state === "running";
         },
 
-        toggleModel(phase, group) {
+        toggleModel(phase: string, group: ModelGroup): void {
             this.run.openModels[`${phase}:${group.model}`] = !this.isModelOpen(phase, group);
         },
 
         // First screen: the state of the form as status rows.
-        get checklist() {
-            let judge;
+        get checklist(): ChecklistRow[] {
+            let judge: { state: string; meta: string };
             if (!this.modelsLoaded) judge = { state: "queued", meta: "loading models…" };
-            else if (this.models.length === 0) judge = { state: "error", meta: "no models. is ollama running?" };
-            else if (this.judge) {
+            else if (this.models.length === 0) {
+                judge = { state: "error", meta: "no models. is ollama running?" };
+            } else if (this.judge) {
                 judge = {
                     state: "done",
                     meta: this.label(this.judge) + (this.judgeCloud ? " · cloud" : ""),
@@ -247,12 +360,12 @@ document.addEventListener("alpine:init", () => {
             ];
         },
 
-        label(model) {
+        label(model: string): string {
             return this.names[model] || shortName(model);
         },
 
         // Clears first, so the same text can be announced twice.
-        announce(text) {
+        announce(text: string): void {
             this.announcement = "";
             setTimeout(() => {
                 this.announcement = text;
@@ -261,12 +374,12 @@ document.addEventListener("alpine:init", () => {
 
         // --- models ---------------------------------------------------------
 
-        async loadModels() {
+        async loadModels(): Promise<void> {
             this.modelsLoaded = false;
             try {
                 const response = await fetch("/api/models");
-                const data = await response.json();
-                this.models = Array.isArray(data.models) ? data.models : [];
+                const data: { models?: unknown } = await response.json();
+                this.models = Array.isArray(data.models) ? (data.models as string[]) : [];
             } catch (e) {
                 console.error("Failed to load models:", e);
                 this.models = [];
@@ -283,7 +396,7 @@ document.addEventListener("alpine:init", () => {
 
         // --- archive --------------------------------------------------------
 
-        async loadHistory() {
+        async loadHistory(): Promise<void> {
             try {
                 const response = await fetch("/api/history");
                 if (!response.ok) throw new Error(`request failed (${response.status})`);
@@ -298,7 +411,7 @@ document.addEventListener("alpine:init", () => {
 
         // Opens a saved run. Disabled while a run is in progress: the running
         // screen would be lost.
-        async openRun(id) {
+        async openRun(id: string): Promise<void> {
             if (this.busy) return;
             const token = ++openToken;
             this.activeRunId = id;
@@ -315,29 +428,32 @@ document.addEventListener("alpine:init", () => {
                 if (!response.ok) {
                     throw new Error(data.error || `request failed (${response.status})`);
                 }
-                let report;
+                let report: Report;
                 try {
                     report = buildReport(data);
                 } catch (e) {
                     console.error("Cannot build the report:", e);
                     // TypeError: a field is missing or has another type -> the file.
                     // Anything else (ReferenceError...) is a bug in the UI, not the file.
-                    let message = "the report could not be built: a bug in the UI, see the browser console.";
+                    let message =
+                        "the report could not be built: a bug in the UI, see the browser console.";
                     if (e instanceof ReportFormatError) message = e.message;
-                    else if (e instanceof TypeError) message = "this run cannot be shown: the file has an unexpected format.";
+                    else if (e instanceof TypeError) {
+                        message = "this run cannot be shown: the file has an unexpected format.";
+                    }
                     throw new Error(message);
                 }
                 this.report = report;
-                this.results = data;
+                this.results = data as ApiResults;
             } catch (e) {
                 console.error("Failed to open run:", e);
-                if (token === openToken) this.resultsError = e.message;
+                if (token === openToken) this.resultsError = errorText(e);
             }
         },
 
         // --- test cases -----------------------------------------------------
 
-        addCase() {
+        addCase(): void {
             // Collapse the finished ones, never one that is still empty.
             this.cases.forEach((c) => {
                 if (c.question.trim()) c.open = false;
@@ -345,17 +461,17 @@ document.addEventListener("alpine:init", () => {
             this.cases.push(newCase());
         },
 
-        removeCase(id) {
+        removeCase(id: number): void {
             if (this.cases.length > 1) {
                 this.cases = this.cases.filter((c) => c.id !== id);
             }
         },
 
-        get canExport() {
+        get canExport(): boolean {
             return this.cases.some((c) => c.question.trim());
         },
 
-        exportCases() {
+        exportCases(): void {
             this.casesError = "";
             const text = buildCasesFile({
                 baseRationale: this.baseRationale,
@@ -374,8 +490,8 @@ document.addEventListener("alpine:init", () => {
         // Empty form: the file replaces it. Otherwise the cases are added after
         // the existing ones; empty cases are dropped either way. The general
         // criteria of the file are used only while the field is empty.
-        async importCases(event) {
-            const input = event.target;
+        async importCases(event: Event): Promise<void> {
+            const input = event.target as HTMLInputElement;
             const file = input.files?.[0];
             if (!file) return;
             this.casesError = "";
@@ -405,7 +521,7 @@ document.addEventListener("alpine:init", () => {
 
         // --- start ----------------------------------------------------------
 
-        validate() {
+        validate(): string {
             if (!this.judge) {
                 return "choose a judge model.";
             }
@@ -420,7 +536,7 @@ document.addEventListener("alpine:init", () => {
             return "";
         },
 
-        buildPayload() {
+        buildPayload(): EvaluatePayload {
             return {
                 judge: this.judge,
                 judge_provider: this.judgeCloud ? "ollama_cloud" : "ollama",
@@ -430,7 +546,7 @@ document.addEventListener("alpine:init", () => {
             };
         },
 
-        async submit() {
+        async submit(): Promise<void> {
             this.formError = this.validate();
             if (this.formError || this.busy) return;
 
@@ -448,7 +564,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 this.startRun(data.task_id, payload);
             } catch (e) {
-                this.formError = e.message;
+                this.formError = errorText(e);
             } finally {
                 this.submitting = false;
             }
@@ -456,7 +572,7 @@ document.addEventListener("alpine:init", () => {
 
         // --- running --------------------------------------------------------
 
-        startRun(taskId, payload) {
+        startRun(taskId: string, payload: EvaluatePayload): void {
             this.stopStream();
             const steps = buildSteps(
                 payload.judge,
@@ -464,7 +580,7 @@ document.addEventListener("alpine:init", () => {
                 payload.test_cases.length,
                 this.names,
             );
-            const pos = {};
+            const pos: Record<string, number> = {};
             steps.forEach((step, index) => (pos[step.key] = index));
             const now = Date.now();
 
@@ -501,7 +617,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         // One clock for the elapsed time, the row timers and the load notice.
-        tick() {
+        tick(): void {
             this.run.now = Date.now();
             if (!loadWatch.length) return;
             loadWatch = loadWatch.filter((step) => {
@@ -513,20 +629,21 @@ document.addEventListener("alpine:init", () => {
             });
         },
 
-        stopStream() {
+        stopStream(): void {
             if (source) source.close();
             source = null;
             if (timer) clearInterval(timer);
             timer = null;
         },
 
-        step(event) {
-            const index = this.run.pos[stepKey(event.phase, event.model, event.question)];
+        step(event: SseEvent): Step | null {
+            const key = stepKey(event.phase ?? "", event.model, event.question);
+            const index = this.run.pos[key];
             return index === undefined ? null : this.run.steps[index];
         },
 
-        onMessage(message) {
-            let event;
+        onMessage(message: MessageEvent<string>): void {
+            let event: SseEvent;
             try {
                 event = JSON.parse(message.data);
             } catch (e) {
@@ -555,12 +672,12 @@ document.addEventListener("alpine:init", () => {
             this.updatePhases();
         },
 
-        stepStarted(step, event) {
+        stepStarted(step: Step, event: SseEvent): void {
             // A duplicate start must not reset the timer of a row in flight.
             if (step.state !== "queued") return;
             step.state = "running";
             step.startedAt = Date.now();
-            const ts = Date.parse(event.timestamp);
+            const ts = Date.parse(event.timestamp ?? "");
             step.startTs = Number.isFinite(ts) ? ts : null;
 
             const phaseKey = `phase:${step.phase}`;
@@ -578,13 +695,13 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        stepDone(step, event) {
+        stepDone(step: Step, event: SseEvent): void {
             // Finished rows stay as they are (duplicates, events after `skipped`).
             if (step.state !== "running" && step.state !== "queued") return;
 
             // Both timestamps come from the server, so its time zone cancels out.
             // No start event (or a broken timestamp): no duration instead of nonsense.
-            const end = Date.parse(event.timestamp);
+            const end = Date.parse(event.timestamp ?? "");
             const sec =
                 step.startTs !== null && Number.isFinite(end) ? (end - step.startTs) / 1000 : NaN;
             const duration = fmtSeconds(sec);
@@ -618,17 +735,17 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        finishRun() {
+        finishRun(): void {
             this.run.done = this.run.total; // `completed` may come without `progress`
             this.run.status = "done";
             this.run.endedAt = Date.now();
             this.stopStream();
             this.announce("evaluation finished. opening the results.");
-            this.loadHistory();
-            this.openRun(this.run.id);
+            void this.loadHistory();
+            if (this.run.id) void this.openRun(this.run.id);
         },
 
-        failRun(message) {
+        failRun(message: string): void {
             // Rows that were in flight will never finish: stop their animation.
             this.run.steps.forEach((step) => {
                 if (step.state === "running") {
@@ -644,26 +761,26 @@ document.addEventListener("alpine:init", () => {
         },
 
         // Back to the form: after an error the setup panel may still be closed.
-        dismissRun() {
+        dismissRun(): void {
             this.view = "idle";
             this.setupOpen = true;
         },
 
         // Wordmark: back to the first screen. A run in progress keeps going;
         // the topbar status and the first screen lead back to it.
-        goHome() {
+        goHome(): void {
             this.view = "idle";
             if (!this.busy) this.activeRunId = null;
             if (this.$refs?.main) this.$refs.main.scrollTop = 0;
         },
 
-        showRun() {
+        showRun(): void {
             this.view = "running";
             this.activeRunId = this.run.id;
         },
 
         // Progress segment -> its group of rows.
-        scrollToPhase(phase) {
+        scrollToPhase(phase: string): void {
             const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
             document
                 .getElementById(`phase-${phase}`)
@@ -673,7 +790,7 @@ document.addEventListener("alpine:init", () => {
         // Comparison table -> a card or an eval block in 03 view. Both 03 views
         // are x-if templates, so switch first and scroll once the view exists.
         // Without `view` the active view stays: each holds every answer block.
-        async jumpTo(id, view = null) {
+        async jumpTo(id: string | null, view: string | null = null): Promise<void> {
             if (!id) return;
             if (view && this.resultsView !== view) {
                 this.resultsView = view;
@@ -695,7 +812,7 @@ document.addEventListener("alpine:init", () => {
             target.focus({ preventScroll: true });
         },
 
-        async copyText(text) {
+        async copyText(text: unknown): Promise<boolean> {
             try {
                 await navigator.clipboard.writeText(String(text ?? ""));
                 return true;
@@ -705,22 +822,29 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        isAnswerOpen(id) {
+        isAnswerOpen(id: string): boolean {
             return Boolean(this.openAnswers[id]);
         },
 
-        toggleAnswer(id) {
+        toggleAnswer(id: string): void {
             this.openAnswers[id] = !this.openAnswers[id];
         },
 
         // [ and ] toggle the panels, Esc goes to the first screen.
         // event.code: the same physical keys on any layout (х / ї in Ukrainian).
         // Ignored while typing and with modifiers.
-        hotkey(event) {
-            if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        hotkey(event: KeyboardEvent): void {
+            if (
+                event.defaultPrevented ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.altKey ||
+                event.shiftKey
+            ) {
                 return;
             }
-            if (event.target.closest?.("input, textarea, select, [contenteditable]")) return;
+            const target = event.target as Element | null;
+            if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
 
             if (event.code === "BracketLeft") this.setupOpen = !this.setupOpen;
             else if (event.code === "BracketRight") this.archiveOpen = !this.archiveOpen;
@@ -730,38 +854,38 @@ document.addEventListener("alpine:init", () => {
         },
 
         // Tabs (ui.tabs): `key` is the state property, ids are tab-<key>-<value>.
-        setTab(key, value) {
-            this[key] = value;
-            this.$nextTick(() => document.getElementById(`tab-${key}-${value}`)?.focus());
+        setTab(key: string, value: string): void {
+            (this as unknown as Record<string, unknown>)[key] = value;
+            void this.$nextTick(() => document.getElementById(`tab-${key}-${value}`)?.focus());
         },
 
         // `list`: comma-separated values in tab order; `step`: +1 / -1, wraps around.
-        cycleTab(key, list, step) {
+        cycleTab(key: string, list: string, step: number): void {
             const values = list.split(",");
-            const index = values.indexOf(this[key]);
+            const current = (this as unknown as Record<string, unknown>)[key] as string;
+            const index = values.indexOf(current);
             this.setTab(key, values[(index + step + values.length) % values.length]);
         },
 
         // --- row helpers ----------------------------------------------------
 
-        stateClass(state) {
-            return (
-                {
-                    done: "text-fg",
-                    ready: "text-fg",
-                    running: "text-link",
-                    queued: "text-fg-muted",
-                    skipped: "text-fg-muted",
-                    error: "text-warn",
-                }[state] || "text-fg-muted"
-            );
+        stateClass(state: string): string {
+            const classes: Record<string, string> = {
+                done: "text-fg",
+                ready: "text-fg",
+                running: "text-link",
+                queued: "text-fg-muted",
+                skipped: "text-fg-muted",
+                error: "text-warn",
+            };
+            return classes[state] || "text-fg-muted";
         },
 
-        isMuted(state) {
+        isMuted(state: string): boolean {
             return state === "queued" || state === "skipped" || !state;
         },
 
-        rowMeta(step) {
+        rowMeta(step: Step): string {
             if (step.state === "running" && step.startedAt) {
                 // run.now ticks once a second and can be behind startedAt.
                 return fmtSeconds(Math.max(0, this.run.now - step.startedAt) / 1000);
@@ -769,10 +893,11 @@ document.addEventListener("alpine:init", () => {
             return step.meta;
         },
 
-        showLoadNotice(step) {
+        showLoadNotice(step: Step): boolean {
             return (
                 step.state === "running" &&
                 step.loading &&
+                step.startedAt !== null &&
                 this.run.now - step.startedAt > SLOW_LOAD_MS
             );
         },
