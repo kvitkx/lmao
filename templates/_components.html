@@ -187,3 +187,26 @@
     {%- endfor %}
 </div>
 {%- endmacro %}
+
+
+{# rank-badge. A 20px square with the two-digit rank by mean score. `rank` is a
+   text expression, `kind` is recommended (filled), best (thick border: best
+   score or fastest) or plain (thin border). #}
+{% macro rank_badge(rank, kind) -%}
+<span class="inline-flex items-center justify-center size-20 shrink-0 tabular-nums"
+      :class="{{ kind }} === 'recommended' ? 'border bg-fg text-bg border-fg' : ({{ kind }} === 'best' ? 'border-2 border-fg text-fg' : 'border border-fg-muted text-fg-muted')"
+      x-text="{{ rank }}"></span>
+{%- endmacro %}
+
+{# section-nav (143:1865). Scrolls to a section of the open tab: `items` is a
+   list of (id, text); the section is the element with the id `sec-<id>`. #}
+{% macro section_nav(items) -%}
+<nav class="flex items-center gap-22 print:hidden" aria-label="sections">
+    {%- for id, text in items %}
+    <button type="button" @click="goSection('{{ id }}')"
+            :aria-current="activeSection === '{{ id }}' ? 'true' : null"
+            class="pb-3 border-b"
+            :class="activeSection === '{{ id }}' ? 'text-fg border-fg' : 'text-fg-muted border-transparent hover:text-fg'">{{ text }}</button>
+    {%- endfor %}
+</nav>
+{%- endmacro %}

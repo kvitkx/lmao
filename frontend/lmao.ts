@@ -49,6 +49,16 @@ import {
     type MatrixRow,
     type NowRow,
 } from "./lib.ts";
+import {
+    COLUMNS,
+    buildOverview,
+    defaultDirection,
+    sortRows,
+    type Overview,
+    type SortDirection,
+    type SortKey,
+    type TableRow,
+} from "./overview.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
 interface SseEvent {
@@ -196,7 +206,8 @@ document.addEventListener("alpine:init", () => {
 
         view: "idle", // idle | running | results
         resultsView: "model", // model | question
-        comparisonView: "table", // table | chart
+        resultsTab: "overview", // overview | answers
+        sections: { overview: "summary", answers: "scores" } as Record<string, string>, // the section nav, per tab
 
         phaseGroups: PHASE_GROUPS,
 
@@ -224,6 +235,9 @@ document.addEventListener("alpine:init", () => {
         matrixStart: 0, // first visible question while the user pages by hand
         results: null as ApiResults | null,
         report: null as Report | null,
+        overview: null as Overview | null,
+        modelSort: { key: "mean", dir: "desc" } as { key: SortKey; dir: SortDirection },
+        modelColumns: COLUMNS,
 
         announcement: "", // text of the page live region
         // Clipboard API exists only in a secure context (localhost / https).
@@ -501,6 +515,9 @@ document.addEventListener("alpine:init", () => {
             if (this.$refs?.main) this.$refs.main.scrollTop = 0;
             this.results = null;
             this.report = null;
+            this.overview = null;
+            this.resultsTab = "overview";
+            this.sections = { overview: "summary", answers: "scores" };
             this.openAnswers = {};
             this.resultsError = "";
             try {
@@ -525,6 +542,7 @@ document.addEventListener("alpine:init", () => {
                     }
                     throw new Error(message);
                 }
+                this.overview = buildOverview(data as ApiResults);
                 this.report = report;
                 this.results = data as ApiResults;
             } catch (e) {
@@ -887,6 +905,41 @@ document.addEventListener("alpine:init", () => {
             target.scrollIntoView({ block: "start", behavior: "auto" });
             // Keyboard users continue from the target.
             target.focus({ preventScroll: true });
+        },
+
+        // --- results tabs ---------------------------------------------------
+
+        get modelRows(): TableRow[] {
+            if (!this.overview) return [];
+            return sortRows(this.overview.models, this.modelSort.key, this.modelSort.dir);
+        },
+
+        sortModels(key: SortKey): void {
+            if (this.modelSort.key === key) {
+                this.modelSort.dir = this.modelSort.dir === "desc" ? "asc" : "desc";
+            } else {
+                this.modelSort = { key, dir: defaultDirection(key) };
+            }
+        },
+
+        get activeSection(): string {
+            return this.sections[this.resultsTab] ?? "";
+        },
+
+        // Section nav -> the section `sec-<id>` of the open tab.
+        goSection(id: string): void {
+            this.sections[this.resultsTab] = id;
+            const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            document
+                .getElementById(`sec-${id}`)
+                ?.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+        },
+
+        // From one tab to a block of another one: switch first, then jump.
+        async showIn(tab: string, id: string | null, view: string | null = null): Promise<void> {
+            this.resultsTab = tab;
+            await this.$nextTick();
+            await this.jumpTo(id, view);
         },
 
         async copyText(text: unknown): Promise<boolean> {

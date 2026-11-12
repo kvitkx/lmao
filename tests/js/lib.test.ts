@@ -772,7 +772,7 @@ test("buildReport: question cards rank answers and put failures last", () => {
     assert.equal(card.spread, "one graded answer · 95");
 });
 
-test("buildReport: table grid, heads, references and chart", () => {
+test("buildReport: table grid, heads and references", () => {
     const report = lib.buildReport(runFixture());
 
     assert.equal(
@@ -783,8 +783,6 @@ test("buildReport: table grid, heads, references and chart", () => {
         { id: "q1", title: "logic", anchor: lib.domId("question", "q1") },
     ]);
     assert.equal(report.references[0].title, "q1 · logic · generated");
-    assert.equal(report.chart.points.length, 1);
-    assert.deepEqual(report.chart.missing, ["b"]);
 });
 
 test("buildReport: anchors link the comparison table to the 03 cards", () => {

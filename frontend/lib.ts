@@ -1433,7 +1433,6 @@ export interface Report {
     };
     notes: string[];
     summaryBlocks: MdBlock[];
-    chart: Chart;
     grid: string;
     questionHeads: { id: string; title: string; anchor: string }[];
     models: ReportModel[];
@@ -1551,7 +1550,6 @@ export function buildReport(raw: unknown): Readonly<Report> {
         },
         notes,
         summaryBlocks: shortenNames(parseMarkdown(summary.text, { bareFence: true }), names),
-        chart: buildChart(summaryModels, display, rec.model),
         // model | mean | median | pass | one column per question | c/s | t/s | time
         grid: `grid-template-columns:minmax(160px,1fr) 64px 64px 64px repeat(${questions.length},48px) 64px 64px 64px`,
         questionHeads: questions.map((q) => ({
