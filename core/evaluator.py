@@ -40,6 +40,7 @@ from .scoring import (
     recommend,
     summarize_model,
 )
+from .version import lmao_version
 
 SCHEMA_VERSION = 3
 # Everything the server stores lives under one directory: one Docker volume.
@@ -262,6 +263,7 @@ class EvaluationPipeline:
             judge_provider (Provider, optional): Serves the judge. Defaults to
                 the provider of the candidates (the local Ollama).
         """
+        started_at = datetime.now().isoformat(timespec="seconds")
         judge = payload.get("judge")
         judge_kind = payload.get("judge_provider", JUDGE_OLLAMA)
         cloud = judge_kind != JUDGE_OLLAMA
@@ -321,6 +323,13 @@ class EvaluationPipeline:
                 "judge_is_candidate": judge_kind != JUDGE_OPENAI
                 and judge in candidates,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "run": {
+                    "started_at": started_at,
+                    "lmao_version": lmao_version(),
+                    "ollama_version": self.provider.get_version(),
+                    "candidate_params": {"think": False, **CANDIDATE_OPTIONS},
+                    "judge_params": _judge_options(),
+                },
                 "questions_results": questions,
                 "summary": summary,
             },

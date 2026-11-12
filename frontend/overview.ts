@@ -3,7 +3,23 @@
 // and the speed against quality chart. Pure: no DOM, no Alpine.
 
 import type { ApiResults, ModelStats } from "../types/results.js";
-import { buildChart, domId, pad2, shortName, shortNames, type Chart, type ChartPoint } from "./lib.ts";
+import {
+    buildDetails,
+    buildHardest,
+    buildRunLines,
+    type Details,
+    type HardRow,
+} from "./details.ts";
+import {
+    buildChart,
+    domId,
+    numeric,
+    pad2,
+    shortName,
+    shortNames,
+    type Chart,
+    type ChartPoint,
+} from "./lib.ts";
 
 // recommended: filled badge; best: thick border (best score or fastest); plain: thin.
 export type BadgeKind = "recommended" | "best" | "plain";
@@ -110,10 +126,6 @@ export interface TableRow {
 }
 
 const GB = 1e9;
-
-function numeric(value: unknown): number | null {
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
 
 function valuesOf(m: ModelStats): Record<SortKey, number | null> {
     return {
@@ -224,10 +236,14 @@ export function buildOverviewChart(
 export interface Overview {
     models: TableRow[];
     chart: OverviewChart;
+    details: Details;
+    hardest: HardRow[];
+    runLines: string[];
 }
 
 export function buildOverview(data: ApiResults): Readonly<Overview> {
     const models = data.summary.models.filter((s) => s && typeof s.model === "string");
+    const questions = data.questions_results ?? [];
     const recommended = data.summary.recommendation?.model ?? null;
     const names = shortNames([...models.map((s) => s.model), recommended]);
     const display = (m: string) => names[m] || shortName(m);
@@ -236,5 +252,8 @@ export function buildOverview(data: ApiResults): Readonly<Overview> {
     return Object.freeze({
         models: buildTable(models, display, ranks),
         chart: buildOverviewChart(models, display, recommended, ranks),
+        details: buildDetails(models, display, ranks, questions),
+        hardest: buildHardest(questions, display, ranks),
+        runLines: buildRunLines(data),
     });
 }

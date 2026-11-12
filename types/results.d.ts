@@ -100,6 +100,17 @@ export interface Summary {
     text: string;
 }
 
+/** How a run was made. Runs saved before this block existed have none. */
+export interface RunInfo {
+    started_at: string;
+    lmao_version: string | null;
+    ollama_version: string | null;
+    /** Options the candidates were called with (`think`, `num_predict`). */
+    candidate_params: Record<string, number | boolean>;
+    /** Options the judge was called with (temperature, seed, context). */
+    judge_params: Record<string, number | boolean>;
+}
+
 /** Content of evaluation_results.json. */
 export interface Results {
     schema_version: 3;
@@ -110,6 +121,7 @@ export interface Results {
     mode: Mode;
     judge_is_candidate: boolean;
     finished_at: string;
+    run?: RunInfo;
     questions_results: Question[];
     summary: Summary;
 }

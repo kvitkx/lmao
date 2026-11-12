@@ -1726,3 +1726,8 @@ export function parseCasesFile(text: unknown): { baseRationale: string; cases: R
 
     return { baseRationale, cases };
 }
+
+// A finite number, or null.
+export function numeric(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}

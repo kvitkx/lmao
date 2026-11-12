@@ -39,6 +39,7 @@ def test_optional_capabilities_have_safe_defaults():
     assert provider.unload("m") is True
     assert provider.get_model_sizes() == {}
     assert provider.get_loaded("m") is None
+    assert provider.get_version() is None
 
 
 def test_ollama_client_is_a_provider():

@@ -15,7 +15,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.evaluator import JUDGE_NUM_CTX, JUDGE_SEED, EvaluationPipeline
+from core.evaluator import (
+    JUDGE_NUM_CTX,
+    JUDGE_NUM_PREDICT,
+    JUDGE_SEED,
+    EvaluationPipeline,
+)
 from core.prompts import (
     CATEGORIES,
     GRADE_SCHEMA,
@@ -25,6 +30,7 @@ from core.prompts import (
     build_answer_prompt,
 )
 from core.provider import Provider
+from core.version import lmao_version
 
 TASK_ID = "run_test_20260101_000000"
 
@@ -163,6 +169,9 @@ class FakeOllama:
     def get_loaded(self, model):
         self.footprint_calls.append(model)
         return self.memory.get(model)
+
+    def get_version(self):
+        return "0.0.0-test"
 
     @staticmethod
     def _next(queue, default):
@@ -914,3 +923,22 @@ def test_history_lives_in_the_data_directory():
     pipeline = EvaluationPipeline(FakeOllama())
 
     assert Path(pipeline.history_dir) == Path("data/history")
+
+
+def test_results_describe_how_the_run_was_made():
+    pipeline = EvaluationPipeline(FakeOllama())
+
+    run(pipeline)
+
+    results = load(pipeline, "evaluation_results.json")
+    info = results["run"]
+    assert info["started_at"] <= results["finished_at"]
+    assert info["lmao_version"] == lmao_version()
+    assert info["ollama_version"] == "0.0.0-test"
+    assert info["candidate_params"] == {"think": False, "num_predict": 1000}
+    assert info["judge_params"] == {
+        "temperature": 0,
+        "seed": JUDGE_SEED,
+        "num_ctx": JUDGE_NUM_CTX,
+        "num_predict": JUDGE_NUM_PREDICT,
+    }

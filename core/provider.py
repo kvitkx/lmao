@@ -96,3 +96,10 @@ class Provider(ABC):
                 cannot tell (the default).
         """
         return None
+
+    def get_version(self) -> str | None:
+        """Returns the version of the runtime behind the provider.
+
+        The default knows none.
+        """
+        return None

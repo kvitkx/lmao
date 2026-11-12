@@ -877,8 +877,10 @@ def test_export_csv_has_one_row_per_answer_and_defuses_formulas(client):
     )
 
     lines = body.splitlines()
-    assert lines[0] == "question,tag,model,score,category,status,tps,cps,time_sec"
-    assert lines[1] == "q1,'=SUM(1+1),m1,95,perfect,ok,10.0,50.0,1.0"
+    assert lines[0] == (
+        "question,tag,model,score,category,status,tps,cps,time_sec,tokens,chars"
+    )
+    assert lines[1] == "q1,'=SUM(1+1),m1,95,perfect,ok,10.0,50.0,1.0,,"
     assert len(lines) == 2
 
 

@@ -99,7 +99,7 @@ COPY core/ /app/core/
 COPY static/ /app/static/
 COPY --from=assets-out / /app/static/
 COPY templates/ /app/templates/
-COPY app.py /app/
+COPY app.py pyproject.toml /app/
 
 RUN mkdir -p /app/data && \
     chown appuser:appuser /app/data

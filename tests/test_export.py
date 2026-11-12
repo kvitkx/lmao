@@ -26,6 +26,8 @@ def _entry(model, **overrides):
         "tps": 50.0,
         "cps": 250.0,
         "time_sec": 1.5,
+        "tokens": 40,
+        "chars": 120,
     }
     entry.update(overrides)
     return entry
@@ -43,6 +45,8 @@ def _failed(model):
         tps=None,
         cps=None,
         time_sec=None,
+        tokens=None,
+        chars=None,
     )
 
 
@@ -89,6 +93,11 @@ def _results():
                     "median_tps": 50.0,
                     "median_cps": 250.0,
                     "median_time_sec": 1.5,
+                    "avg_chars": 1200,
+                    "score_per_gb": 41.8,
+                    "tokens_per_pass": 400,
+                    "memory_bytes": 5_000_000_000,
+                    "vram_bytes": 3_000_000_000,
                 },
                 {
                     "model": "b",
@@ -135,6 +144,8 @@ def test_csv_has_the_documented_columns_including_cps():
         "tps",
         "cps",
         "time_sec",
+        "tokens",
+        "chars",
     ]
     assert tuple(header) == CSV_COLUMNS
 
@@ -153,8 +164,22 @@ def test_csv_has_one_row_per_answer():
         "50.0",
         "250.0",
         "1.5",
+        "40",
+        "120",
     ]
-    assert rows[1] == ["q1", "logic", "b", "", "", "generation_error", "", "", ""]
+    assert rows[1] == [
+        "q1",
+        "logic",
+        "b",
+        "",
+        "",
+        "generation_error",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]
 
 
 def test_csv_defuses_a_formula_in_the_tag():
@@ -249,13 +274,16 @@ def test_markdown_table_uses_the_summary_numbers_and_dashes_for_missing():
 
     assert (
         "| model | graded | mean | median | pass | fails | critical | errors "
-        "| judge errors | c/s | t/s | time, s |"
+        "| judge errors | c/s | t/s | time, s | length | score/GB | tok/pass "
+        "| memory GB |"
     ) in markdown
     assert (
-        "| a | 1 | 83.5 | 83.5 | 100% | 0 | 0 | 0 | 0 | 250.0 | 50.0 | 1.5 |"
-        in markdown
-    )
-    assert "| b | 1 | 15.0 | 15.0 | 0% | 0 | 1 | 1 | 0 | – | – | – |" in markdown
+        "| a | 1 | 83.5 | 83.5 | 100% | 0 | 0 | 0 | 0 | 250.0 | 50.0 | 1.5 "
+        "| 1200 | 41.8 | 400 | 3.0+2.0 |"
+    ) in markdown
+    assert (
+        "| b | 1 | 15.0 | 15.0 | 0% | 0 | 1 | 1 | 0 | – | – | – | – | – | – | – |"
+    ) in markdown
 
 
 def test_markdown_escapes_pipes_in_table_cells():

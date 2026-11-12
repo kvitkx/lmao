@@ -1,4 +1,32 @@
 {% import "_components.html" as ui %}
+
+{# One bar panel of "04 details": a title with a note, then a row per model:
+   badge | bar | value. `note` is an Alpine expression, `chart` the path of the
+   BarChart (bars, medianLeft). #}
+{% macro bar_panel(title, note, chart) -%}
+<div class="min-w-0 flex flex-col">
+    <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
+        <span class="shrink-0">{{ title }}</span>
+        <span class="min-w-0 text-right" x-text="{{ note }}"></span>
+    </div>
+    <div class="flex flex-col pt-8">
+        <template x-for="b in {{ chart }}.bars" :key="b.model">
+            <div class="grid grid-cols-[20px_1fr_120px] items-center gap-x-12 h-30">
+                {{ ui.rank_badge("b.rank.text", "b.rank.kind") }}
+                <span class="relative self-stretch flex items-center" :title="b.short">
+                    <span x-show="{{ chart }}.medianLeft !== null"
+                          class="absolute inset-y-0 border-l border-dashed border-fg-muted/40"
+                          :style="'left:' + {{ chart }}.medianLeft + '%'"></span>
+                    <span class="relative block h-16" :class="b.rank.kind === 'recommended' ? 'bg-fg' : 'bg-fg-muted'"
+                          :style="'width:' + b.width + '%'"></span>
+                </span>
+                <span class="min-w-0 tabular-nums" :class="b.best ? 'text-fg' : 'text-fg-muted'" x-text="b.text"></span>
+            </div>
+        </template>
+    </div>
+</div>
+{%- endmacro %}
+
 {# results #}
 <div x-show="view === 'results'" x-cloak class="flex flex-col gap-33">
     {{ ui.warn_notice("resultsError", "resultsError") }}
@@ -26,7 +54,7 @@
             <div class="flex justify-between items-center gap-22">
                 {{ ui.tabs("resultsTab", [("overview", "overview"), ("answers", "answers")], "results tab") }}
                 <div x-show="resultsTab === 'overview'">
-                    {{ ui.section_nav([("summary", "summary"), ("models", "models"), ("chart", "speed vs quality")]) }}
+                    {{ ui.section_nav([("summary", "summary"), ("models", "models"), ("chart", "speed vs quality"), ("details", "details"), ("questions", "questions"), ("run", "run")]) }}
                 </div>
                 <div x-show="resultsTab === 'answers'" x-cloak>
                     {{ ui.section_nav([("scores", "scores"), ("answers", "answers"), ("references", "reference answers")]) }}
@@ -220,6 +248,185 @@
                         <div x-show="!overview.chart.points.length" class="text-fg-muted">no model has both a mean score and c/s.</div>
                         <div x-show="overview.chart.missing.length" class="text-fg-muted"
                              x-text="'not plotted (no mean score or c/s): ' + overview.chart.missing.join(', ')"></div>
+                    </section>
+
+                    {# 04 details: the same badges in the same order as the table, so a model sits at the same place in every panel #}
+                    <section id="sec-details" class="flex flex-col gap-22 scroll-mt-33">
+                        <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+                            <span>04 details</span>
+                            <span>same markers and the same numbers as above</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-x-33 gap-y-33">
+                            {{ bar_panel("score / GB",
+                                         "'mean score per GB on disk · dashed = median ' + overview.details.scoreGb.medianText",
+                                         "overview.details.scoreGb") }}
+                            {{ bar_panel("tokens / correct",
+                                         "'generated tokens per pass · lower = better · dashed = median ' + overview.details.tokPass.medianText",
+                                         "overview.details.tokPass") }}
+
+                            {# memory: the part in VRAM is filled, the part in RAM is an outline #}
+                            <div class="min-w-0 flex flex-col">
+                                <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
+                                    <span class="shrink-0">memory</span>
+                                    <span class="min-w-0 text-right">from ollama ps: loaded size split into GPU and CPU share</span>
+                                </div>
+                                <div class="flex flex-col pt-8">
+                                    <template x-for="b in overview.details.memory" :key="b.model">
+                                        <div class="grid grid-cols-[20px_1fr_150px] items-center gap-x-12 h-30">
+                                            {{ ui.rank_badge("b.rank.text", "b.rank.kind") }}
+                                            <span class="relative flex items-center" :title="b.short">
+                                                <span class="relative block h-16" :style="'width:' + b.width + '%'">
+                                                    <span class="absolute inset-y-0 left-0 bg-fg" :style="'width:' + b.gpu + '%'"></span>
+                                                    <span x-show="b.gpu < 100" class="absolute inset-y-0 right-0 border border-fg"
+                                                          :style="'left:' + b.gpu + '%'"></span>
+                                                </span>
+                                            </span>
+                                            <span class="min-w-0 tabular-nums text-fg-muted" x-text="b.text"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="flex flex-wrap gap-x-22 gap-y-8 pt-8 text-fg-muted">
+                                    <span class="flex items-center gap-8"><span class="size-12 bg-fg"></span>GPU (VRAM)</span>
+                                    <span class="flex items-center gap-8"><span class="size-12 border border-fg"></span>CPU (RAM, offload)</span>
+                                </div>
+                            </div>
+
+                            {# tokens vs characters: how far chars/s can be compared across tokenizers #}
+                            <div class="min-w-0 flex flex-col">
+                                <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
+                                    <span class="shrink-0">tokens vs characters</span>
+                                    <span class="min-w-0 text-right">rays = characters per token</span>
+                                </div>
+                                <template x-if="overview.details.scatter.points.length">
+                                    <div class="pt-22 pr-33 pb-44 pl-44">
+                                        <div class="relative h-240 border-l border-b border-line" role="img"
+                                             aria-label="tokens per second against characters per second, with rays of 3 and 4 characters per token">
+                                            <span class="absolute bottom-full right-full pr-8 pb-8 text-fg-muted">chars/s</span>
+                                            <template x-for="t in overview.details.scatter.yTicks" :key="t.text">
+                                                <span class="absolute right-full pr-8 translate-y-1/2 text-fg-muted"
+                                                      :style="'bottom:' + t.pos + '%'" x-text="t.text"></span>
+                                            </template>
+                                            <template x-for="t in overview.details.scatter.xTicks" :key="t.text">
+                                                <span class="absolute top-full pt-8 -translate-x-1/2 text-fg-muted"
+                                                      :style="'left:' + t.pos + '%'" x-text="t.text"></span>
+                                            </template>
+                                            <span class="absolute top-full right-0 pt-33 text-fg-muted">tokens/s</span>
+
+                                            <svg aria-hidden="true" class="absolute inset-0 size-full overflow-visible pointer-events-none"
+                                                 viewBox="0 0 100 100" preserveAspectRatio="none">
+                                                <line x1="0" y1="100" :x2="overview.details.scatter.rays[0].x2"
+                                                      :y2="100 - overview.details.scatter.rays[0].y2" class="stroke-fg-muted"
+                                                      stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"></line>
+                                                <line x1="0" y1="100" :x2="overview.details.scatter.rays[1].x2"
+                                                      :y2="100 - overview.details.scatter.rays[1].y2" class="stroke-fg-muted"
+                                                      stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"></line>
+                                            </svg>
+                                            <span class="absolute whitespace-nowrap text-fg-muted -translate-x-full -translate-y-full pr-8 pb-4"
+                                                  :style="'left:' + overview.details.scatter.rays[0].x2 + '%;bottom:' + overview.details.scatter.rays[0].y2 + '%'"
+                                                  x-text="overview.details.scatter.rays[0].label"></span>
+                                            <span class="absolute whitespace-nowrap text-fg-muted -translate-x-full -translate-y-full pr-8 pb-4"
+                                                  :style="'left:' + overview.details.scatter.rays[1].x2 + '%;bottom:' + overview.details.scatter.rays[1].y2 + '%'"
+                                                  x-text="overview.details.scatter.rays[1].label"></span>
+
+                                            <template x-for="p in overview.details.scatter.points" :key="p.model">
+                                                <div class="absolute" :style="'left:' + p.left + '%;bottom:' + p.bottom + '%'" :title="p.title">
+                                                    <span class="absolute -translate-x-1/2 translate-y-1/2">
+                                                        {{ ui.rank_badge("p.rank.text", "p.rank.kind") }}
+                                                    </span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <div x-show="!overview.details.scatter.points.length" class="pt-15 text-fg-muted">no model has both t/s and c/s.</div>
+                                <div x-show="overview.details.scatter.missing.length" class="text-fg-muted"
+                                     x-text="'not plotted: ' + overview.details.scatter.missing.join(', ')"></div>
+                            </div>
+                        </div>
+
+                        {# answers by category #}
+                        <div class="flex flex-col">
+                            <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
+                                <span class="shrink-0">answers by category</span>
+                                <span class="min-w-0 text-right" x-text="'pass = perfect + acceptable · dashed = ' + overview.details.categories.threshold + '% pass threshold'"></span>
+                            </div>
+                            <div class="flex flex-col pt-8">
+                                <template x-for="c in overview.details.categories.bars" :key="c.model">
+                                    <div class="grid grid-cols-[20px_1fr_90px] items-center gap-x-12 h-30">
+                                        {{ ui.rank_badge("c.rank.text", "c.rank.kind") }}
+                                        <span class="relative self-stretch flex items-center" :title="c.short">
+                                            <span class="flex w-full h-16">
+                                                <template x-for="s in c.segments" :key="s.label">
+                                                    <span class="block h-16" :class="s.cls" :style="'width:' + s.pct + '%'"
+                                                          :title="s.label + ': ' + s.count"></span>
+                                                </template>
+                                            </span>
+                                            <span class="absolute inset-y-0 border-l border-dashed border-fg-muted/60 pointer-events-none"
+                                                  :style="'left:' + overview.details.categories.threshold + '%'"></span>
+                                        </span>
+                                        <span class="tabular-nums text-fg-muted" x-text="c.passText"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <div class="flex flex-wrap gap-x-22 gap-y-8 pt-8 text-fg-muted">
+                                <template x-for="l in overview.details.categories.legend" :key="l.label">
+                                    <span class="flex items-center gap-8"><span class="size-12" :class="l.cls"></span><span x-text="l.label"></span></span>
+                                </template>
+                                <span class="flex items-center gap-8"><span class="w-15 border-t border-dashed border-fg-muted"></span><span x-text="'pass threshold ' + overview.details.categories.threshold + '%'"></span></span>
+                            </div>
+                        </div>
+                    </section>
+
+                    {# 05 hardest questions: the lowest mean score across models #}
+                    <section id="sec-questions" x-show="overview.hardest.length" class="flex flex-col scroll-mt-33">
+                        <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+                            <span>05 hardest questions</span>
+                            <span>lowest mean score across models</span>
+                        </div>
+                        <div class="grid grid-cols-[240px_60px_1fr_70px_220px] items-center gap-x-22 py-12 border-b border-line text-fg-muted">
+                            <div>question</div>
+                            <div>mean</div>
+                            <div>range · mean tick</div>
+                            <div>passed</div>
+                            <div>best</div>
+                        </div>
+                        <template x-for="r in overview.hardest" :key="r.id">
+                            <div class="grid grid-cols-[240px_60px_1fr_70px_220px] items-center gap-x-22 py-12 border-b border-line tabular-nums">
+                                <button type="button" @click="showIn('answers', r.anchor, 'question')"
+                                        :aria-label="r.label + ': show in per question view'"
+                                        class="min-w-0 truncate text-left normal-nums hover:text-fg-muted" x-text="r.label" :title="r.label"></button>
+                                <div x-text="r.mean"></div>
+                                <span class="relative block h-15" aria-hidden="true">
+                                    <span class="absolute inset-x-0 top-1/2 h-px bg-line"></span>
+                                    <span class="absolute inset-y-4 w-px bg-fg-muted" :style="'left:' + r.min + '%'"></span>
+                                    <span class="absolute inset-y-4 w-px bg-fg-muted" :style="'left:' + r.max + '%'"></span>
+                                    <span class="absolute inset-y-0 w-px bg-fg" :style="'left:' + r.mean + '%'"></span>
+                                </span>
+                                <div x-text="r.passed"></div>
+                                <div class="min-w-0 flex items-center gap-12 normal-nums">
+                                    <template x-if="r.best">
+                                        <span class="min-w-0 flex items-center gap-12">
+                                            {{ ui.rank_badge("r.best.rank.text", "r.best.rank.kind") }}
+                                            <span class="min-w-0 truncate" x-text="r.best.short" :title="r.best.model"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </section>
+
+                    {# 06 run: how this run was made #}
+                    <section id="sec-run" class="flex flex-col gap-15 scroll-mt-33">
+                        <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+                            <span>06 run</span>
+                            <span>how this run was made</span>
+                        </div>
+                        <div class="flex flex-col gap-4">
+                            <template x-for="(line, li) in overview.runLines" :key="li">
+                                <div class="break-words" :class="li ? 'text-fg-muted' : ''" x-text="line"></div>
+                            </template>
+                        </div>
                     </section>
                 </div>
 
