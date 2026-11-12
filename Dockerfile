@@ -45,17 +45,31 @@ FROM css-deps AS css
 
 COPY scripts/build-assets.sh scripts/build-assets.sh
 
-# Only what the class scan reads (see the @source lines of input.css).
+# What the build reads: the class scan (see the @source lines of input.css)
+# and the TypeScript sources.
 COPY static/css/input.css static/css/input.css
-COPY static/js/ static/js/
+COPY tsconfig.json tsconfig.json
+COPY frontend/ frontend/
+COPY types/ types/
 COPY templates/ templates/
 
-# /build/out has the layout of /app/static: Alpine, the fonts and the stylesheet.
+# /build/out has the layout of /app/static: Alpine, the fonts, the scripts and the stylesheet.
 RUN sh scripts/build-assets.sh node_modules /build/out && \
+    ./node_modules/.bin/tsc --project tsconfig.json --outDir /build/out/js && \
     ./node_modules/.bin/tailwindcss \
       --input static/css/input.css \
       --output /build/out/css/app.css \
       --minify
+
+
+FROM css-deps AS typecheck
+
+COPY tsconfig.json tsconfig.check.json ./
+COPY frontend/ frontend/
+COPY types/ types/
+COPY tests/js/ tests/js/
+
+RUN ./node_modules/.bin/tsc --project tsconfig.check.json
 
 
 # What the page loads from /static: `make css` exports it, the production

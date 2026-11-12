@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>lmao | local model assessment operator</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-    <script defer src="{{ url_for('static', filename='js/lib.js') }}"></script>
-    {# Must be deferred BEFORE Alpine so that 'alpine:init' is already listened to. #}
-    <script defer src="{{ url_for('static', filename='js/lmao.js') }}"></script>
+    {# A module runs deferred, in document order: it must come BEFORE Alpine
+       so that 'alpine:init' is already listened to. lmao.js imports lib.js. #}
+    <script type="module" src="{{ url_for('static', filename='js/lmao.js') }}"></script>
     {% include "_theme.html" %}
 </head>
 {# tabular-nums: timers, counters and matrix columns keep their width. #}

@@ -125,8 +125,10 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as
 
 - Tests: coverage must stay at or above `fail_under` in `pyproject.toml`
   (measured by `make ci`; `make test` skips it).
-- JS tests: `static/js/lib.js` holds the pure helpers; cover new ones in
-  `tests/js/` (`make test`). Keep the DOM and Alpine out of `lib.js`.
+- Front end: TypeScript in `frontend/`, compiled to `static/js/` (generated).
+  `frontend/lib.ts` holds the pure helpers; cover new ones in `tests/js/*.test.ts`
+  (`make test`). Keep the DOM and Alpine out of `lib.ts`. `make typecheck-js`
+  runs `tsc`. No `enum` or `namespace`: Node runs the tests by stripping types.
 - Python version: the `Dockerfile` `FROM python:` line and `requires-python`
   change together (`make check-python` verifies it).
 - Workflows call make only as a single-line `run: make report-TARGET`

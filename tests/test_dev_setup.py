@@ -63,3 +63,18 @@ def test_font_packages_are_pinned_to_exact_versions():
 
     for name in ("@fontsource/inter", "@fontsource/ibm-plex-mono"):
         assert re.fullmatch(r"\d+\.\d+\.\d+", dev[name])
+
+def test_css_service_compiles_and_watches_typescript():
+    compose = _compose_dev()
+
+    assert "tsc --project tsconfig.json --watch" in compose
+    # the healthcheck waits for the compiled app script
+    assert "static/js/lmao.js" in compose
+
+
+def test_typescript_packages_are_pinned_to_exact_versions():
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    dev = package["devDependencies"]
+
+    for name in ("typescript", "@types/node", "@types/alpinejs"):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", dev[name])

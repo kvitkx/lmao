@@ -23,6 +23,7 @@ node_modules/
 # Built in the css stage
 static/css/app.css
 static/vendor/
+static/js/
 static/fonts/
 
 # Secrets

@@ -81,9 +81,10 @@ def test_index_html_builds_markdown_with_the_directive(client):
 
 
 def test_scripts_never_write_html():
-    scripts = Path(__file__).parent.parent / "static" / "js"
+    scripts = Path(__file__).parent.parent / "frontend"
 
-    for path in scripts.glob("*.js"):
+    assert list(scripts.glob("*.ts"))
+    for path in scripts.glob("*.ts"):
         text = path.read_text(encoding="utf-8")
         for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML"):
             assert forbidden not in text, f"{path.name} uses {forbidden}"
@@ -115,7 +116,7 @@ def test_css_build_reads_templates_and_scripts():
 
     assert '@import "tailwindcss" source(none);' in css
     assert '@source "../../templates";' in css
-    assert '@source "../js";' in css
+    assert '@source "../../frontend";' in css
 
 
 def test_nav_toggle_classes_are_in_the_css_safelist(client):
@@ -153,3 +154,9 @@ def test_index_html_preloads_the_body_font(client):
     assert "/static/fonts/inter-latin-300.woff2" in html
     assert 'as="font"' in html
     assert "crossorigin" in html
+
+def test_index_html_loads_the_app_as_one_module(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert '<script type="module" src="/static/js/lmao.js"></script>' in html
+    assert "js/lib.js" not in html

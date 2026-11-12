@@ -64,7 +64,7 @@ user_id="$(docker exec "$container" id -u)"
 [[ "$user_id" != 0 ]] || die "Container is running as root."
 log "Container runs as UID $user_id."
 
-for asset in css/app.css vendor/alpine.min.js fonts/inter-latin-300.woff2; do
+for asset in css/app.css js/lmao.js js/lib.js vendor/alpine.min.js fonts/inter-latin-300.woff2; do
     docker exec "$container" python -c 'import sys, urllib.request as u; b = u.urlopen("http://localhost:5000/static/" + sys.argv[1]).read(); assert len(b) > 1000, "empty"' "$asset" \
         || die "The static file /static/$asset is not served."
     log "Served: /static/$asset"
