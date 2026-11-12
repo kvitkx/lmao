@@ -155,6 +155,7 @@ def test_index_html_preloads_the_body_font(client):
     assert 'as="font"' in html
     assert "crossorigin" in html
 
+
 def test_index_html_loads_the_app_as_one_module(client):
     html = client.get("/").get_data(as_text=True)
 

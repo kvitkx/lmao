@@ -64,6 +64,7 @@ def test_font_packages_are_pinned_to_exact_versions():
     for name in ("@fontsource/inter", "@fontsource/ibm-plex-mono"):
         assert re.fullmatch(r"\d+\.\d+\.\d+", dev[name])
 
+
 def test_css_service_compiles_and_watches_typescript():
     compose = _compose_dev()
 
