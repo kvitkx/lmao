@@ -129,7 +129,9 @@ export function buildSteps(
     });
 
     const steps: Step[] = [];
-    ids.forEach((q) => steps.push(row("reference", judge, q, `reference ${q}`)));
+    ids.forEach((q) =>
+        steps.push(row("reference", judge, q, `reference · ${q} · ${display(judge)}`)),
+    );
     unique.forEach((m) =>
         ids.forEach((q) => steps.push(row("answer", m, q, `${display(m)} · ${q}`))),
     );
@@ -152,56 +154,6 @@ export function loadGroup(phase: string, model: string, cloud: boolean): string 
 
 export type GroupState = "queued" | "running" | "done";
 
-export interface ModelGroup {
-    model: string;
-    rows: Step[];
-    total: number;
-    ok: number;
-    errors: number;
-    skipped: number;
-    state: GroupState;
-    side: string;
-}
-
-// Rows of one phase grouped by model, in row order. Reference and summary have
-// one group (the judge). The state is derived from the rows, so no new events.
-export function modelGroups(steps: Step[], phase: string): ModelGroup[] {
-    const groups = new Map<string, Step[]>();
-    for (const s of steps) {
-        if (s.phase !== phase) continue;
-        const rows = groups.get(s.model);
-        if (rows) rows.push(s);
-        else groups.set(s.model, [s]);
-    }
-    return [...groups].map(([model, rows]) => {
-        const count = (state: StepState) => rows.filter((r) => r.state === state).length;
-        const ok = count("done");
-        const errors = count("error");
-        const skipped = count("skipped");
-        const total = rows.length;
-        const finished = ok + errors + skipped;
-
-        // Between two rows of one model nothing runs for a moment: still running.
-        let state: GroupState = "queued";
-        if (count("running") || (finished > 0 && finished < total)) state = "running";
-        else if (finished === total) state = "done";
-
-        // Wall clock from the first start to the last end (server timestamps).
-        const starts = rows.map((r) => r.startTs).filter((t): t is number => t !== null);
-        const ends = rows.map((r) => r.endTs).filter((t): t is number => t !== null);
-        const span =
-            state === "done" && starts.length && ends.length
-                ? fmtSpan((Math.max(...ends) - Math.min(...starts)) / 1000)
-                : "";
-
-        // Running: how far it got. Done: how many succeeded, and how long it took.
-        const side =
-            state === "done"
-                ? [`${ok}/${total}`, span].filter(Boolean).join(" · ")
-                : `${finished}/${total}`;
-        return { model, rows, total, ok, errors, skipped, state, side };
-    });
-}
 
 export interface PhaseGroup {
     phase: string;
@@ -295,21 +247,46 @@ export function fmtSpan(sec: unknown): string {
     return sec < 60 ? `${sec.toFixed(1)} s` : fmtClock(sec);
 }
 
-// --- matrix columns ---------------------------------------------------------
+// --- matrix -----------------------------------------------------------------
 
-// Sizes of the matrix, in px (see the Figma frames of the running screen and
-// of results/answers): the model column, one question column, a counter.
-export const MATRIX_NAME_WIDTH = 254;
-export const MATRIX_CELL_WIDTH = 48;
-export const MATRIX_COUNTER_WIDTH = 48;
+export interface MatrixLayout {
+    name: number; // px of the model column
+    tail: number; // px of the columns after the questions (time)
+    cell: number; // px of one question column
+    counter: number; // px of one `‹ N` / `N ›` counter column
+    counters: 1 | 2; // counter columns that take room when not everything fits
+}
+
+// The scores matrix of the results screens: a counter on the right only.
+export const RESULTS_MATRIX: MatrixLayout = {
+    name: 254,
+    tail: 0,
+    cell: 48,
+    counter: 48,
+    counters: 1,
+};
+
+// The matrix of the running screen: both counters are always there, so the
+// columns do not jump while the window follows the run.
+export const RUNNING_MATRIX: MatrixLayout = {
+    name: 270,
+    tail: 80,
+    cell: 52,
+    counter: 44,
+    counters: 2,
+};
 
 // How many question columns fit into a matrix `width` px wide. Everything fits:
-// all `total`. Otherwise one counter takes the room of a column.
-export function columnsThatFit(width: number, total: number): number {
-    const room = width - MATRIX_NAME_WIDTH;
-    if (!(room >= MATRIX_CELL_WIDTH) || !(total > 0)) return 0;
-    if (Math.floor(room / MATRIX_CELL_WIDTH) >= total) return total;
-    return Math.max(1, Math.floor((room - MATRIX_COUNTER_WIDTH) / MATRIX_CELL_WIDTH));
+// all `total`. Otherwise the counter columns take their room first.
+export function columnsThatFit(
+    width: number,
+    total: number,
+    layout: MatrixLayout = RESULTS_MATRIX,
+): number {
+    const room = width - layout.name - layout.tail;
+    if (!(room >= layout.cell) || !(total > 0)) return 0;
+    if (Math.floor(room / layout.cell) >= total) return total;
+    return Math.max(1, Math.floor((room - layout.counters * layout.counter) / layout.cell));
 }
 
 export interface ColumnWindow {
@@ -321,8 +298,7 @@ export interface ColumnWindow {
 
 // The visible window of question columns. `fit` comes from columnsThatFit().
 // The window is centred on `anchor` (the question in progress) unless `start`
-// is given (manual paging). With a counter on both edges one more column of the
-// room is taken, so the window gets one column shorter.
+// is given (manual paging); it never leaves 0..total.
 export function columnWindow(
     total: number,
     fit: number,
@@ -335,9 +311,233 @@ export function columnWindow(
 
     const wanted = start ?? anchor - Math.floor((fit - 1) / 2);
     const first = Math.max(0, Math.min(total - fit, wanted));
-    let end = first + fit;
-    if (first > 0 && end < total) end -= 1;
+    const end = first + fit;
     return { start: first, end, before: first, after: total - end };
+}
+
+// --- running matrix ---------------------------------------------------------
+
+export type CellState =
+    | "planned"
+    | "answering"
+    | "ready"
+    | "grading"
+    | "graded"
+    | "generation_error"
+    | "judge_error";
+
+export interface MatrixCellInfo {
+    state: CellState;
+    title: string; // tooltip and accessible name
+}
+
+export interface MatrixRow {
+    model: string;
+    label: string;
+    sub: string; // the judge's name on the reference row
+    reference: boolean;
+    state: GroupState;
+    time: string; // total answering time of the model
+    cells: MatrixCellInfo[];
+}
+
+const CELL_TEXT: Record<CellState, string> = {
+    planned: "planned",
+    answering: "answering",
+    ready: "answer ready",
+    grading: "grading",
+    graded: "graded",
+    generation_error: "generation error",
+    judge_error: "judge error",
+};
+
+const CELL_ORDER: CellState[] = [
+    "graded",
+    "ready",
+    "grading",
+    "answering",
+    "planned",
+    "generation_error",
+    "judge_error",
+];
+
+function isErrorCell(state: CellState): boolean {
+    return state === "generation_error" || state === "judge_error";
+}
+
+function stepSeconds(step: Step | undefined): number | null {
+    if (!step || step.startTs === null || step.endTs === null) return null;
+    const sec = (step.endTs - step.startTs) / 1000;
+    return sec >= 0 ? sec : null;
+}
+
+function referenceCell(step: Step | undefined): CellState {
+    if (!step) return "planned";
+    if (step.state === "running") return "answering";
+    if (step.state === "done") return "graded";
+    if (step.state === "error") return "generation_error";
+    return "planned";
+}
+
+function candidateCell(answer: Step | undefined, grading: Step | undefined): CellState {
+    if (!answer || answer.state === "queued") return "planned";
+    if (answer.state === "running") return "answering";
+    if (answer.state === "error") return "generation_error";
+    if (!grading || grading.state === "queued") return "ready";
+    if (grading.state === "running") return "grading";
+    if (grading.state === "error") return "judge_error";
+    return "graded";
+}
+
+function cellInfo(
+    name: string,
+    id: string,
+    state: CellState,
+    step: Step | undefined,
+): MatrixCellInfo {
+    const sec = stepSeconds(step);
+    const time = sec === null ? "" : ` · ${sec.toFixed(1)} s`;
+    return { state, title: `${name} · ${id}: ${CELL_TEXT[state]}${time}` };
+}
+
+function rowState(cells: MatrixCellInfo[]): GroupState {
+    if (cells.every((c) => c.state === "planned")) return "queued";
+    const final = (s: CellState) => s === "graded" || isErrorCell(s);
+    return cells.every((c) => final(c.state)) ? "done" : "running";
+}
+
+// Sum in ms, so 4.1 s + 1.9 s is exactly 6 s.
+function totalTime(steps: (Step | undefined)[]): string {
+    let ms = 0;
+    let any = false;
+    for (const s of steps) {
+        if (s && s.startTs !== null && s.endTs !== null && s.endTs >= s.startTs) {
+            ms += s.endTs - s.startTs;
+            any = true;
+        }
+    }
+    return any ? fmtClock(ms / 1000) : "–";
+}
+
+// The reference row and one row per candidate, a cell per question. The state
+// of a cell comes from the answer and grading steps, so no new events.
+export function buildMatrix(
+    steps: Step[],
+    questionCount: number,
+    display: (model: string) => string,
+): MatrixRow[] {
+    const byKey = new Map(steps.map((s) => [s.key, s]));
+    const candidates: string[] = [];
+    let judge = "";
+    for (const s of steps) {
+        if (s.phase === "reference" && !judge) judge = s.model;
+        if (s.phase === "answer" && !candidates.includes(s.model)) candidates.push(s.model);
+    }
+    const ids = Array.from({ length: questionCount }, (_, i) => `q${i + 1}`);
+
+    const referenceSteps = ids.map((id) => byKey.get(stepKey("reference", judge, id)));
+    const referenceCells = ids.map((id, i) => {
+        const step = referenceSteps[i];
+        return cellInfo(`reference · ${display(judge)}`, id, referenceCell(step), step);
+    });
+    const rows: MatrixRow[] = judge
+        ? [
+              {
+                  model: judge,
+                  label: "reference",
+                  sub: display(judge),
+                  reference: true,
+                  state: rowState(referenceCells),
+                  time: totalTime(referenceSteps),
+                  cells: referenceCells,
+              },
+          ]
+        : [];
+
+    for (const model of candidates) {
+        const answers = ids.map((id) => byKey.get(stepKey("answer", model, id)));
+        const cells = ids.map((id, i) => {
+            const grading = byKey.get(stepKey("grading", model, id));
+            const state = candidateCell(answers[i], grading);
+            const graded = state === "grading" || state === "graded" || state === "judge_error";
+            return cellInfo(display(model), id, state, graded ? grading : answers[i]);
+        });
+        rows.push({
+            model,
+            label: display(model),
+            sub: "",
+            reference: false,
+            state: rowState(cells),
+            time: totalTime(answers),
+            cells,
+        });
+    }
+    return rows;
+}
+
+// The first question that is in progress (0-based), or null between two steps.
+export function activeQuestion(steps: Step[]): number | null {
+    let first = Infinity;
+    for (const s of steps) {
+        if (s.state !== "running" || !s.question) continue;
+        const n = Number(s.question.slice(1)) - 1;
+        if (Number.isFinite(n)) first = Math.min(first, n);
+    }
+    return Number.isFinite(first) ? first : null;
+}
+
+export interface Hidden {
+    count: number;
+    warn: boolean; // an error among the hidden cells
+    title: string;
+}
+
+// The counter of the hidden cells cells[from, to): how many, and what they hold.
+export function hiddenSummary(cells: MatrixCellInfo[], from: number, to: number): Hidden {
+    const part = cells.slice(from, to);
+    if (!part.length) return { count: 0, warn: false, title: "" };
+
+    const parts = CELL_ORDER.flatMap((state) => {
+        const hits = part
+            .map((cell, i) => ({ cell, id: from + i + 1 }))
+            .filter((hit) => hit.cell.state === state);
+        if (!hits.length) return [];
+        const where = isErrorCell(state)
+            ? ` (${hits
+                  .slice(0, 3)
+                  .map((hit) => `q${hit.id}`)
+                  .join(", ")}${hits.length > 3 ? ", …" : ""})`
+            : "";
+        return [`${hits.length} ${CELL_TEXT[state]}${where}`];
+    });
+    const first = from + 1;
+    const last = from + part.length;
+    const range = part.length === 1 ? `q${first}` : `q${first}–q${last}`;
+    return {
+        count: part.length,
+        warn: part.some((c) => isErrorCell(c.state)),
+        title: `${range}: ${parts.join(" · ")}`,
+    };
+}
+
+// The calls in flight, for the `now` list.
+export interface NowRow {
+    key: string;
+    step: Step;
+    verb: string;
+}
+
+const VERBS: Record<string, string> = {
+    reference: "reference",
+    answer: "answering",
+    grading: "grading",
+    summary: "summary",
+};
+
+export function nowRows(steps: Step[]): NowRow[] {
+    return steps
+        .filter((s) => s.state === "running")
+        .map((s) => ({ key: s.key, step: s, verb: VERBS[s.phase] ?? s.phase }));
 }
 
 // --- dom anchors ----------------------------------------------------------

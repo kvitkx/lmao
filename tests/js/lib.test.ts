@@ -97,7 +97,7 @@ test("buildSteps lists every row up front, once per unique candidate, grading mo
         ],
     );
     assert.ok(steps.every((s) => s.state === "queued"));
-    assert.equal(steps[0].label, "reference q1");
+    assert.equal(steps[0].label, "reference · q1 · j");
     assert.equal(steps[2].label, "a · q1");
     assert.equal(steps[6].label, "judge · a · q1");
     assert.equal(steps[10].label, "final summary");
@@ -125,76 +125,17 @@ function setRow(steps: lib.Step[], key: string, fields: Partial<lib.Step>) {
     Object.assign(steps.find((s) => s.key === key)!, fields);
 }
 
-test("modelGroups splits a phase by model in row order, flat for the judge phases", () => {
-    const steps = lib.buildSteps("j", ["a", "b"], 2);
 
-    assert.deepEqual(
-        lib.modelGroups(steps, "grading").map((g) => [g.model, g.total]),
-        [
-            ["a", 2],
-            ["b", 2],
-        ],
-    );
-    assert.deepEqual(
-        lib.modelGroups(steps, "reference").map((g) => [g.model, g.total]),
-        [["j", 2]],
-    );
-    assert.equal(lib.modelGroups(steps, "summary").length, 1);
-});
 
-test("modelGroups: a queued group", () => {
-    const [a] = lib.modelGroups(lib.buildSteps("j", ["a"], 2), "answer");
 
-    assert.equal(a.state, "queued");
-    assert.equal(a.side, "0/2");
-});
 
-test("modelGroups: a group in progress stays running between two rows", () => {
-    const steps = lib.buildSteps("j", ["a"], 3);
-    setRow(steps, "answer:a:q1", { state: "done" });
-    setRow(steps, "answer:a:q2", { state: "running" });
-    const [running] = lib.modelGroups(steps, "answer");
 
-    assert.equal(running.state, "running");
-    assert.equal(running.side, "1/3");
 
-    setRow(steps, "answer:a:q2", { state: "done" });
-    const [between] = lib.modelGroups(steps, "answer");
 
-    assert.equal(between.state, "running");
-    assert.equal(between.side, "2/3");
-});
 
-test("modelGroups: a finished group shows successes, errors and the duration", () => {
-    const steps = lib.buildSteps("j", ["a"], 3);
-    setRow(steps, "answer:a:q1", { state: "done", startTs: 1000, endTs: 20000 });
-    setRow(steps, "answer:a:q2", { state: "error", startTs: 20000, endTs: 30000 });
-    setRow(steps, "answer:a:q3", { state: "done", startTs: 30000, endTs: 52300 });
-    const [a] = lib.modelGroups(steps, "answer");
 
-    assert.equal(a.state, "done");
-    assert.equal(a.ok, 2);
-    assert.equal(a.errors, 1);
-    assert.equal(a.side, "2/3 · 51.3 s");
-});
 
-test("modelGroups: skipped grading rows count as finished and are reported apart", () => {
-    const steps = lib.buildSteps("j", ["a"], 2);
-    setRow(steps, "grading:a:q1", { state: "done" });
-    setRow(steps, "grading:a:q2", { state: "skipped" });
-    const [a] = lib.modelGroups(steps, "grading");
 
-    assert.equal(a.state, "done");
-    assert.equal(a.skipped, 1);
-    assert.equal(a.side, "1/2");
-});
-
-test("modelGroups: no duration without server timestamps", () => {
-    const steps = lib.buildSteps("j", ["a"], 1);
-    setRow(steps, "answer:a:q1", { state: "done" });
-
-    assert.equal(lib.modelGroups(steps, "answer")[0].side, "1/1");
-});
 
 const PHASES = [
     { phase: "reference", title: "01 reference answers" },
@@ -315,17 +256,25 @@ test("columnWindow shows everything when it fits", () => {
     assert.deepEqual(lib.columnWindow(0, 16, 0), { start: 0, end: 0, before: 0, after: 0 });
 });
 
-test("columnWindow sticks to the edges and gives up a column for a second counter", () => {
+test("columnWindow sticks to the edges and centres on the question in progress", () => {
     assert.deepEqual(lib.columnWindow(30, 16, 0), { start: 0, end: 16, before: 0, after: 14 });
     assert.deepEqual(lib.columnWindow(30, 16, 29), { start: 14, end: 30, before: 14, after: 0 });
-    assert.deepEqual(lib.columnWindow(30, 16, 15), { start: 8, end: 23, before: 8, after: 7 });
+    assert.deepEqual(lib.columnWindow(30, 16, 15), { start: 8, end: 24, before: 8, after: 6 });
 });
 
 test("columnWindow follows manual paging and clamps it", () => {
-    assert.deepEqual(lib.columnWindow(30, 16, 0, 5), { start: 5, end: 20, before: 5, after: 10 });
+    assert.deepEqual(lib.columnWindow(30, 16, 0, 5), { start: 5, end: 21, before: 5, after: 9 });
     assert.deepEqual(lib.columnWindow(30, 16, 0, 99), { start: 14, end: 30, before: 14, after: 0 });
     assert.deepEqual(lib.columnWindow(30, 16, 0, -3), { start: 0, end: 16, before: 0, after: 14 });
     assert.deepEqual(lib.columnWindow(30, 0, 3), { start: 0, end: 0, before: 0, after: 30 });
+});
+
+test("columnsThatFit for the running matrix reserves both counters", () => {
+    // 270 (model) + 80 (time) fixed, 52 per question, 2 x 44 for the counters
+    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 12);
+    assert.equal(lib.columnsThatFit(1094, 10, lib.RUNNING_MATRIX), 10);
+    assert.equal(lib.columnsThatFit(2494, 30, lib.RUNNING_MATRIX), 30);
+    assert.equal(lib.columnsThatFit(300, 30, lib.RUNNING_MATRIX), 0);
 });
 
 // --- markdown -------------------------------------------------------------
@@ -886,6 +835,126 @@ test("buildReport: no recommendation and a cloud judge", () => {
     assert.equal(report.verdict.rule, "no answers could be graded");
     assert.deepEqual(report.notes, []);
     assert.ok(report.meta.endsWith("cloud judge"));
+});
+
+// --- running matrix ---------------------------------------------------------
+
+test("buildMatrix: a reference row and a row per candidate, a cell per question", () => {
+    const rows = lib.buildMatrix(lib.buildSteps("j", ["a", "b"], 3), 3, (m) => m);
+
+    assert.deepEqual(
+        rows.map((r) => [r.label, r.reference, r.sub, r.cells.length]),
+        [
+            ["reference", true, "j", 3],
+            ["a", false, "", 3],
+            ["b", false, "", 3],
+        ],
+    );
+    assert.ok(rows.every((r) => r.state === "queued" && r.time === "–"));
+    assert.ok(rows.every((r) => r.cells.every((c) => c.state === "planned")));
+});
+
+test("buildMatrix: a cell follows the answer and the grading of its question", () => {
+    const steps = lib.buildSteps("j", ["a", "b"], 3);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    setRow(steps, "answer:a:q2", { state: "done" });
+    setRow(steps, "answer:a:q3", { state: "error" });
+    setRow(steps, "grading:a:q3", { state: "skipped" });
+    setRow(steps, "answer:b:q1", { state: "done" });
+    setRow(steps, "grading:b:q1", { state: "running" });
+    setRow(steps, "answer:b:q2", { state: "done" });
+    setRow(steps, "grading:b:q2", { state: "done" });
+    setRow(steps, "answer:b:q3", { state: "done" });
+    setRow(steps, "grading:b:q3", { state: "error" });
+
+    const [, a, b] = lib.buildMatrix(steps, 3, (m) => m);
+
+    assert.deepEqual(
+        a.cells.map((c) => c.state),
+        ["answering", "ready", "generation_error"],
+    );
+    assert.deepEqual(
+        b.cells.map((c) => c.state),
+        ["grading", "graded", "judge_error"],
+    );
+    assert.equal(a.state, "running");
+    assert.equal(b.state, "running");
+
+    setRow(steps, "grading:b:q1", { state: "done" });
+    assert.equal(lib.buildMatrix(steps, 3, (m) => m)[2].state, "done");
+});
+
+test("buildMatrix: the reference row follows the reference steps", () => {
+    const steps = lib.buildSteps("j", ["a"], 3);
+    setRow(steps, "reference:j:q1", { state: "done" });
+    setRow(steps, "reference:j:q2", { state: "error" });
+    setRow(steps, "reference:j:q3", { state: "running" });
+
+    const [reference] = lib.buildMatrix(steps, 3, (m) => m);
+
+    assert.deepEqual(
+        reference.cells.map((c) => c.state),
+        ["graded", "generation_error", "answering"],
+    );
+    assert.equal(reference.state, "running");
+});
+
+test("buildMatrix: time is the total answering time, the title names the cell", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    setRow(steps, "answer:a:q1", { state: "done", startTs: 0, endTs: 4100 });
+    setRow(steps, "answer:a:q2", { state: "done", startTs: 5000, endTs: 6900 });
+
+    const [, a] = lib.buildMatrix(steps, 2, (m) => m);
+
+    assert.equal(a.time, "00:06");
+    assert.equal(a.cells[0].title, "a · q1: answer ready · 4.1 s");
+    assert.equal(a.cells[1].title, "a · q2: answer ready · 1.9 s");
+});
+
+test("activeQuestion is the first question in progress, or null", () => {
+    const steps = lib.buildSteps("j", ["a"], 3);
+
+    assert.equal(lib.activeQuestion(steps), null);
+    setRow(steps, "answer:a:q3", { state: "running" });
+    setRow(steps, "grading:a:q2", { state: "running" });
+    assert.equal(lib.activeQuestion(steps), 1);
+});
+
+test("hiddenSummary counts the hidden cells and warns about errors", () => {
+    const cell = (state: lib.CellState): lib.MatrixCellInfo => ({ state, title: "" });
+    const cells = [
+        cell("graded"),
+        cell("graded"),
+        cell("judge_error"),
+        cell("graded"),
+        cell("planned"),
+    ];
+
+    assert.deepEqual(lib.hiddenSummary(cells, 0, 4), {
+        count: 4,
+        warn: true,
+        title: "q1–q4: 3 graded · 1 judge error (q3)",
+    });
+    assert.deepEqual(lib.hiddenSummary(cells, 4, 5), {
+        count: 1,
+        warn: false,
+        title: "q5: 1 planned",
+    });
+    assert.deepEqual(lib.hiddenSummary(cells, 2, 2), { count: 0, warn: false, title: "" });
+});
+
+test("nowRows lists the running steps with a verb", () => {
+    const steps = lib.buildSteps("j", ["a"], 1);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    setRow(steps, "grading:a:q1", { state: "running" });
+
+    assert.deepEqual(
+        lib.nowRows(steps).map((r) => [r.key, r.verb]),
+        [
+            ["answer:a:q1", "answering"],
+            ["grading:a:q1", "grading"],
+        ],
+    );
 });
 
 // --- test cases file ------------------------------------------------------

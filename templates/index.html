@@ -144,9 +144,7 @@
     {# One segment per phase. Summary is a single call: half the width, no counter. #}
     <div class="grid grid-cols-[2fr_2fr_2fr_1fr] gap-33">
         <template x-for="p in phaseProgress" :key="p.phase">
-            <button type="button" @click="scrollToPhase(p.phase)"
-                    :aria-label="p.title + ': ' + p.finished + ' of ' + p.total + (p.errors ? ', ' + p.errors + ' errors' : '')"
-                    class="min-w-0 flex flex-col gap-8 text-left">
+            <div class="min-w-0 flex flex-col gap-8">
                 <span class="flex items-center justify-between gap-8">
                     <span class="min-w-0 flex items-center gap-8" :class="stateClass(p.state)">
                         {{ ui.activity_dot("p.state === 'running'") }}
@@ -161,57 +159,114 @@
                     <span class="block h-4 bg-fg transition-[width] duration-200 ease-out motion-reduce:transition-none"
                           :style="'width:' + p.pct + '%'"></span>
                 </span>
-            </button>
+            </div>
         </template>
     </div>
 
     {{ ui.warn_notice("run.status === 'error'", "run.error",
                       action="dismissRun()", action_label="back to setup") }}
 
-    <template x-for="g in phaseGroups" :key="g.phase">
-        <div class="flex flex-col scroll-mt-33" :id="'phase-' + g.phase">
-            {# group header: a finished phase folds into this line #}
-            <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
-                <span x-text="g.title"></span>
-                <span x-show="phaseOf(g.phase).state === 'done'" class="flex items-center gap-15">
-                    <span>
-                        <span x-text="phaseOf(g.phase).side"></span><span
-                              x-show="phaseOf(g.phase).errors" class="text-warn"
-                              x-text="(phaseOf(g.phase).side ? ' · ' : '') + phaseOf(g.phase).errors + ' err'"></span>
-                    </span>
-                    <button type="button" @click="togglePhase(g.phase)"
-                            :aria-expanded="!isCollapsed(g.phase)" :aria-controls="'rows-' + g.phase"
-                            class="hover:text-fg" x-text="isCollapsed(g.phase) ? 'show' : 'hide'"></button>
-                </span>
+    {# models x questions: as many question columns as fit the width #}
+    <section class="flex flex-col">
+        <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+            <span>models × questions</span>
+            <span x-text="run.cloud ? 'cloud judge · grading runs in parallel' : 'local judge · one model in VRAM at a time'"></span>
+        </div>
+
+        {# window controls: only while some questions do not fit #}
+        <div x-show="matrixOverflow" x-cloak
+             class="flex justify-between items-center gap-15 py-12 border-b border-line text-fg-muted">
+            <span x-text="run.questions + ' questions · showing ' + matrixRange"></span>
+            <span class="flex items-center gap-22">
+                <button type="button" @click="toggleFollow()" :aria-pressed="followCurrent"
+                        class="hover:text-fg" :class="followCurrent && 'text-fg'"
+                        x-text="'follow current · ' + (followCurrent ? 'on' : 'off')"></button>
+                <button type="button" @click="pageMatrix(-1)" :disabled="!matrixWindow.before"
+                        class="enabled:hover:text-fg disabled:cursor-not-allowed">‹ prev</button>
+                <button type="button" @click="pageMatrix(1)" :disabled="!matrixWindow.after"
+                        class="enabled:hover:text-fg disabled:cursor-not-allowed">next ›</button>
+            </span>
+        </div>
+
+        <div x-ref="matrixBox" x-init="observeMatrix($el)">
+            <div class="grid items-center py-12 border-b border-line text-fg-muted" :style="matrixGrid">
+                <div>model</div>
+                <div class="text-center" x-text="matrixWindow.before ? '‹' : ''"></div>
+                <template x-for="id in matrixLabels" :key="id">
+                    <div class="text-center" x-text="id"></div>
+                </template>
+                <div class="text-center" x-text="matrixWindow.after ? '›' : ''"></div>
+                <div class="text-right">time</div>
             </div>
 
-            <div :id="'rows-' + g.phase" x-show="!isCollapsed(g.phase)">
-                <template x-for="mg in modelGroups(g.phase)" :key="mg.model">
-                    <div>
-                        {# model header: answer and grading only #}
-                        <div x-show="isGrouped(g.phase)" x-cloak>{{ ui.model_group_head() }}</div>
-                        <div x-show="isModelOpen(g.phase, mg)">
-                            <template x-for="s in mg.rows" :key="s.key">
-                                <div>
-                                    {{ ui.status_row("s.state", "s.label", "rowMeta(s)", title_expr="s.model") }}
-                                    {# load notice: announced once through the page live region #}
-                                    <div x-show="showLoadNotice(s)" x-cloak class="pl-87 py-10 border-b border-line">
-                                        <div class="bg-surface border border-line p-15 flex flex-col gap-8">
-                                            <div class="flex items-center gap-8">
-                                                {{ ui.activity_dot() }}
-                                                the model may still be loading — this is normal
-                                            </div>
-                                            <p class="text-fg-muted">each model is loaded once at the start of its phase and stays loaded for 10 minutes. a large model can take 10–60 s to load, so the first answer is slow. nothing is frozen.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
+            <template x-for="row in run.matrix" :key="row.model + ':' + row.reference">
+                <div class="grid items-center py-12 border-b border-line" :style="matrixGrid">
+                    <div class="min-w-0 flex items-baseline gap-8" :class="stateClass(row.state)">
+                        <span class="truncate" x-text="row.label" :title="row.model"></span>
+                        <span x-show="row.sub" class="truncate text-fg-muted" x-text="row.sub"></span>
                     </div>
-                </template>
+                    <div class="text-center tabular-nums"
+                         :class="hiddenLeft(row).warn ? 'text-warn' : 'text-fg-muted'"
+                         :title="hiddenLeft(row).title"
+                         x-text="matrixWindow.before ? '‹ ' + hiddenLeft(row).count : ''"></div>
+                    <template x-for="(c, ci) in visibleCells(row)" :key="ci">
+                        <div class="flex items-center justify-center" role="img"
+                             :title="c.title" :aria-label="c.title">
+                            <span class="flex items-center justify-center size-16" :class="cellClass(c.state)">
+                                <span x-show="cellDot(c.state)" class="block animate-pulse-cell motion-reduce:animate-none" :class="cellDot(c.state)"></span>
+                            </span>
+                        </div>
+                    </template>
+                    <div class="text-center tabular-nums"
+                         :class="hiddenRight(row).warn ? 'text-warn' : 'text-fg-muted'"
+                         :title="hiddenRight(row).title"
+                         x-text="matrixWindow.after ? hiddenRight(row).count + ' ›' : ''"></div>
+                    <div class="text-right tabular-nums" :class="isMuted(row.state) && 'text-fg-muted'"
+                         x-text="row.time"></div>
+                </div>
+            </template>
+        </div>
+
+        {# legend: shape and fill, never colour alone #}
+        <div class="flex flex-col gap-8 py-15 text-fg-muted">
+            <div class="flex flex-wrap gap-x-22 gap-y-8">
+                <span class="flex items-center gap-8"><span class="flex items-center justify-center size-16 border border-link"><span class="size-10 bg-link"></span></span>answering</span>
+                <span class="flex items-center gap-8"><span class="size-16 border border-fg"></span>answer ready</span>
+                <span class="flex items-center gap-8">
+                    <span class="flex items-center justify-center size-16 border border-fg"><span class="size-6 bg-link"></span></span>grading
+                </span>
+                <span class="flex items-center gap-8"><span class="size-16 bg-fg"></span>graded</span>
+                <span class="flex items-center gap-8"><span class="size-16 bg-warn"></span>generation error</span>
+                <span class="flex items-center gap-8"><span class="size-16 border border-warn"></span>judge error</span>
+                <span>empty · planned</span>
+            </div>
+            <div class="flex flex-wrap gap-x-22 gap-y-8">
+                <span x-show="matrixOverflow" x-cloak>‹ 6 · hidden questions, warn if one has an error</span>
+                <span>time · total answering time of the model</span>
             </div>
         </div>
-    </template>
+    </section>
+
+    {# now: the calls in flight #}
+    <section class="flex flex-col" x-show="run.current.length" x-cloak>
+        {{ ui.section_label("now") }}
+        <template x-for="n in run.current" :key="n.key">
+            <div>
+                {{ ui.status_row("n.step.state", "n.step.label", "rowMeta(n.step)",
+                                 title_expr="n.step.model", state_text="n.verb") }}
+                {# load notice: announced once through the page live region #}
+                <div x-show="showLoadNotice(n.step)" x-cloak class="pl-87 py-10 border-b border-line">
+                    <div class="bg-surface border border-line p-15 flex flex-col gap-8">
+                        <div class="flex items-center gap-8">
+                            {{ ui.activity_dot() }}
+                            the model may still be loading — this is normal
+                        </div>
+                        <p class="text-fg-muted">each model is loaded once at the start of its phase and stays loaded for 10 minutes. a large model can take 10–60 s to load, so the first answer is slow. nothing is frozen.</p>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </section>
 </div>
 
 {# results #}

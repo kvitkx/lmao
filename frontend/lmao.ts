@@ -17,7 +17,6 @@ import {
     isBlankCase,
     loadGroup,
     markdownTree,
-    modelGroups,
     pad2,
     parseCasesFile,
     payloadCase,
@@ -30,13 +29,25 @@ import {
     type FormCase,
     type HistoryRun,
     type MdBlock,
-    type ModelGroup,
     type PayloadCase,
     type PhaseFigures,
     type PhaseGroup,
     type Report,
     type Step,
     type TreeNode,
+    RUNNING_MATRIX,
+    activeQuestion,
+    buildMatrix,
+    columnWindow,
+    columnsThatFit,
+    hiddenSummary,
+    nowRows,
+    type CellState,
+    type ColumnWindow,
+    type Hidden,
+    type MatrixCellInfo,
+    type MatrixRow,
+    type NowRow,
 } from "./lib.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
@@ -66,9 +77,11 @@ interface RunState {
     endedAt: number | null;
     now: number;
     error: string;
-    expanded: Record<string, boolean>; // phase -> true/false, set by the user; default: folded when done without errors
-    openModels: Record<string, boolean>; // "phase:model" -> true/false, set by the user; default: open while running
-    phases: Record<string, PhaseFigures>; // phase -> figures, see updatePhases()
+    phases: Record<string, PhaseFigures>; // phase -> figures, see updateRun()
+    questions: number;
+    active: number; // the question in progress (0-based), the anchor of the matrix window
+    matrix: MatrixRow[];
+    current: NowRow[]; // the calls in flight
 }
 
 // A case of the setup form: every field is there.
@@ -168,9 +181,11 @@ document.addEventListener("alpine:init", () => {
         endedAt: null,
         now: 0,
         error: "",
-        expanded: {},
-        openModels: {},
         phases: phaseStats([], PHASE_GROUPS),
+        questions: 0,
+        active: 0,
+        matrix: [],
+        current: [],
     });
 
     const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -204,6 +219,9 @@ document.addEventListener("alpine:init", () => {
         resultsError: "",
         openAnswers: {} as Record<string, boolean>, // eval block anchor -> true: its answer text is rendered
         run: freshRun(),
+        matrixWidth: 0, // px, from a ResizeObserver
+        followCurrent: true,
+        matrixStart: 0, // first visible question while the user pages by hand
         results: null as ApiResults | null,
         report: null as Report | null,
 
@@ -282,45 +300,109 @@ document.addEventListener("alpine:init", () => {
 
         // Recomputed once per event, not on every read: the template reads
         // these figures many times per row.
-        updatePhases(): void {
-            this.run.phases = phaseStats(this.run.steps, this.phaseGroups);
+        updateRun(): void {
+            const run = this.run;
+            run.phases = phaseStats(run.steps, this.phaseGroups);
+            run.matrix = buildMatrix(run.steps, run.questions, (m) => this.label(m));
+            run.current = nowRows(run.steps);
+            const active = activeQuestion(run.steps);
+            // Between two steps nothing runs: keep the last question.
+            if (active !== null) run.active = active;
         },
 
-        phaseOf(phase: string): PhaseFigures {
-            return this.run.phases[phase];
+        // --- matrix ---------------------------------------------------------
+
+        observeMatrix(el: HTMLElement): void {
+            const read = () => {
+                this.matrixWidth = el.clientWidth;
+            };
+            read();
+            new ResizeObserver(read).observe(el);
         },
 
-        // A finished phase folds into its header. Phases with errors stay open
-        // unless the user folds them.
-        isCollapsed(phase: string): boolean {
-            const p = this.phaseOf(phase);
-            if (p.state !== "done") return false;
-            return !(this.run.expanded[phase] ?? p.errors > 0);
+        // As many question columns as fit the width, centred on the question in progress.
+        get matrixWindow(): ColumnWindow {
+            const total = this.run.questions;
+            const fit = columnsThatFit(this.matrixWidth, total, RUNNING_MATRIX);
+            return columnWindow(
+                total,
+                fit,
+                this.run.active,
+                this.followCurrent ? null : this.matrixStart,
+            );
         },
 
-        togglePhase(phase: string): void {
-            this.run.expanded[phase] = this.isCollapsed(phase);
+        get matrixOverflow(): boolean {
+            const w = this.matrixWindow;
+            return w.before + w.after > 0;
         },
 
-        // Answer and grading are listed per model; reference and summary are
-        // one judge and stay flat (no group header).
-        isGrouped(phase: string): boolean {
-            return phase === "answer" || phase === "grading";
+        get matrixRange(): string {
+            const w = this.matrixWindow;
+            return `q${pad2(w.start)}–q${pad2(w.end - 1)}`;
         },
 
-        modelGroups(phase: string): ModelGroup[] {
-            return modelGroups(this.run.steps, phase);
+        get matrixLabels(): string[] {
+            const w = this.matrixWindow;
+            return Array.from({ length: w.end - w.start }, (_, i) => `q${w.start + i + 1}`);
         },
 
-        // Only the model that works now is open. Errors do not open a group
-        // (the run would jump around): they show as `! N err` in its header.
-        isModelOpen(phase: string, group: ModelGroup): boolean {
-            if (!this.isGrouped(phase)) return true;
-            return this.run.openModels[`${phase}:${group.model}`] ?? group.state === "running";
+        // model | counter | one column per visible question | counter | time.
+        // The counter columns exist only while something is hidden.
+        get matrixGrid(): string {
+            const w = this.matrixWindow;
+            const counter = this.matrixOverflow ? RUNNING_MATRIX.counter : 0;
+            const count = w.end - w.start;
+            const cells = count ? `repeat(${count},${RUNNING_MATRIX.cell}px)` : "";
+            return `grid-template-columns:${RUNNING_MATRIX.name}px ${counter}px ${cells} ${counter}px minmax(${RUNNING_MATRIX.tail}px,1fr)`;
         },
 
-        toggleModel(phase: string, group: ModelGroup): void {
-            this.run.openModels[`${phase}:${group.model}`] = !this.isModelOpen(phase, group);
+        visibleCells(row: MatrixRow): MatrixCellInfo[] {
+            const w = this.matrixWindow;
+            return row.cells.slice(w.start, w.end);
+        },
+
+        hiddenLeft(row: MatrixRow): Hidden {
+            return hiddenSummary(row.cells, 0, this.matrixWindow.start);
+        },
+
+        hiddenRight(row: MatrixRow): Hidden {
+            return hiddenSummary(row.cells, this.matrixWindow.end, row.cells.length);
+        },
+
+        toggleFollow(): void {
+            // Turning it off keeps the window where it is.
+            if (this.followCurrent) this.matrixStart = this.matrixWindow.start;
+            this.followCurrent = !this.followCurrent;
+        },
+
+        pageMatrix(direction: -1 | 1): void {
+            const w = this.matrixWindow;
+            const size = Math.max(1, w.end - w.start);
+            this.matrixStart = w.start + direction * size; // columnWindow clamps it
+            this.followCurrent = false;
+        },
+
+        // Filled = progress, outlined = waiting for the next step, warn = error.
+        cellClass(state: CellState): string {
+            const classes: Record<CellState, string> = {
+                planned: "",
+                answering: "border border-link",
+                ready: "border border-fg",
+                grading: "border border-fg",
+                graded: "bg-fg",
+                generation_error: "bg-warn",
+                judge_error: "border border-warn",
+            };
+            return classes[state];
+        },
+
+        // The square inside a cell that is being worked on. It pulses; the
+        // grading one is smaller, so the two phases differ by size, not by motion.
+        cellDot(state: CellState): string {
+            if (state === "answering") return "size-10 bg-link";
+            if (state === "grading") return "size-6 bg-link";
+            return "";
         },
 
         // First screen: the state of the form as status rows.
@@ -593,10 +675,13 @@ document.addEventListener("alpine:init", () => {
                 cloud: payload.judge_provider !== "ollama",
                 // Corrected by the first event that carries `progress`.
                 total: totalSteps(payload.test_cases.length, new Set(payload.candidates).size),
+                questions: payload.test_cases.length,
                 startedAt: now,
                 now,
             };
-            this.updatePhases();
+            this.followCurrent = true;
+            this.matrixStart = 0;
+            this.updateRun();
             loadWatch = [];
             this.activeRunId = taskId;
             this.setupOpen = false;
@@ -669,7 +754,7 @@ document.addEventListener("alpine:init", () => {
             if (!step) return;
             if (match[2] === "start") this.stepStarted(step, event);
             else this.stepDone(step, event);
-            this.updatePhases();
+            this.updateRun();
         },
 
         stepStarted(step: Step, event: SseEvent): void {
@@ -753,7 +838,7 @@ document.addEventListener("alpine:init", () => {
                     step.meta = "interrupted";
                 }
             });
-            this.updatePhases();
+            this.updateRun();
             this.run.status = "error";
             this.run.error = message; // announced by the role="alert" notice
             this.run.endedAt = Date.now();
@@ -777,14 +862,6 @@ document.addEventListener("alpine:init", () => {
         showRun(): void {
             this.view = "running";
             this.activeRunId = this.run.id;
-        },
-
-        // Progress segment -> its group of rows.
-        scrollToPhase(phase: string): void {
-            const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            document
-                .getElementById(`phase-${phase}`)
-                ?.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
         },
 
         // Comparison table -> a card or an eval block in 03 view. Both 03 views

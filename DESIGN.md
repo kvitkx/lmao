@@ -256,23 +256,13 @@ Buttons below: `back to run` while a run is in progress; `open setup` while the 
 
 The setup panel closes. Elapsed time and the step count are in the topbar.
 
-**Progress.** A grid of four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each segment is a button: the label (with an activity dot while running) and `finished / total` on the right, then an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates still answer. A finished phase also shows its duration (wall clock from the first start to the last end). Errors show as `· N err` in warn. Summary is a single call: half width, no counter. Clicking a segment scrolls to its rows. An `sr-only` `progressbar` carries the overall value.
+**Progress.** A grid of four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each segment is a button: the label (with an activity dot while running) and `finished / total` on the right, then an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates still answer. A finished phase also shows its duration (wall clock from the first start to the last end). Errors show as `· N err` in warn. Summary is a single call: half width, no counter. An `sr-only` `progressbar` carries the overall value.
 
-**Matrix.** [planned] Built instead: rows grouped by phase and model, each with a fold/unfold header. `models × questions`, with the judge mode noted on the right(`local judge · one model in VRAM at a time`, or the cloud variant).
+**Matrix.** Rows: the reference row (the judge's name muted beside it) and one row per candidate; the model that works now is `link`, waiting rows are muted. Columns: model (270px), one 52px column per question, time (80px, the total answering time of the model). A cell is a 16px square, its state shown by shape and fill: planned = empty, answering = ring `link` with a pulsing filled `link` square inside, answer ready = outline `fg`, grading = outline `fg` with a smaller pulsing `link` square inside (both pulses stop with reduced motion), graded = filled `fg`, generation error = filled `warn`, judge error = outline `warn`. A cell has a tooltip (`ministral-3:3b · q6: answer ready · 4.1 s`). The legend is always shown under the matrix.
 
-- Rows: the reference row (judge name in muted text, with its answered count and no graded count) and one row per candidate. The model currently working is coloured `link`.
-- Columns: model, `time` (total answering time of the model), question columns, `answered`, `graded`.
-- Footer rows: per-question `answered` and `graded` counts; a count in `warn` means an error in that column.
-- Cells use the matrix cell states (section 4). Hovering a cell shows its tooltip.
-- Legend and a one-line explanation under the grid.
+**Columns fit the width.** There is no fixed number of question columns: the matrix shows as many as fit (`ResizeObserver`), so a wide window or closed side panels show more. When not all fit, the window follows the question in progress, and each row gets counters on both edges (`‹ 6`, `8 ›`; `warn` if a hidden cell has an error, the tooltip summarises the hidden range). A line above the grid: `24 questions · showing q07–q16`, `follow current · on/off`, `‹ prev`, `next ›`. Manual paging turns `follow current` off.
 
-**Long runs (more than 10 questions).** [planned] The matrix shows a window of 10 question columns.
-
-- A line above the grid: `24 questions · showing q07–q16`, with `follow current · on/off`, `‹ prev` and `next ›`.
-- Columns outside the window collapse into counters at the edges (`‹ 6`, `8 ›`) in every row. A counter turns `warn` if any hidden cell has an error; its tooltip summarises the hidden range (`5 graded · 1 judge error (q4)`).
-- `follow current` moves the window with the active question. Manual paging turns it off.
-
-**Now.** [planned] Under the matrix, a `now` section lists the calls in flight as status rows: state, label, timer. In cloud mode several rows can run at once.
+**Now.** Under the matrix, the calls in flight as status rows: the verb (`reference`, `answering`, `grading`, `summary`), the label, a timer. In cloud mode several rows can run at once.
 
 **Load notice.** Shown only after a row has been `running` for about 8 seconds on the first call of a model load group, so it appears only where a model may still be loading. It says that loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
