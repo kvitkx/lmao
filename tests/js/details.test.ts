@@ -127,7 +127,7 @@ test("memory: the share in VRAM and the GPU note when a model spills over", () =
     );
 });
 
-test("tokens vs characters: round axes, rays of 3 and 4 chars per token", () => {
+test("tokens vs characters: round axes, a ray for the fewest and for the most characters per token", () => {
     const { scatter } = build([
         stats("a", { mean: 90, median_tps: 10, median_cps: 40 }),
         stats("b", { mean: 60, median_tps: 20, median_cps: 100 }),
@@ -144,36 +144,61 @@ test("tokens vs characters: round axes, rays of 3 and 4 chars per token", () => 
         ],
     );
     assert.deepEqual(
-        scatter.rays.map((r) => [r.label, r.x2, Math.round(r.y2)]),
+        scatter.rays.map((r) => [r.label, r.x2, Math.round(r.y2), r.edge]),
         [
-            ["3 chars/token", 100, 60],
-            ["4 chars/token", 100, 80],
+            ["min 4.0 chars/token", 100, 80, "right"],
+            ["max 5.0 chars/token", 100, 100, "right"],
         ],
     );
     assert.deepEqual(scatter.missing, ["c"]);
 });
 
 test("tokens vs characters: a steep ray ends on the top edge", () => {
-    const { scatter } = build([stats("a", { mean: 90, median_tps: 10, median_cps: 10 })]);
+    const { scatter } = build([
+        stats("a", { mean: 90, median_tps: 1, median_cps: 100 }),
+        stats("b", { mean: 60, median_tps: 100, median_cps: 50 }),
+    ]);
 
-    // x axis 0..10 (ticks of 2), y axis 0..12 (ticks of 2): 4 chars/token leaves the top first
-    const [three, four] = scatter.rays;
-    assert.equal(three.y2 <= 100, true);
-    assert.equal(four.y2, 100);
-    assert.ok(four.x2 < 100);
+    const [lowest, highest] = scatter.rays;
+
+    assert.deepEqual(
+        [lowest.label, lowest.edge, lowest.x2, lowest.y2, lowest.title],
+        ["min 0.5 chars/token", "right", 100, 50, "b"],
+    );
+    assert.deepEqual(
+        [highest.label, highest.edge, highest.x2, highest.y2, highest.title],
+        ["max 100.0 chars/token", "top", 1, 100, "a"],
+    );
 });
 
-test("answers by category: segments in rank order, errors in warn, pass from the summary", () => {
+test("tokens vs characters: one ray when the models need the same chars per token", () => {
+    const { scatter } = build([
+        stats("a", { mean: 90, median_tps: 10, median_cps: 40 }),
+        stats("b", { mean: 60, median_tps: 20, median_cps: 80 }),
+    ]);
+
+    assert.deepEqual(scatter.rays.map((r) => r.label), ["4.0 chars/token"]);
+});
+
+test("answers by category: counted like the scores, so the bar and the pass number agree", () => {
     const answers = [
         answer("a", 95),
         answer("a", 95),
         answer("a", 80, { category: "acceptable" }),
         answer("a", 5, { category: "garbage" }),
         answer("a", null, { status: "generation_error", category: null }),
+        answer("a", 95, { status: "truncated" }),
+        answer("a", null, { status: "judge_error", category: null }),
     ];
-    const models = [stats("a", { mean: 90, pass_rate: 0.6 })];
+    const questions = [
+        question("q1", answers),
+        // no reference: left out of the scores, so left out of the bar
+        question("q2", [answer("a", 40, { category: "instruction_violation" })], {
+            no_reference: true,
+        }),
+    ];
 
-    const { categories } = build(models, [question("q1", answers)]);
+    const { categories } = build([stats("a", { mean: 90 })], questions);
     const [bar] = categories.bars;
 
     assert.deepEqual(
@@ -182,14 +207,36 @@ test("answers by category: segments in rank order, errors in warn, pass from the
             ["perfect solution", 2, "bg-fg"],
             ["generally acceptable", 1, "bg-fg/65"],
             ["garbage", 1, "bg-fg/8"],
+            ["truncated", 1, "border border-fg-muted"],
             ["generation error", 1, "bg-warn"],
         ],
     );
-    assert.equal(bar.segments[0].pct, 40);
-    assert.equal(bar.passText, "60% pass");
-    assert.equal(categories.legend.length, 5);
+    // 6 counted answers, 3 of them pass
+    assert.equal(bar.passText, "50% pass");
+    assert.equal(Math.round(bar.segments[0].pct), 33);
+    assert.equal(categories.threshold, 70);
+    assert.deepEqual(
+        categories.legend.map((l) => l.label),
+        [
+            "perfect solution",
+            "generally acceptable",
+            "violation of instructions",
+            "broken logic",
+            "garbage",
+            "truncated",
+            "generation error",
+        ],
+    );
     assert.deepEqual(categories.legend[0], { label: "perfect solution", cls: "bg-fg" });
-    assert.equal(categories.threshold, 80);
+});
+
+test("answers by category: a model without counted answers has an empty bar", () => {
+    const { categories } = build([stats("a", { mean: 90 })], [
+        question("q1", [answer("a", null, { status: "judge_error", category: null })]),
+    ]);
+
+    assert.deepEqual(categories.bars[0].segments, []);
+    assert.equal(categories.bars[0].passText, "–");
 });
 
 test("hardest questions: lowest mean first, errors count as 0, the best model named", () => {

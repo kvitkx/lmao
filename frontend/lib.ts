@@ -271,7 +271,7 @@ export const RESULTS_MATRIX: MatrixLayout = {
 export const RUNNING_MATRIX: MatrixLayout = {
     name: 270,
     tail: 80,
-    cell: 52,
+    cell: 18,
     counter: 44,
     counters: 2,
 };
@@ -337,6 +337,7 @@ export interface MatrixRow {
     sub: string; // the judge's name on the reference row
     reference: boolean;
     state: GroupState;
+    loaded: boolean; // the model is in memory now: it answers, or it judges
     time: string; // total answering time of the model
     cells: MatrixCellInfo[];
 }
@@ -419,12 +420,23 @@ function totalTime(steps: (Step | undefined)[]): string {
     return any ? fmtClock(ms / 1000) : "–";
 }
 
+// A group of steps is in progress while one of them runs, or some are finished
+// and some are still to come (a skipped step is neither).
+function inProgress(steps: (Step | undefined)[]): boolean {
+    const list = steps.filter((s): s is Step => s !== undefined);
+    const finished = (s: Step) => s.state === "done" || s.state === "error";
+    const open = (s: Step) => s.state === "queued" || s.state === "running";
+    return list.some((s) => s.state === "running") || (list.some(finished) && list.some(open));
+}
+
 // The reference row and one row per candidate, a cell per question. The state
-// of a cell comes from the answer and grading steps, so no new events.
+// of a cell comes from the answer and grading steps, so no new events. `cloud`:
+// the judge runs remotely, beside the candidates.
 export function buildMatrix(
     steps: Step[],
     questionCount: number,
     display: (model: string) => string,
+    cloud = false,
 ): MatrixRow[] {
     const byKey = new Map(steps.map((s) => [s.key, s]));
     const candidates: string[] = [];
@@ -440,6 +452,14 @@ export function buildMatrix(
         const step = referenceSteps[i];
         return cellInfo(`reference · ${display(judge)}`, id, referenceCell(step), step);
     });
+    // The judge is in memory while it works: for the references, then again for
+    // grading and the summary (a local judge is loaded twice). A cloud judge
+    // works beside the candidates, from its first call to the summary.
+    const judgeSteps = steps.filter((s) => s.phase === "grading" || s.phase === "summary");
+    const judgeLoaded = cloud
+        ? inProgress([...referenceSteps, ...judgeSteps])
+        : inProgress(referenceSteps) || inProgress(judgeSteps);
+
     const rows: MatrixRow[] = judge
         ? [
               {
@@ -448,6 +468,7 @@ export function buildMatrix(
                   sub: display(judge),
                   reference: true,
                   state: rowState(referenceCells),
+                  loaded: judgeLoaded,
                   time: totalTime(referenceSteps),
                   cells: referenceCells,
               },
@@ -468,6 +489,7 @@ export function buildMatrix(
             sub: "",
             reference: false,
             state: rowState(cells),
+            loaded: inProgress(answers),
             time: totalTime(answers),
             cells,
         });
@@ -569,7 +591,7 @@ const RULE_LABELS: Record<string, string> = {
     highest_median: "the highest median score (no model reached the pass-rate threshold)",
     none_graded: "no answers could be graded",
 };
-const CATEGORY_LABELS: Record<string, string> = {
+export const CATEGORY_LABELS: Record<string, string> = {
     perfect: "perfect solution",
     acceptable: "generally acceptable",
     instruction_violation: "violation of instructions",
@@ -1109,7 +1131,7 @@ export function sortHistory(runs: unknown): HistoryRun[] {
 
 // --- answers by category -------------------------------------------------
 
-const CATEGORY_ORDER: string[] = [
+export const CATEGORY_ORDER: string[] = [
     "perfect",
     "acceptable",
     "instruction_violation",
@@ -1423,7 +1445,6 @@ export interface ReportReference {
 }
 
 export interface Report {
-    meta: string;
     verdict: {
         model: string | null;
         short: string;
@@ -1529,18 +1550,9 @@ export function buildReport(raw: unknown): Readonly<Report> {
         };
     });
 
-    const finished =
-        typeof data.finished_at === "string" ? data.finished_at.replace("T", " ").slice(0, 16) : "";
     // Frozen on purpose: Alpine does not wrap a frozen object in a reactive
     // proxy, and a report never changes after it is built.
     return Object.freeze({
-        meta: [
-            finished && `finished ${finished}`,
-            data.judge_model && `judge: ${data.judge_model}`,
-            data.mode === "cloud" ? "cloud judge" : "local judge",
-        ]
-            .filter(Boolean)
-            .join(" · "),
         verdict: {
             model: rec.model || null,
             short: rec.model ? display(rec.model) : "",

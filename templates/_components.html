@@ -8,10 +8,10 @@
    Static strings (`text` in section_label / checkbox_row, `label` in field)
    are rendered as plain text. #}
 
-{# activity-dot (33:221). Square, link colour, breathes. #}
+{# activity-dot (33:221). Square, link colour. #}
 {% macro activity_dot(show="") -%}
 <span{% if show %} x-show="{{ show }}"{% endif %} aria-hidden="true"
-      class="inline-block size-8 shrink-0 bg-link animate-breathe motion-reduce:animate-none"></span>
+      class="inline-block size-8 shrink-0 bg-link"></span>
 {%- endmacro %}
 
 {# Section label: hairline under a muted caption. #}

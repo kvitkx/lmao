@@ -270,10 +270,10 @@ test("columnWindow follows manual paging and clamps it", () => {
 });
 
 test("columnsThatFit for the running matrix reserves both counters", () => {
-    // 270 (model) + 80 (time) fixed, 52 per question, 2 x 44 for the counters
-    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 12);
-    assert.equal(lib.columnsThatFit(1094, 10, lib.RUNNING_MATRIX), 10);
-    assert.equal(lib.columnsThatFit(2494, 30, lib.RUNNING_MATRIX), 30);
+    // 270 (model) + 80 (time) fixed, 18 per question, 2 x 44 for the counters
+    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 24);
+    assert.equal(lib.columnsThatFit(1094, 60, lib.RUNNING_MATRIX), 36);
+    assert.equal(lib.columnsThatFit(2494, 60, lib.RUNNING_MATRIX), 60);
     assert.equal(lib.columnsThatFit(300, 30, lib.RUNNING_MATRIX), 0);
 });
 
@@ -697,10 +697,9 @@ test("buildReport rejects files in an older format", () => {
     assert.throws(() => lib.buildReport(null), lib.ReportFormatError);
 });
 
-test("buildReport: header, verdict and notes", () => {
+test("buildReport: verdict and notes", () => {
     const report = lib.buildReport(runFixture());
 
-    assert.equal(report.meta, "finished 2026-01-01 12:00 · judge: j · local judge");
     assert.equal(report.verdict.model, "a");
     assert.equal(report.verdict.label, "recommended");
     assert.equal(report.verdict.rule, "the fastest model among those with a high pass rate");
@@ -832,7 +831,6 @@ test("buildReport: no recommendation and a cloud judge", () => {
     assert.deepEqual(report.verdict.figures, []);
     assert.equal(report.verdict.rule, "no answers could be graded");
     assert.deepEqual(report.notes, []);
-    assert.ok(report.meta.endsWith("cloud judge"));
 });
 
 // --- running matrix ---------------------------------------------------------
@@ -1074,4 +1072,57 @@ test("parseCasesFile limits the number of cases and the size in bytes", () => {
     rejects("x".repeat(lib.CASES_MAX_BYTES + 1), lib.CASES_TOO_LARGE);
     // fewer characters than the limit, but more bytes
     rejects("я".repeat(lib.CASES_MAX_BYTES / 2 + 1), lib.CASES_TOO_LARGE);
+});
+
+// --- who is in memory ---------------------------------------------------------
+
+test("buildMatrix: a candidate is loaded only while its own answers are in progress", () => {
+    const steps = lib.buildSteps("j", ["a", "b"], 2);
+    const loaded = () => lib.buildMatrix(steps, 2, (m) => m).map((r) => r.loaded);
+
+    assert.deepEqual(loaded(), [false, false, false]);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    assert.deepEqual(loaded(), [false, true, false]);
+    // between two answers the model is still loaded
+    setRow(steps, "answer:a:q1", { state: "done" });
+    assert.deepEqual(loaded(), [false, true, false]);
+    setRow(steps, "answer:a:q2", { state: "done" });
+    setRow(steps, "answer:b:q1", { state: "running" });
+    assert.deepEqual(loaded(), [false, false, true]);
+});
+
+test("buildMatrix: a local judge is loaded for the references, then for grading and the summary", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    const judge = () => lib.buildMatrix(steps, 2, (m) => m)[0].loaded;
+
+    setRow(steps, "reference:j:q1", { state: "running" });
+    assert.equal(judge(), true);
+    setRow(steps, "reference:j:q1", { state: "done" });
+    setRow(steps, "reference:j:q2", { state: "done" });
+    assert.equal(judge(), false); // the candidates answer now
+    setRow(steps, "answer:a:q1", { state: "done" });
+    setRow(steps, "answer:a:q2", { state: "error" });
+    setRow(steps, "grading:a:q2", { state: "skipped" }); // a failed answer is skipped at once
+    assert.equal(judge(), false);
+    setRow(steps, "grading:a:q1", { state: "running" });
+    assert.equal(judge(), true);
+    setRow(steps, "grading:a:q1", { state: "done" }); // the summary is still to come
+    assert.equal(judge(), true);
+    setRow(steps, "summary:j:", { state: "done" });
+    assert.equal(judge(), false);
+});
+
+test("buildMatrix: a cloud judge is loaded from its first call to the summary", () => {
+    const steps = lib.buildSteps("j", ["a"], 1);
+    const judge = () => lib.buildMatrix(steps, 1, (m) => m, true)[0].loaded;
+
+    assert.equal(judge(), false);
+    setRow(steps, "reference:j:q1", { state: "running" });
+    assert.equal(judge(), true);
+    // waiting for an answer to grade: it still works beside the candidates
+    setRow(steps, "reference:j:q1", { state: "done" });
+    assert.equal(judge(), true);
+    setRow(steps, "grading:a:q1", { state: "done" });
+    setRow(steps, "summary:j:", { state: "done" });
+    assert.equal(judge(), false);
 });

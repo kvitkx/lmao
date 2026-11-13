@@ -59,6 +59,7 @@ import {
     type SortKey,
     type TableRow,
 } from "./overview.ts";
+import { barStates, faviconHref, type BarState } from "./favicon.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
 interface SseEvent {
@@ -246,6 +247,16 @@ document.addEventListener("alpine:init", () => {
         init(): void {
             void this.loadModels();
             void this.loadHistory();
+            // The tab shows the state of the run: its title and its icon.
+            let icon = "";
+            Alpine.effect(() => {
+                document.title = this.pageTitle;
+                const href = faviconHref(this.faviconBars);
+                if (href !== icon) {
+                    icon = href;
+                    document.getElementById("favicon")?.setAttribute("href", href);
+                }
+            });
         },
 
         // Templates read it as `pad2(i)`: modules have no globals.
@@ -257,6 +268,19 @@ document.addEventListener("alpine:init", () => {
         // screen (the wordmark can lead away from the running screen).
         get busy(): boolean {
             return this.run.status === "running";
+        },
+
+        get pageTitle(): string {
+            if (this.run.status === "running") {
+                return `lmao | running ${fmtClock(this.elapsed)} ${this.run.done} / ${this.run.total}`;
+            }
+            if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
+            return "lmao";
+        },
+
+        // The four bars of the icon are the four phases of a run.
+        get faviconBars(): BarState[] {
+            return barStates(this.run.phases, this.run.status);
         },
 
         get runTitle(): string | null {
@@ -317,7 +341,7 @@ document.addEventListener("alpine:init", () => {
         updateRun(): void {
             const run = this.run;
             run.phases = phaseStats(run.steps, this.phaseGroups);
-            run.matrix = buildMatrix(run.steps, run.questions, (m) => this.label(m));
+            run.matrix = buildMatrix(run.steps, run.questions, (m) => this.label(m), run.cloud);
             run.current = nowRows(run.steps);
             const active = activeQuestion(run.steps);
             // Between two steps nothing runs: keep the last question.
@@ -358,7 +382,7 @@ document.addEventListener("alpine:init", () => {
 
         get matrixLabels(): string[] {
             const w = this.matrixWindow;
-            return Array.from({ length: w.end - w.start }, (_, i) => `q${w.start + i + 1}`);
+            return Array.from({ length: w.end - w.start }, (_, i) => String(w.start + i + 1));
         },
 
         // model | counter | one column per visible question | counter | time.
@@ -367,8 +391,15 @@ document.addEventListener("alpine:init", () => {
             const w = this.matrixWindow;
             const counter = this.matrixOverflow ? RUNNING_MATRIX.counter : 0;
             const count = w.end - w.start;
-            const cells = count ? `repeat(${count},${RUNNING_MATRIX.cell}px)` : "";
-            return `grid-template-columns:${RUNNING_MATRIX.name}px ${counter}px ${cells} ${counter}px minmax(${RUNNING_MATRIX.tail}px,1fr)`;
+            const cell = RUNNING_MATRIX.cell;
+            // Not everything fits: the columns share the leftover width, so there
+            // is no gap before the time. Everything fits: they keep their size.
+            const track = this.matrixOverflow ? `minmax(${cell}px,1fr)` : `${cell}px`;
+            const cells = count ? `repeat(${count},${track})` : "";
+            const tail = this.matrixOverflow
+                ? `${RUNNING_MATRIX.tail}px`
+                : `minmax(${RUNNING_MATRIX.tail}px,1fr)`;
+            return `grid-template-columns:${RUNNING_MATRIX.name}px ${counter}px ${cells} ${counter}px ${tail}`;
         },
 
         visibleCells(row: MatrixRow): MatrixCellInfo[] {
@@ -397,26 +428,25 @@ document.addEventListener("alpine:init", () => {
             this.followCurrent = false;
         },
 
-        // Filled = progress, outlined = waiting for the next step, warn = error.
+        // The mark of a cell, 14px (the template adds the blinking ring and dots):
+        // outline = waiting for the next step, filled = progress, warn = error.
         cellClass(state: CellState): string {
             const classes: Record<CellState, string> = {
-                planned: "",
-                answering: "border border-link",
+                planned: "border border-line",
+                answering: "bg-link",
                 ready: "border border-fg",
                 grading: "border border-fg",
                 graded: "bg-fg",
-                generation_error: "bg-warn",
-                judge_error: "border border-warn",
+                generation_error: "border border-warn",
+                judge_error: "border border-fg",
             };
             return classes[state];
         },
 
-        // The square inside a cell that is being worked on. It pulses; the
-        // grading one is smaller, so the two phases differ by size, not by motion.
-        cellDot(state: CellState): string {
-            if (state === "answering") return "size-10 bg-link";
-            if (state === "grading") return "size-6 bg-link";
-            return "";
+        // Blue only while the model is in memory, white once it is done.
+        rowNameClass(row: MatrixRow): string {
+            if (row.loaded) return "text-link";
+            return row.state === "queued" ? "text-fg-muted" : "text-fg";
         },
 
         // First screen: the state of the form as status rows.

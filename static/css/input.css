@@ -88,16 +88,10 @@
   --text-display: 40px;
   --text-display--line-height: 1.11;
 
-  --animate-breathe: breathe 2s ease-in-out infinite;
-  @keyframes breathe {
+  --animate-blink: blink 1.4s ease-in-out infinite;
+  @keyframes blink {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.25; }
-  }
-
-  --animate-pulse-cell: pulse-cell 1.6s ease-in-out infinite;
-  @keyframes pulse-cell {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(0.5); }
+    50% { opacity: 0; }
   }
 }
 

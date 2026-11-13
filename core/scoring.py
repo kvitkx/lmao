@@ -17,7 +17,7 @@ PASS_MIN_SCORE = 70
 CRITICAL_BELOW = 40
 
 # A model is recommended on speed only if it passes at least this share.
-PASS_RATE_THRESHOLD = 0.8
+PASS_RATE_THRESHOLD = 0.7
 # Fewer graded questions than this means a low-confidence recommendation.
 MIN_QUESTIONS = 5
 

@@ -38,7 +38,6 @@
             <div class="flex justify-between items-start gap-22">
                 <div class="min-w-0 flex flex-col gap-8">
                     <div class="text-heading break-words" x-text="runTitle"></div>
-                    <div class="text-fg-muted break-words" x-text="report.meta"></div>
                 </div>
                 <div class="shrink-0 flex items-center gap-15 text-fg-muted print:hidden">
                     <span>export</span>
@@ -292,17 +291,17 @@
                                 </div>
                             </div>
 
-                            {# tokens vs characters: how far chars/s can be compared across tokenizers #}
+                            {# tokens vs characters: the fewest and the most characters per token, as rays #}
                             <div class="min-w-0 flex flex-col">
                                 <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
                                     <span class="shrink-0">tokens vs characters</span>
-                                    <span class="min-w-0 text-right">rays = characters per token</span>
+                                    <span class="min-w-0 text-right">rays = fewest and most characters per token</span>
                                 </div>
                                 <template x-if="overview.details.scatter.points.length">
-                                    <div class="pt-22 pr-33 pb-44 pl-44">
+                                    <div class="pt-44 pr-22 pb-55 pl-66">
                                         <div class="relative h-240 border-l border-b border-line" role="img"
-                                             aria-label="tokens per second against characters per second, with rays of 3 and 4 characters per token">
-                                            <span class="absolute bottom-full right-full pr-8 pb-8 text-fg-muted">chars/s</span>
+                                             aria-label="tokens per second against characters per second, with a ray for the fewest and a ray for the most characters per token">
+                                            <span class="absolute bottom-full right-full whitespace-nowrap pr-8 pb-8 text-fg-muted">chars/s</span>
                                             <template x-for="t in overview.details.scatter.yTicks" :key="t.text">
                                                 <span class="absolute right-full pr-8 translate-y-1/2 text-fg-muted"
                                                       :style="'bottom:' + t.pos + '%'" x-text="t.text"></span>
@@ -313,21 +312,27 @@
                                             </template>
                                             <span class="absolute top-full right-0 pt-33 text-fg-muted">tokens/s</span>
 
-                                            <svg aria-hidden="true" class="absolute inset-0 size-full overflow-visible pointer-events-none"
+                                            {# the rays: two fixed lines, a template cannot live inside an svg #}
+                                            <svg aria-hidden="true" class="absolute inset-0 size-full overflow-visible pointer-events-none text-fg-muted"
                                                  viewBox="0 0 100 100" preserveAspectRatio="none">
-                                                <line x1="0" y1="100" :x2="overview.details.scatter.rays[0].x2"
-                                                      :y2="100 - overview.details.scatter.rays[0].y2" class="stroke-fg-muted"
-                                                      stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"></line>
-                                                <line x1="0" y1="100" :x2="overview.details.scatter.rays[1].x2"
-                                                      :y2="100 - overview.details.scatter.rays[1].y2" class="stroke-fg-muted"
-                                                      stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"></line>
+                                                <line x-show="overview.details.scatter.rays[0]" x1="0" y1="100"
+                                                      :x2="overview.details.scatter.rays[0]?.x2"
+                                                      :y2="100 - (overview.details.scatter.rays[0]?.y2 ?? 100)"
+                                                      stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"
+                                                      vector-effect="non-scaling-stroke"></line>
+                                                <line x-show="overview.details.scatter.rays[1]" x1="0" y1="100"
+                                                      :x2="overview.details.scatter.rays[1]?.x2"
+                                                      :y2="100 - (overview.details.scatter.rays[1]?.y2 ?? 100)"
+                                                      stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"
+                                                      vector-effect="non-scaling-stroke"></line>
                                             </svg>
-                                            <span class="absolute whitespace-nowrap text-fg-muted -translate-x-full -translate-y-full pr-8 pb-4"
-                                                  :style="'left:' + overview.details.scatter.rays[0].x2 + '%;bottom:' + overview.details.scatter.rays[0].y2 + '%'"
-                                                  x-text="overview.details.scatter.rays[0].label"></span>
-                                            <span class="absolute whitespace-nowrap text-fg-muted -translate-x-full -translate-y-full pr-8 pb-4"
-                                                  :style="'left:' + overview.details.scatter.rays[1].x2 + '%;bottom:' + overview.details.scatter.rays[1].y2 + '%'"
-                                                  x-text="overview.details.scatter.rays[1].label"></span>
+                                            {# the label sits at the end of its ray, inside the plot #}
+                                            <template x-for="r in overview.details.scatter.rays" :key="r.label">
+                                                <span class="absolute whitespace-nowrap text-fg-muted -translate-x-full pr-8"
+                                                      :class="r.edge === 'right' ? 'pb-4' : 'translate-y-full pt-4'"
+                                                      :style="'left:' + r.x2 + '%;bottom:' + r.y2 + '%'"
+                                                      :title="r.title" x-text="r.label"></span>
+                                            </template>
 
                                             <template x-for="p in overview.details.scatter.points" :key="p.model">
                                                 <div class="absolute" :style="'left:' + p.left + '%;bottom:' + p.bottom + '%'" :title="p.title">
@@ -349,7 +354,7 @@
                         <div class="flex flex-col">
                             <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
                                 <span class="shrink-0">answers by category</span>
-                                <span class="min-w-0 text-right" x-text="'pass = perfect + acceptable · dashed = ' + overview.details.categories.threshold + '% pass threshold'"></span>
+                                <span class="min-w-0 text-right" x-text="'pass = perfect + acceptable · dashed = ' + overview.details.categories.threshold + '% pass to be recommended on speed'"></span>
                             </div>
                             <div class="flex flex-col pt-8">
                                 <template x-for="c in overview.details.categories.bars" :key="c.model">

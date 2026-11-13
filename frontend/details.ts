@@ -4,7 +4,8 @@
 
 import type { ApiResults, Entry, ModelStats, Question } from "../types/results.js";
 import {
-    buildDistribution,
+    CATEGORY_LABELS,
+    CATEGORY_ORDER,
     domId,
     median,
     niceStep,
@@ -19,7 +20,7 @@ const GB = 1e9;
 
 // Mirrors of the constants in core/scoring.py.
 const PASS_MIN_SCORE = 70;
-const PASS_THRESHOLD_PCT = 80;
+const PASS_THRESHOLD_PCT = 70;
 
 export interface Who {
     model: string;
@@ -139,15 +140,17 @@ export interface ScatterPoint extends Who {
 // A line of constant chars per token, from the origin to the edge of the plot.
 export interface Ray {
     label: string;
-    x2: number; // % of the width
-    y2: number; // % of the height
+    title: string; // the model on it
+    x2: number; // % of the width where it ends
+    y2: number; // % of the height where it ends
+    edge: "right" | "top"; // the edge of the plot it ends on
 }
 
 export interface Scatter {
     points: ScatterPoint[];
     xTicks: Tick[];
     yTicks: Tick[];
-    rays: Ray[];
+    rays: Ray[]; // the fewest and the most characters per token
     missing: string[];
 }
 
@@ -167,7 +170,13 @@ function axis(max: number): { max: number; ticks: Tick[] } {
     };
 }
 
-const RAYS = [3, 4];
+// Where the ray of k chars per token meets the edge of the plot.
+function rayTo(k: number, label: string, title: string, xMax: number, yMax: number): Ray {
+    if (k * xMax <= yMax) {
+        return { label, title, x2: 100, y2: (100 * k * xMax) / yMax, edge: "right" };
+    }
+    return { label, title, x2: (100 * yMax) / k / xMax, y2: 100, edge: "top" };
+}
 
 function buildScatter(items: Item[]): Scatter {
     const plotted = items.filter(
@@ -181,6 +190,27 @@ function buildScatter(items: Item[]): Scatter {
     const x = axis(Math.max(...plotted.map(tps)));
     const y = axis(Math.max(...plotted.map(cps)));
 
+    // The tokenizers that need the fewest and the most characters per token.
+    const ratios = plotted
+        .filter((item) => tps(item) > 0)
+        .map((item) => ({ item, k: cps(item) / tps(item) }))
+        .sort((a, b) => a.k - b.k);
+    const rays: Ray[] = [];
+    if (ratios.length) {
+        const lowest = ratios[0];
+        const highest = ratios[ratios.length - 1];
+        const text = (r: { k: number }) => r.k.toFixed(1);
+        if (text(lowest) === text(highest)) {
+            const label = `${text(lowest)} chars/token`;
+            rays.push(rayTo(lowest.k, label, lowest.item.short, x.max, y.max));
+        } else {
+            const low = `min ${text(lowest)} chars/token`;
+            const high = `max ${text(highest)} chars/token`;
+            rays.push(rayTo(lowest.k, low, lowest.item.short, x.max, y.max));
+            rays.push(rayTo(highest.k, high, highest.item.short, x.max, y.max));
+        }
+    }
+
     return {
         points: plotted.map((item) => ({
             ...who(item),
@@ -190,12 +220,7 @@ function buildScatter(items: Item[]): Scatter {
         })),
         xTicks: x.ticks,
         yTicks: y.ticks,
-        rays: RAYS.map((k): Ray => {
-            const label = `${k} chars/token`;
-            // Where the ray meets the right edge, or the top edge if it is steeper.
-            if (k * x.max <= y.max) return { label, x2: 100, y2: (100 * k * x.max) / y.max };
-            return { label, x2: (100 * y.max) / k / x.max, y2: 100 };
-        }),
+        rays,
         missing,
     };
 }
@@ -220,42 +245,64 @@ export interface Categories {
     threshold: number; // the pass-rate threshold of the recommendation, in %
 }
 
-// perfect .. garbage, light to dark; the extras (errors) come after them.
+// perfect .. garbage, light to dark; what is not a category comes after them.
 const SHADES = ["bg-fg", "bg-fg/65", "bg-fg/40", "bg-fg/20", "bg-fg/8"];
+const BASE_LABELS = CATEGORY_ORDER.map((id) => CATEGORY_LABELS[id]);
+const ALL_LABELS = [...BASE_LABELS, "uncategorised", "truncated", "generation error"];
 
-function segmentClass(label: string, index: number): string {
-    if (index < SHADES.length) return SHADES[index];
+function segmentClass(label: string): string {
+    const index = BASE_LABELS.indexOf(label);
+    if (index >= 0) return SHADES[index];
+    if (label === "truncated") return "border border-fg-muted";
     if (label === "generation error") return "bg-warn";
-    if (label === "judge error") return "border border-warn";
     return "bg-line";
 }
 
+// What an answer counts as, the way core/scoring.py counts it: a generation
+// error is a 0, a judge error and an answer to a question without a reference
+// are left out (null), a truncated answer cannot pass.
+function bucketOf(question: Question, entry: Entry): string | null {
+    if (entry.status === "generation_error") return "generation error";
+    if (entry.status === "judge_error" || question.no_reference) return null;
+    if (entry.status === "truncated") return "truncated";
+    return (entry.category && CATEGORY_LABELS[entry.category]) || "uncategorised";
+}
+
+// The bar and the pass number come from the same answers, so they agree.
 function buildCategories(items: Item[], questions: Question[]): Categories {
+    const used = new Set<string>();
     const bars = items.map((item): CategoryBar => {
-        const results = questions.flatMap((q) =>
-            (q.results || []).filter((r) => r.model_name === item.model),
-        );
-        const distribution = buildDistribution(results);
-        const pass = numeric(item.stats.pass_rate);
+        const counts = new Map<string, number>();
+        let n = 0;
+        let passed = 0;
+        for (const question of questions) {
+            for (const entry of question.results || []) {
+                if (entry.model_name !== item.model) continue;
+                const label = bucketOf(question, entry);
+                if (label === null) continue;
+                n += 1;
+                counts.set(label, (counts.get(label) ?? 0) + 1);
+                if (label === CATEGORY_LABELS.perfect || label === CATEGORY_LABELS.acceptable) {
+                    passed += 1;
+                }
+            }
+        }
+        const segments = ALL_LABELS.filter((label) => counts.has(label)).map((label) => {
+            used.add(label);
+            const count = counts.get(label) as number;
+            return { label, count, pct: (100 * count) / n, cls: segmentClass(label) };
+        });
         return {
             ...who(item),
-            segments: distribution.rows
-                .map((row, i) => ({
-                    label: row.label,
-                    count: row.count,
-                    pct: distribution.n ? (100 * row.count) / distribution.n : 0,
-                    cls: segmentClass(row.label, i),
-                }))
-                .filter((segment) => segment.count > 0),
-            passText: pass === null ? "–" : `${Math.round(pass * 100)}% pass`,
+            segments,
+            passText: n ? `${Math.round((100 * passed) / n)}% pass` : "–",
         };
     });
     return {
         bars,
-        legend: buildDistribution([]).rows.map((row, i) => ({
-            label: row.label,
-            cls: SHADES[i],
-        })),
+        legend: ALL_LABELS.filter((label) => BASE_LABELS.includes(label) || used.has(label)).map(
+            (label) => ({ label, cls: segmentClass(label) }),
+        ),
         threshold: PASS_THRESHOLD_PCT,
     };
 }
