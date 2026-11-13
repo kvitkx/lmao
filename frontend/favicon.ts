@@ -1,7 +1,7 @@
 // The icon of the tab. Its four bars are the four phases of a run: reference,
 // answers, grading, summary. A bar is off (black), active (blue) or done
-// (white); neighbouring bars in the same state are drawn as one block, gap
-// included. Pure: the caller puts the result into the page.
+// (white); every bar is its own rectangle, as in the design. Pure: the caller
+// puts the result into the page.
 
 export type BarState = "off" | "active" | "done";
 
@@ -18,22 +18,13 @@ const COLORS = { active: "#3b9ae1", done: "#f6f8f7" };
 const PHASES = ["reference", "answer", "grading", "summary"];
 
 export function faviconSvg(states: BarState[]): string {
-    const blocks: string[] = [];
-    let i = 0;
-    while (i < BARS.length) {
+    const rects: string[] = [];
+    BARS.forEach((bar, i) => {
         const state = states[i] ?? "off";
-        if (state === "off") {
-            i += 1;
-            continue;
-        }
-        let last = i;
-        while (last + 1 < BARS.length && (states[last + 1] ?? "off") === state) last += 1;
-        const x = BARS[i].x;
-        const width = BARS[last].x + BARS[last].w - x;
-        blocks.push(`<rect x="${x}" y="8" width="${width}" height="16" fill="${COLORS[state]}"/>`);
-        i = last + 1;
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" fill="#000"/>${blocks.join("")}</svg>`;
+        if (state === "off") return;
+        rects.push(`<rect x="${bar.x}" y="8" width="${bar.w}" height="16" fill="${COLORS[state]}"/>`);
+    });
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" fill="#000"/>${rects.join("")}</svg>`;
 }
 
 export function faviconHref(states: BarState[]): string {

@@ -200,7 +200,7 @@
             </div>
 
             <template x-for="row in run.matrix" :key="row.model + ':' + row.reference">
-                <div class="grid items-center h-28 border-b border-line" :style="matrixGrid">
+                <div class="grid items-center h-40 border-b border-line" :style="matrixGrid">
                     <div class="min-w-0 flex items-baseline gap-8" :class="rowNameClass(row)">
                         <span class="truncate" x-text="row.label" :title="row.model"></span>
                         <span x-show="row.sub" class="truncate" :class="row.loaded ? '' : 'text-fg-muted'" x-text="row.sub"></span>
@@ -210,14 +210,15 @@
                          :title="hiddenLeft(row).title"
                          x-text="matrixWindow.before ? '‹ ' + hiddenLeft(row).count : ''"></div>
                     <template x-for="(c, ci) in visibleCells(row)" :key="ci">
-                        <div class="flex items-center justify-center h-28" role="img"
+                        <div class="flex items-center justify-center h-40" role="img"
                              :title="c.title" :aria-label="c.title">
-                            <span class="relative block size-14" :class="cellClass(c.state)">
-                                <span x-show="c.state === 'answering'"
-                                      class="absolute -inset-2 border border-fg/50 animate-blink motion-reduce:animate-none"></span>
+                            <span class="relative block size-18" :class="cellClass(c.state)">
+                                {# answering: the whole square breathes, the ring with it #}
+                                <span x-show="c.state === 'answering'" class="absolute -inset-4 border border-fg"></span>
+                                {# grading: only the inner square breathes #}
                                 <span x-show="c.state === 'grading'"
-                                      class="absolute inset-4 bg-fg animate-blink motion-reduce:animate-none"></span>
-                                <span x-show="c.state === 'judge_error'" class="absolute inset-2 bg-warn"></span>
+                                      class="absolute inset-3 bg-fg animate-breathe motion-reduce:animate-none"></span>
+                                <span x-show="c.state === 'judge_error'" class="absolute inset-0 bg-warn"></span>
                             </span>
                         </div>
                     </template>
@@ -233,14 +234,14 @@
 
         {# legend: shape and fill, never colour alone #}
         <div class="flex flex-col gap-8 py-15 text-fg-muted">
-            <div class="flex flex-wrap gap-x-22 gap-y-8">
-                <span class="flex items-center gap-8"><span class="relative block size-14 bg-link"><span class="absolute -inset-2 border border-fg/50"></span></span>answering</span>
-                <span class="flex items-center gap-8"><span class="block size-14 border border-fg"></span>answer ready</span>
-                <span class="flex items-center gap-8"><span class="relative block size-14 border border-fg"><span class="absolute inset-4 bg-fg"></span></span>grading</span>
-                <span class="flex items-center gap-8"><span class="block size-14 bg-fg"></span>graded</span>
-                <span class="flex items-center gap-8"><span class="block size-14 border border-warn"></span>generation error</span>
-                <span class="flex items-center gap-8"><span class="relative block size-14 border border-fg"><span class="absolute inset-2 bg-warn"></span></span>judge error</span>
-                <span class="flex items-center gap-8"><span class="block size-14 border border-line"></span>planned</span>
+            <div class="flex flex-wrap items-center gap-x-22 gap-y-12">
+                <span class="flex items-center gap-12"><span class="relative block size-18 m-4 bg-link"><span class="absolute -inset-4 border border-fg"></span></span>answering</span>
+                <span class="flex items-center gap-8"><span class="block size-18 border border-fg"></span>answer ready</span>
+                <span class="flex items-center gap-8"><span class="relative block size-18 border border-fg"><span class="absolute inset-3 bg-fg"></span></span>grading</span>
+                <span class="flex items-center gap-8"><span class="block size-18 bg-fg"></span>graded</span>
+                <span class="flex items-center gap-8"><span class="block size-18 border border-warn"></span>generation error</span>
+                <span class="flex items-center gap-8"><span class="relative block size-18 border-2 border-fg"><span class="absolute inset-0 bg-warn"></span></span>judge error</span>
+                <span class="flex items-center gap-8"><span class="block size-18 border border-line"></span>planned</span>
             </div>
             <div class="flex flex-wrap gap-x-22 gap-y-8">
                 <span x-show="matrixOverflow" x-cloak>‹ 6 · hidden questions, warn if one has an error</span>

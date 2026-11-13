@@ -79,6 +79,7 @@ export type SortKey =
     | "median"
     | "pass"
     | "cps"
+    | "tps"
     | "time"
     | "length"
     | "scoreGb"
@@ -97,6 +98,7 @@ export const COLUMNS: Column[] = [
     { key: "median", label: "median", best: "high" },
     { key: "pass", label: "pass", best: "high" },
     { key: "cps", label: "c/s", best: "high" },
+    { key: "tps", label: "t/s", best: "high" },
     { key: "time", label: "time, s", best: "low" },
     { key: "length", label: "length", best: null },
     { key: "scoreGb", label: "score/GB", best: "high" },
@@ -133,6 +135,7 @@ function valuesOf(m: ModelStats): Record<SortKey, number | null> {
         median: numeric(m.median),
         pass: numeric(m.pass_rate),
         cps: numeric(m.median_cps),
+        tps: numeric(m.median_tps),
         time: numeric(m.median_time_sec),
         length: numeric(m.avg_chars),
         scoreGb: numeric(m.score_per_gb),

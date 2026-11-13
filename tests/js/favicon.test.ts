@@ -6,39 +6,48 @@ import * as favicon from "../../frontend/favicon.ts";
 const WHITE = "#f6f8f7";
 const BLUE = "#3b9ae1";
 
-// The blocks of an icon: [x, width, colour].
-function blocks(states: favicon.BarState[]): [number, number, string][] {
+// The bars of an icon: [x, width, colour].
+function bars(states: favicon.BarState[]): [number, number, string][] {
     const svg = favicon.faviconSvg(states);
     return [...svg.matchAll(/<rect x="(\d+)" y="8" width="(\d+)" height="16" fill="(#[0-9a-f]+)"\/>/g)].map(
         (m) => [Number(m[1]), Number(m[2]), m[3]],
     );
 }
 
-test("all bars done is one solid block, all off is a black square", () => {
-    assert.deepEqual(blocks(["done", "done", "done", "done"]), [[2, 28, WHITE]]);
-    assert.deepEqual(blocks(["off", "off", "off", "off"]), []);
+test("all bars done are four white rectangles, all off is a black square", () => {
+    assert.deepEqual(bars(["done", "done", "done", "done"]), [
+        [2, 2, WHITE],
+        [6, 8, WHITE],
+        [16, 6, WHITE],
+        [24, 6, WHITE],
+    ]);
+    assert.deepEqual(bars(["off", "off", "off", "off"]), []);
 });
 
-test("one bar per phase, in the states of the design", () => {
-    assert.deepEqual(blocks(["active", "off", "off", "off"]), [[2, 2, BLUE]]);
-    assert.deepEqual(blocks(["done", "active", "off", "off"]), [
+test("every bar has its own colour, nothing is merged", () => {
+    assert.deepEqual(bars(["active", "off", "off", "off"]), [[2, 2, BLUE]]);
+    assert.deepEqual(bars(["done", "active", "off", "off"]), [
         [2, 2, WHITE],
         [6, 8, BLUE],
     ]);
-    assert.deepEqual(blocks(["done", "done", "active", "off"]), [
-        [2, 12, WHITE],
+    assert.deepEqual(bars(["done", "done", "active", "off"]), [
+        [2, 2, WHITE],
+        [6, 8, WHITE],
         [16, 6, BLUE],
     ]);
-    assert.deepEqual(blocks(["done", "done", "done", "active"]), [
-        [2, 20, WHITE],
+    assert.deepEqual(bars(["done", "done", "done", "active"]), [
+        [2, 2, WHITE],
+        [6, 8, WHITE],
+        [16, 6, WHITE],
         [24, 6, BLUE],
     ]);
 });
 
-test("a cloud judge grades while the answers are written: two blue bars are one block", () => {
-    assert.deepEqual(blocks(["done", "active", "active", "off"]), [
+test("a cloud judge grades while the answers are written: two blue bars", () => {
+    assert.deepEqual(bars(["done", "active", "active", "off"]), [
         [2, 2, WHITE],
-        [6, 16, BLUE],
+        [6, 8, BLUE],
+        [16, 6, BLUE],
     ]);
 });
 

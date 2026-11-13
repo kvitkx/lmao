@@ -270,10 +270,10 @@ test("columnWindow follows manual paging and clamps it", () => {
 });
 
 test("columnsThatFit for the running matrix reserves both counters", () => {
-    // 270 (model) + 80 (time) fixed, 18 per question, 2 x 44 for the counters
-    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 24);
-    assert.equal(lib.columnsThatFit(1094, 60, lib.RUNNING_MATRIX), 36);
-    assert.equal(lib.columnsThatFit(2494, 60, lib.RUNNING_MATRIX), 60);
+    // 270 (model) + 80 (time) fixed, 52 per question, 2 x 44 for the counters
+    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 12);
+    assert.equal(lib.columnsThatFit(1094, 10, lib.RUNNING_MATRIX), 10);
+    assert.equal(lib.columnsThatFit(2494, 30, lib.RUNNING_MATRIX), 30);
     assert.equal(lib.columnsThatFit(300, 30, lib.RUNNING_MATRIX), 0);
 });
 
@@ -711,17 +711,10 @@ test("buildReport: verdict and notes", () => {
 test("buildReport: model rows", () => {
     const [a, b] = lib.buildReport(runFixture()).models;
 
-    assert.equal(a.mean, "95");
-    assert.equal(a.median, "95");
-    assert.equal(a.passRate, "100%");
     assert.equal(
         a.metricsLine,
         "mean 95 · median 95 · pass 100% · fails 0 · critical 0 · errors 0 · judge errors 0 · 250 c/s · 50 t/s · 2.5 s total",
     );
-    assert.equal(a.cps, "250");
-    assert.equal(b.cps, "–");
-    assert.equal(b.tps, "–");
-    assert.equal(b.median, "0");
     assert.equal(b.cells[0].text, "err");
     assert.equal(b.cells[0].warn, true);
     assert.equal(b.entries[0].error, true);
@@ -771,13 +764,9 @@ test("buildReport: question cards rank answers and put failures last", () => {
     assert.equal(card.spread, "one graded answer · 95");
 });
 
-test("buildReport: table grid, heads and references", () => {
+test("buildReport: heads and references", () => {
     const report = lib.buildReport(runFixture());
 
-    assert.equal(
-        report.grid,
-        "grid-template-columns:minmax(160px,1fr) 64px 64px 64px repeat(1,48px) 64px 64px 64px",
-    );
     assert.deepEqual(report.questionHeads, [
         { id: "q1", title: "logic", anchor: lib.domId("question", "q1") },
     ]);

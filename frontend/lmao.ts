@@ -33,8 +33,10 @@ import {
     type PhaseFigures,
     type PhaseGroup,
     type Report,
+    type ReportCell,
     type Step,
     type TreeNode,
+    RESULTS_MATRIX,
     RUNNING_MATRIX,
     activeQuestion,
     buildMatrix,
@@ -59,6 +61,7 @@ import {
     type SortKey,
     type TableRow,
 } from "./overview.ts";
+import { buildScoreRows, nextScoreSort, sortScoreRows, type ScoreRow, type ScoreSort } from "./answers.ts";
 import { barStates, faviconHref, type BarState } from "./favicon.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
@@ -239,6 +242,10 @@ document.addEventListener("alpine:init", () => {
         overview: null as Overview | null,
         modelSort: { key: "mean", dir: "desc" } as { key: SortKey; dir: SortDirection },
         modelColumns: COLUMNS,
+        scores: [] as ScoreRow[],
+        scoreSort: { key: null, dir: "asc" } as ScoreSort,
+        scoresWidth: 0, // px, from a ResizeObserver
+        scoresStart: 0, // first visible question
 
         announcement: "", // text of the page live region
         // Clipboard API exists only in a secure context (localhost / https).
@@ -272,7 +279,7 @@ document.addEventListener("alpine:init", () => {
 
         get pageTitle(): string {
             if (this.run.status === "running") {
-                return `lmao | running ${fmtClock(this.elapsed)} ${this.run.done} / ${this.run.total}`;
+                return `lmao | ${fmtClock(this.elapsed)} ${this.run.done} / ${this.run.total}`;
             }
             if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
             return "lmao";
@@ -382,7 +389,7 @@ document.addEventListener("alpine:init", () => {
 
         get matrixLabels(): string[] {
             const w = this.matrixWindow;
-            return Array.from({ length: w.end - w.start }, (_, i) => String(w.start + i + 1));
+            return Array.from({ length: w.end - w.start }, (_, i) => `q${w.start + i + 1}`);
         },
 
         // model | counter | one column per visible question | counter | time.
@@ -394,7 +401,7 @@ document.addEventListener("alpine:init", () => {
             const cell = RUNNING_MATRIX.cell;
             // Not everything fits: the columns share the leftover width, so there
             // is no gap before the time. Everything fits: they keep their size.
-            const track = this.matrixOverflow ? `minmax(${cell}px,1fr)` : `${cell}px`;
+            const track = this.matrixOverflow ? `minmax(${cell}px,1fr)` : `minmax(${cell}px,64px)`;
             const cells = count ? `repeat(${count},${track})` : "";
             const tail = this.matrixOverflow
                 ? `${RUNNING_MATRIX.tail}px`
@@ -428,17 +435,18 @@ document.addEventListener("alpine:init", () => {
             this.followCurrent = false;
         },
 
-        // The mark of a cell, 14px (the template adds the blinking ring and dots):
+        // The mark of a cell, 18px (the template adds the ring and the dots):
         // outline = waiting for the next step, filled = progress, warn = error.
+        // The only animation is the breathing of the live marks.
         cellClass(state: CellState): string {
             const classes: Record<CellState, string> = {
                 planned: "border border-line",
-                answering: "bg-link",
+                answering: "bg-link animate-breathe motion-reduce:animate-none",
                 ready: "border border-fg",
                 grading: "border border-fg",
                 graded: "bg-fg",
                 generation_error: "border border-warn",
-                judge_error: "border border-fg",
+                judge_error: "border-2 border-fg",
             };
             return classes[state];
         },
@@ -546,6 +554,9 @@ document.addEventListener("alpine:init", () => {
             this.results = null;
             this.report = null;
             this.overview = null;
+            this.scores = [];
+            this.scoreSort = { key: null, dir: "asc" };
+            this.scoresStart = 0;
             this.resultsTab = "overview";
             this.sections = { overview: "summary", answers: "scores" };
             this.openAnswers = {};
@@ -573,6 +584,7 @@ document.addEventListener("alpine:init", () => {
                     throw new Error(message);
                 }
                 this.overview = buildOverview(data as ApiResults);
+                this.scores = buildScoreRows(report.models, this.overview.models);
                 this.report = report;
                 this.results = data as ApiResults;
             } catch (e) {
@@ -938,6 +950,69 @@ document.addEventListener("alpine:init", () => {
         },
 
         // --- results tabs ---------------------------------------------------
+
+        // --- scores matrix of the answers tab ------------------------------
+
+        observeScores(el: HTMLElement): void {
+            const read = () => {
+                this.scoresWidth = el.clientWidth;
+            };
+            read();
+            new ResizeObserver(read).observe(el);
+        },
+
+        get scoreRows(): ScoreRow[] {
+            return sortScoreRows(this.scores, this.scoreSort.key, this.scoreSort.dir);
+        },
+
+        // As many question columns as fit the width, from the question the user paged to.
+        get scoresWindow(): ColumnWindow {
+            const total = this.report?.questionHeads.length ?? 0;
+            const fit = columnsThatFit(this.scoresWidth, total, RESULTS_MATRIX);
+            return columnWindow(total, fit, 0, this.scoresStart);
+        },
+
+        get scoresOverflow(): boolean {
+            const w = this.scoresWindow;
+            return w.before + w.after > 0;
+        },
+
+        get scoresRange(): string {
+            const w = this.scoresWindow;
+            return `q${pad2(w.start)}–q${pad2(w.end - 1)}`;
+        },
+
+        // model | one column per visible question | the counter of the hidden ones
+        get scoresGrid(): string {
+            const w = this.scoresWindow;
+            const count = w.end - w.start;
+            const cells = count ? ` repeat(${count},${RESULTS_MATRIX.cell}px)` : "";
+            const counter = this.scoresOverflow ? ` ${RESULTS_MATRIX.counter}px` : "";
+            return `grid-template-columns:${RESULTS_MATRIX.name}px${cells}${counter}`;
+        },
+
+        // The headers of the visible columns, with their place among all questions.
+        get scoresHeads(): { index: number; id: string; title: string }[] {
+            const w = this.scoresWindow;
+            return (this.report?.questionHeads ?? [])
+                .slice(w.start, w.end)
+                .map((h, i) => ({ index: w.start + i, id: h.id, title: h.title }));
+        },
+
+        visibleScoreCells(row: ScoreRow): (ReportCell & { index: number })[] {
+            const w = this.scoresWindow;
+            return row.cells.slice(w.start, w.end).map((cell, i) => ({ ...cell, index: w.start + i }));
+        },
+
+        sortScores(key: number | null): void {
+            this.scoreSort = nextScoreSort(this.scoreSort, key);
+        },
+
+        pageScores(direction: -1 | 1): void {
+            const w = this.scoresWindow;
+            const size = Math.max(1, w.end - w.start);
+            this.scoresStart = w.start + direction * size; // columnWindow clamps it
+        },
 
         get modelRows(): TableRow[] {
             if (!this.overview) return [];

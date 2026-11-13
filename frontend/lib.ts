@@ -271,7 +271,7 @@ export const RESULTS_MATRIX: MatrixLayout = {
 export const RUNNING_MATRIX: MatrixLayout = {
     name: 270,
     tail: 80,
-    cell: 18,
+    cell: 52,
     counter: 44,
     counters: 2,
 };
@@ -1423,12 +1423,6 @@ export interface ReportModel {
     model: string;
     anchor: string;
     short: string;
-    mean: string;
-    median: string;
-    passRate: string;
-    cps: string;
-    tps: string;
-    time: string;
     cells: ReportCell[];
     entries: EvalEntry[];
     distribution: Distribution;
@@ -1454,7 +1448,6 @@ export interface Report {
     };
     notes: string[];
     summaryBlocks: MdBlock[];
-    grid: string;
     questionHeads: { id: string; title: string; anchor: string }[];
     models: ReportModel[];
     questionCards: QuestionCard[];
@@ -1524,12 +1517,6 @@ export function buildReport(raw: unknown): Readonly<Report> {
             model: stats.model,
             anchor: domId("model", stats.model),
             short: display(stats.model),
-            mean: fmtNum(stats.mean),
-            median: fmtNum(stats.median),
-            passRate: pass,
-            cps: fmtNum(stats.median_cps),
-            tps: fmtNum(stats.median_tps),
-            time: fmtNum(stats.median_time_sec),
             cells,
             entries,
             distribution: buildDistribution(results),
@@ -1562,8 +1549,6 @@ export function buildReport(raw: unknown): Readonly<Report> {
         },
         notes,
         summaryBlocks: shortenNames(parseMarkdown(summary.text, { bareFence: true }), names),
-        // model | mean | median | pass | one column per question | c/s | t/s | time
-        grid: `grid-template-columns:minmax(160px,1fr) 64px 64px 64px repeat(${questions.length},48px) 64px 64px 64px`,
         questionHeads: questions.map((q) => ({
             id: q.id,
             title: q.tag || "",

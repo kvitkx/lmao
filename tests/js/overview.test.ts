@@ -168,3 +168,17 @@ test("buildOverview builds the table and the chart of one run", () => {
     assert.ok(built.models[0].anchor.startsWith("model-"));
     assert.ok(Object.isFrozen(built));
 });
+
+test("buildTable has a t/s column next to c/s", () => {
+    const models = [
+        stats("a", { mean: 80, median_tps: 40, median_cps: 100 }),
+        stats("b", { mean: 40, median_tps: 10, median_cps: 200 }),
+    ];
+
+    const [a, b] = overview.buildTable(models, same, overview.rankModels(models, null));
+
+    assert.deepEqual(overview.COLUMNS.map((c) => c.key).slice(3, 6), ["cps", "tps", "time"]);
+    assert.equal(a.cells.tps.text, "40");
+    assert.equal(a.cells.tps.best, true);
+    assert.equal(b.cells.tps.bar, 25);
+});

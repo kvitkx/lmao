@@ -88,10 +88,10 @@
   --text-display: 40px;
   --text-display--line-height: 1.11;
 
-  --animate-blink: blink 1.4s ease-in-out infinite;
-  @keyframes blink {
+  --animate-breathe: breathe 2s ease-in-out infinite;
+  @keyframes breathe {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
+    50% { opacity: 0.25; }
   }
 }
 
