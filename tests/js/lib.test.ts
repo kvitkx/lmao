@@ -1,9 +1,13 @@
-"use strict";
+import assert from "node:assert/strict";
+import test from "node:test";
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import * as lib from "../../frontend/lib.ts";
 
-const lib = require("../../static/js/lib.js");
+// Parsed blocks and trees are read field by field below: `any` keeps the
+// assertions short, the shapes themselves are checked by lib.ts.
+const md = (text: unknown, options?: { bareFence?: boolean }): any[] =>
+    lib.parseMarkdown(text, options);
+const tree = (blocks: unknown): any => lib.markdownTree(blocks as lib.MdBlock[]);
 
 // --- names ----------------------------------------------------------------
 
@@ -93,7 +97,7 @@ test("buildSteps lists every row up front, once per unique candidate, grading mo
         ],
     );
     assert.ok(steps.every((s) => s.state === "queued"));
-    assert.equal(steps[0].label, "reference q1");
+    assert.equal(steps[0].label, "reference · q1 · j");
     assert.equal(steps[2].label, "a · q1");
     assert.equal(steps[6].label, "judge · a · q1");
     assert.equal(steps[10].label, "final summary");
@@ -117,80 +121,21 @@ test("loadGroup tells which model has to be loaded", () => {
 
 // --- model groups ---------------------------------------------------------
 
-function setRow(steps, key, fields) {
-    Object.assign(steps.find((s) => s.key === key), fields);
+function setRow(steps: lib.Step[], key: string, fields: Partial<lib.Step>) {
+    Object.assign(steps.find((s) => s.key === key)!, fields);
 }
 
-test("modelGroups splits a phase by model in row order, flat for the judge phases", () => {
-    const steps = lib.buildSteps("j", ["a", "b"], 2);
 
-    assert.deepEqual(
-        lib.modelGroups(steps, "grading").map((g) => [g.model, g.total]),
-        [
-            ["a", 2],
-            ["b", 2],
-        ],
-    );
-    assert.deepEqual(
-        lib.modelGroups(steps, "reference").map((g) => [g.model, g.total]),
-        [["j", 2]],
-    );
-    assert.equal(lib.modelGroups(steps, "summary").length, 1);
-});
 
-test("modelGroups: a queued group", () => {
-    const [a] = lib.modelGroups(lib.buildSteps("j", ["a"], 2), "answer");
 
-    assert.equal(a.state, "queued");
-    assert.equal(a.side, "0/2");
-});
 
-test("modelGroups: a group in progress stays running between two rows", () => {
-    const steps = lib.buildSteps("j", ["a"], 3);
-    setRow(steps, "answer:a:q1", { state: "done" });
-    setRow(steps, "answer:a:q2", { state: "running" });
-    const [running] = lib.modelGroups(steps, "answer");
 
-    assert.equal(running.state, "running");
-    assert.equal(running.side, "1/3");
 
-    setRow(steps, "answer:a:q2", { state: "done" });
-    const [between] = lib.modelGroups(steps, "answer");
 
-    assert.equal(between.state, "running");
-    assert.equal(between.side, "2/3");
-});
 
-test("modelGroups: a finished group shows successes, errors and the duration", () => {
-    const steps = lib.buildSteps("j", ["a"], 3);
-    setRow(steps, "answer:a:q1", { state: "done", startTs: 1000, endTs: 20000 });
-    setRow(steps, "answer:a:q2", { state: "error", startTs: 20000, endTs: 30000 });
-    setRow(steps, "answer:a:q3", { state: "done", startTs: 30000, endTs: 52300 });
-    const [a] = lib.modelGroups(steps, "answer");
 
-    assert.equal(a.state, "done");
-    assert.equal(a.ok, 2);
-    assert.equal(a.errors, 1);
-    assert.equal(a.side, "2/3 · 51.3 s");
-});
 
-test("modelGroups: skipped grading rows count as finished and are reported apart", () => {
-    const steps = lib.buildSteps("j", ["a"], 2);
-    setRow(steps, "grading:a:q1", { state: "done" });
-    setRow(steps, "grading:a:q2", { state: "skipped" });
-    const [a] = lib.modelGroups(steps, "grading");
 
-    assert.equal(a.state, "done");
-    assert.equal(a.skipped, 1);
-    assert.equal(a.side, "1/2");
-});
-
-test("modelGroups: no duration without server timestamps", () => {
-    const steps = lib.buildSteps("j", ["a"], 1);
-    setRow(steps, "answer:a:q1", { state: "done" });
-
-    assert.equal(lib.modelGroups(steps, "answer")[0].side, "1/1");
-});
 
 const PHASES = [
     { phase: "reference", title: "01 reference answers" },
@@ -283,6 +228,58 @@ test("competitionRanks shares ranks and skips failed answers", () => {
     assert.deepEqual(lib.competitionRanks([90, 90, 70, null]), [1, 1, 3, null]);
 });
 
+// --- matrix columns -------------------------------------------------------
+
+// A layout with one counter column: columnsThatFit no longer has a default.
+const ONE_COUNTER: lib.MatrixLayout = { name: 254, tail: 0, cell: 48, counter: 48, counters: 1 };
+
+test("columnsThatFit fills the width and leaves room for one counter", () => {
+    // 254 (model) + 48 per question + 48 for the counter
+    assert.equal(lib.columnsThatFit(1094, 30, ONE_COUNTER), 16);
+    assert.equal(lib.columnsThatFit(1374, 30, ONE_COUNTER), 22);
+    assert.equal(lib.columnsThatFit(2494, 30, ONE_COUNTER), 30);
+});
+
+test("columnsThatFit shows everything that fits without a counter", () => {
+    assert.equal(lib.columnsThatFit(1094, 17, ONE_COUNTER), 17);
+    assert.equal(lib.columnsThatFit(1094, 10, ONE_COUNTER), 10);
+    assert.equal(lib.columnsThatFit(1094, 18, ONE_COUNTER), 16);
+});
+
+test("columnsThatFit copes with no room and no questions", () => {
+    assert.equal(lib.columnsThatFit(200, 30, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(NaN, 30, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(1094, 0, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(310, 30, ONE_COUNTER), 1);
+});
+
+test("columnWindow shows everything when it fits", () => {
+    assert.deepEqual(lib.columnWindow(10, 10, 4), { start: 0, end: 10, before: 0, after: 0 });
+    assert.deepEqual(lib.columnWindow(10, 16, 4), { start: 0, end: 10, before: 0, after: 0 });
+    assert.deepEqual(lib.columnWindow(0, 16, 0), { start: 0, end: 0, before: 0, after: 0 });
+});
+
+test("columnWindow sticks to the edges and centres on the question in progress", () => {
+    assert.deepEqual(lib.columnWindow(30, 16, 0), { start: 0, end: 16, before: 0, after: 14 });
+    assert.deepEqual(lib.columnWindow(30, 16, 29), { start: 14, end: 30, before: 14, after: 0 });
+    assert.deepEqual(lib.columnWindow(30, 16, 15), { start: 8, end: 24, before: 8, after: 6 });
+});
+
+test("columnWindow follows manual paging and clamps it", () => {
+    assert.deepEqual(lib.columnWindow(30, 16, 0, 5), { start: 5, end: 21, before: 5, after: 9 });
+    assert.deepEqual(lib.columnWindow(30, 16, 0, 99), { start: 14, end: 30, before: 14, after: 0 });
+    assert.deepEqual(lib.columnWindow(30, 16, 0, -3), { start: 0, end: 16, before: 0, after: 14 });
+    assert.deepEqual(lib.columnWindow(30, 0, 3), { start: 0, end: 0, before: 0, after: 30 });
+});
+
+test("columnsThatFit for the running matrix reserves both counters", () => {
+    // 270 (model) + 80 (time) fixed, 52 per question, 2 x 44 for the counters
+    assert.equal(lib.columnsThatFit(1094, 24, lib.RUNNING_MATRIX), 12);
+    assert.equal(lib.columnsThatFit(1094, 10, lib.RUNNING_MATRIX), 10);
+    assert.equal(lib.columnsThatFit(2494, 30, lib.RUNNING_MATRIX), 30);
+    assert.equal(lib.columnsThatFit(300, 30, lib.RUNNING_MATRIX), 0);
+});
+
 // --- markdown -------------------------------------------------------------
 
 test("parseInline splits bold and code", () => {
@@ -301,7 +298,7 @@ test("parseInline splits bold and code", () => {
 });
 
 test("parseMarkdown: heading, paragraph, CRLF", () => {
-    const blocks = lib.parseMarkdown("# Title\r\n\r\ntext one\r\ntext two");
+    const blocks = md("# Title\r\n\r\ntext one\r\ntext two");
 
     assert.equal(blocks[0].type, "heading");
     assert.equal(blocks[0].level, 1);
@@ -311,33 +308,33 @@ test("parseMarkdown: heading, paragraph, CRLF", () => {
 });
 
 test("parseMarkdown: lists", () => {
-    const [bullets] = lib.parseMarkdown("- a\n- b");
-    const [ordered] = lib.parseMarkdown("3. x\n4. y");
+    const [bullets] = md("- a\n- b");
+    const [ordered] = md("3. x\n4. y");
 
     assert.equal(bullets.type, "list");
     assert.equal(bullets.ordered, false);
     assert.equal(bullets.items.length, 2);
     assert.equal(ordered.ordered, true);
     assert.equal(ordered.start, 3);
-    assert.equal(lib.parseMarkdown("- a\n1. b").length, 2);
+    assert.equal(md("- a\n1. b").length, 2);
 });
 
 test("parseMarkdown: code fences", () => {
-    assert.deepEqual(lib.parseMarkdown("```js\nconst a = 1;\n```"), [
+    assert.deepEqual(md("```js\nconst a = 1;\n```"), [
         { type: "code", lang: "js", text: "const a = 1;" },
     ]);
-    assert.deepEqual(lib.parseMarkdown("```\ncode"), [{ type: "code", lang: "", text: "code" }]);
+    assert.deepEqual(md("```\ncode"), [{ type: "code", lang: "", text: "code" }]);
 });
 
 test("parseMarkdown unwraps a markdown fence, and a bare one only on request", () => {
-    assert.equal(lib.parseMarkdown("```markdown\n# T\n```")[0].type, "heading");
-    assert.equal(lib.parseMarkdown("```\n# T\n```")[0].type, "code");
-    assert.equal(lib.parseMarkdown("```\n# T\n```", { bareFence: true })[0].type, "heading");
+    assert.equal(md("```markdown\n# T\n```")[0].type, "heading");
+    assert.equal(md("```\n# T\n```")[0].type, "code");
+    assert.equal(md("```\n# T\n```", { bareFence: true })[0].type, "heading");
 });
 
 test("parseMarkdown: tables with and without a header", () => {
-    const [withHead] = lib.parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |");
-    const [noHead] = lib.parseMarkdown("| 1 | 2 |\n| 3 | 4 |");
+    const [withHead] = md("| a | b |\n|---|---|\n| 1 | 2 |");
+    const [noHead] = md("| 1 | 2 |\n| 3 | 4 |");
 
     assert.equal(withHead.type, "table");
     assert.equal(withHead.head.length, 2);
@@ -348,38 +345,40 @@ test("parseMarkdown: tables with and without a header", () => {
 });
 
 test("parseMarkdown: rule and empty input", () => {
-    assert.deepEqual(lib.parseMarkdown("---"), [{ type: "rule" }]);
-    assert.deepEqual(lib.parseMarkdown(null), []);
+    assert.deepEqual(md("---"), [{ type: "rule" }]);
+    assert.deepEqual(md(null), []);
 });
 
 test("parseMarkdown keeps HTML as text", () => {
-    const [block] = lib.parseMarkdown("<script>alert(1)</script>");
+    const [block] = md("<script>alert(1)</script>");
 
     assert.equal(block.type, "paragraph");
     assert.equal(block.inlines[0].text, "<script>alert(1)</script>");
 });
 
-function collectTags(node, tags = []) {
+function collectTags(node: lib.TreeNode, tags: string[] = []): string[] {
     if (typeof node === "string") return tags;
     tags.push(node.tag);
     node.children.forEach((child) => collectTags(child, tags));
     return tags;
 }
 
-function textOf(node) {
+function textOf(node: lib.TreeNode): string {
     return typeof node === "string" ? node : node.children.map(textOf).join("");
 }
 
 test("markdownTree: one wrapped block per parsed block, inline styles kept", () => {
-    const tree = lib.markdownTree(lib.parseMarkdown("# T\n\ntext **b** `c`"));
-    const [heading, paragraph] = tree.children.map((block) => block.children[0]);
+    const root = tree(md("# T\n\ntext **b** `c`"));
+    const [heading, paragraph] = root.children.map((block: any) => block.children[0]);
 
-    assert.equal(tree.tag, "div");
-    assert.equal(tree.children.length, 2);
+    assert.equal(root.tag, "div");
+    assert.equal(root.children.length, 2);
     assert.equal(heading.cls, "text-fg break-words text-subheading");
     assert.equal(textOf(heading), "T");
     assert.deepEqual(
-        paragraph.children.map((c) => (typeof c === "string" ? c : [c.tag, c.cls, textOf(c)])),
+        paragraph.children.map((c: any) =>
+            typeof c === "string" ? c : [c.tag, c.cls, textOf(c)],
+        ),
         [
             "text ",
             ["span", "text-fg", "b"],
@@ -387,39 +386,38 @@ test("markdownTree: one wrapped block per parsed block, inline styles kept", () 
             ["span", "font-mono text-fg bg-bg px-4", "c"],
         ],
     );
-    assert.equal(lib.markdownTree([]).children.length, 0);
-    assert.equal(lib.markdownTree(null).children.length, 0);
+    assert.equal(tree([]).children.length, 0);
+    assert.equal(tree(null).children.length, 0);
 });
 
 test("markdownTree: lists keep their numbers and bullets", () => {
-    const marker = (text) =>
-        lib
-            .markdownTree(lib.parseMarkdown(text))
-            .children[0].children[0].children.map((li) => textOf(li.children[0]));
+    const marker = (text: string): string[] =>
+        tree(md(text)).children[0].children[0].children.map((li: any) =>
+            textOf(li.children[0]),
+        );
 
     assert.deepEqual(marker("3. x\n4. y"), ["3.", "4."]);
     assert.deepEqual(marker("- a\n- b"), ["–", "–"]);
 });
 
 test("markdownTree: code keeps its text and an optional language tag", () => {
-    const code = (text) =>
-        lib.markdownTree(lib.parseMarkdown(text)).children[0].children[0];
+    const code = (text: string): any => tree(md(text)).children[0].children[0];
     const withLang = code("```js\nconst a = 1;\n```");
     const noLang = code("```\nx\n```");
 
     assert.deepEqual(
-        withLang.children.map((c) => c.tag),
+        withLang.children.map((c: any) => c.tag),
         ["div", "pre"],
     );
     assert.equal(textOf(withLang.children[1]), "const a = 1;");
     assert.deepEqual(
-        noLang.children.map((c) => c.tag),
+        noLang.children.map((c: any) => c.tag),
         ["pre"],
     );
 });
 
 test("markdownTree: a table has a header only with a separator row", () => {
-    const tags = (text) => collectTags(lib.markdownTree(lib.parseMarkdown(text)));
+    const tags = (text: string): string[] => collectTags(tree(md(text)));
 
     assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("thead"));
     assert.ok(tags("| a | b |\n|---|---|\n| 1 | 2 |").includes("th"));
@@ -428,15 +426,13 @@ test("markdownTree: a table has a header only with a separator row", () => {
 });
 
 test("markdownTree never turns model text into elements", () => {
-    const tree = lib.markdownTree(
-        lib.parseMarkdown(
-            "<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n```html\n<b>x</b>\n```",
-        ),
+    const root = tree(
+        md("<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n```html\n<b>x</b>\n```"),
     );
 
-    assert.ok(collectTags(tree).every((tag) => ["div", "p", "pre", "span"].includes(tag)));
-    assert.ok(textOf(tree).includes("<script>alert(1)</script>"));
-    assert.ok(textOf(tree).includes("<b>x</b>"));
+    assert.ok(collectTags(root).every((tag) => ["div", "p", "pre", "span"].includes(tag)));
+    assert.ok(textOf(root).includes("<script>alert(1)</script>"));
+    assert.ok(textOf(root).includes("<b>x</b>"));
 });
 
 test("answerBlocks parses an answer once", () => {
@@ -446,7 +442,7 @@ test("answerBlocks parses an answer once", () => {
 });
 
 test("shortenNames replaces the longest name first", () => {
-    const blocks = lib.parseMarkdown("m-long and m");
+    const blocks = md("m-long and m");
 
     lib.shortenNames(blocks, { m: "x", "m-long": "y" });
 
@@ -567,8 +563,8 @@ test("buildChart plots models with a mean and c/s and lists the rest", () => {
         chart.yTicks.map((t) => t.text),
         ["0", "25", "50", "75", "100"],
     );
-    assert.equal(chart.mid.cpsText, "median 75 c/s");
-    assert.equal(chart.mid.scoreText, "median 75");
+    assert.equal(chart.mid!.cpsText, "median 75 c/s");
+    assert.equal(chart.mid!.scoreText, "median 75");
     assert.equal(chart.points[0].title, "a: mean score 90 · 50 c/s");
 });
 
@@ -619,7 +615,7 @@ test("verdictFigures gives four figures with their place in the run", () => {
 
 // --- buildReport ----------------------------------------------------------
 
-function runFixture() {
+function runFixture(): any {
     return {
         schema_version: 3,
         judge_model: "j",
@@ -704,10 +700,9 @@ test("buildReport rejects files in an older format", () => {
     assert.throws(() => lib.buildReport(null), lib.ReportFormatError);
 });
 
-test("buildReport: header, verdict and notes", () => {
+test("buildReport: verdict and notes", () => {
     const report = lib.buildReport(runFixture());
 
-    assert.equal(report.meta, "finished 2026-01-01 12:00 · judge: j · local judge");
     assert.equal(report.verdict.model, "a");
     assert.equal(report.verdict.label, "recommended");
     assert.equal(report.verdict.rule, "the fastest model among those with a high pass rate");
@@ -719,17 +714,10 @@ test("buildReport: header, verdict and notes", () => {
 test("buildReport: model rows", () => {
     const [a, b] = lib.buildReport(runFixture()).models;
 
-    assert.equal(a.mean, "95");
-    assert.equal(a.median, "95");
-    assert.equal(a.passRate, "100%");
     assert.equal(
         a.metricsLine,
         "mean 95 · median 95 · pass 100% · fails 0 · critical 0 · errors 0 · judge errors 0 · 250 c/s · 50 t/s · 2.5 s total",
     );
-    assert.equal(a.cps, "250");
-    assert.equal(b.cps, "–");
-    assert.equal(b.tps, "–");
-    assert.equal(b.median, "0");
     assert.equal(b.cells[0].text, "err");
     assert.equal(b.cells[0].warn, true);
     assert.equal(b.entries[0].error, true);
@@ -743,7 +731,7 @@ test("buildReport: answer blocks are parsed lazily and once", () => {
     const [a] = report.models;
     const [card] = report.questionCards;
     const fromModel = a.entries[0];
-    const fromQuestion = card.entries.find((e) => e.model === "a");
+    const fromQuestion = card.entries.find((e) => e.model === "a")!;
 
     assert.equal(typeof fromModel.answerBlocks, "function");
     assert.equal(fromModel.answerBlocks()[0].type, "paragraph");
@@ -779,19 +767,13 @@ test("buildReport: question cards rank answers and put failures last", () => {
     assert.equal(card.spread, "one graded answer · 95");
 });
 
-test("buildReport: table grid, heads, references and chart", () => {
+test("buildReport: heads and references", () => {
     const report = lib.buildReport(runFixture());
 
-    assert.equal(
-        report.grid,
-        "grid-template-columns:minmax(160px,1fr) 64px 64px 64px repeat(1,48px) 64px 64px 64px",
-    );
     assert.deepEqual(report.questionHeads, [
         { id: "q1", title: "logic", anchor: lib.domId("question", "q1") },
     ]);
     assert.equal(report.references[0].title, "q1 · logic · generated");
-    assert.equal(report.chart.points.length, 1);
-    assert.deepEqual(report.chart.missing, ["b"]);
 });
 
 test("buildReport: anchors link the comparison table to the 03 cards", () => {
@@ -805,7 +787,7 @@ test("buildReport: anchors link the comparison table to the 03 cards", () => {
     // a cell, its per-model block and its per-question block share one id
     assert.equal(a.cells[0].anchor, answerA);
     assert.equal(a.entries[0].anchor, answerA);
-    assert.equal(card.entries.find((e) => e.model === "a").anchor, answerA);
+    assert.equal(card.entries.find((e) => e.model === "a")!.anchor, answerA);
     // a failed cell still points to its eval block
     assert.equal(b.cells[0].anchor, lib.domId("answer", "b", "q1"));
 
@@ -841,7 +823,126 @@ test("buildReport: no recommendation and a cloud judge", () => {
     assert.deepEqual(report.verdict.figures, []);
     assert.equal(report.verdict.rule, "no answers could be graded");
     assert.deepEqual(report.notes, []);
-    assert.ok(report.meta.endsWith("cloud judge"));
+});
+
+// --- running matrix ---------------------------------------------------------
+
+test("buildMatrix: a reference row and a row per candidate, a cell per question", () => {
+    const rows = lib.buildMatrix(lib.buildSteps("j", ["a", "b"], 3), 3, (m) => m);
+
+    assert.deepEqual(
+        rows.map((r) => [r.label, r.reference, r.sub, r.cells.length]),
+        [
+            ["reference", true, "j", 3],
+            ["a", false, "", 3],
+            ["b", false, "", 3],
+        ],
+    );
+    assert.ok(rows.every((r) => r.state === "queued" && r.time === "–"));
+    assert.ok(rows.every((r) => r.cells.every((c) => c.state === "planned")));
+});
+
+test("buildMatrix: a cell follows the answer and the grading of its question", () => {
+    const steps = lib.buildSteps("j", ["a", "b"], 3);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    setRow(steps, "answer:a:q2", { state: "done" });
+    setRow(steps, "answer:a:q3", { state: "error" });
+    setRow(steps, "grading:a:q3", { state: "skipped" });
+    setRow(steps, "answer:b:q1", { state: "done" });
+    setRow(steps, "grading:b:q1", { state: "running" });
+    setRow(steps, "answer:b:q2", { state: "done" });
+    setRow(steps, "grading:b:q2", { state: "done" });
+    setRow(steps, "answer:b:q3", { state: "done" });
+    setRow(steps, "grading:b:q3", { state: "error" });
+
+    const [, a, b] = lib.buildMatrix(steps, 3, (m) => m);
+
+    assert.deepEqual(
+        a.cells.map((c) => c.state),
+        ["answering", "ready", "generation_error"],
+    );
+    assert.deepEqual(
+        b.cells.map((c) => c.state),
+        ["grading", "graded", "judge_error"],
+    );
+    assert.equal(a.state, "running");
+    assert.equal(b.state, "running");
+
+    setRow(steps, "grading:b:q1", { state: "done" });
+    assert.equal(lib.buildMatrix(steps, 3, (m) => m)[2].state, "done");
+});
+
+test("buildMatrix: the reference row follows the reference steps", () => {
+    const steps = lib.buildSteps("j", ["a"], 3);
+    setRow(steps, "reference:j:q1", { state: "done" });
+    setRow(steps, "reference:j:q2", { state: "error" });
+    setRow(steps, "reference:j:q3", { state: "running" });
+
+    const [reference] = lib.buildMatrix(steps, 3, (m) => m);
+
+    assert.deepEqual(
+        reference.cells.map((c) => c.state),
+        ["graded", "generation_error", "answering"],
+    );
+    assert.equal(reference.state, "running");
+});
+
+test("buildMatrix: time is the total answering time, the title names the cell", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    setRow(steps, "answer:a:q1", { state: "done", startTs: 0, endTs: 4100 });
+    setRow(steps, "answer:a:q2", { state: "done", startTs: 5000, endTs: 6900 });
+
+    const [, a] = lib.buildMatrix(steps, 2, (m) => m);
+
+    assert.equal(a.time, "00:06");
+    assert.equal(a.cells[0].title, "a · q1: answer ready · 4.1 s");
+    assert.equal(a.cells[1].title, "a · q2: answer ready · 1.9 s");
+});
+
+test("activeQuestion is the first question in progress, or null", () => {
+    const steps = lib.buildSteps("j", ["a"], 3);
+
+    assert.equal(lib.activeQuestion(steps), null);
+    setRow(steps, "answer:a:q3", { state: "running" });
+    setRow(steps, "grading:a:q2", { state: "running" });
+    assert.equal(lib.activeQuestion(steps), 1);
+});
+
+test("hiddenSummary counts the hidden cells and warns about errors", () => {
+    const cell = (state: lib.CellState): lib.MatrixCellInfo => ({ state, title: "" });
+    const cells = [
+        cell("graded"),
+        cell("graded"),
+        cell("judge_error"),
+        cell("graded"),
+        cell("planned"),
+    ];
+
+    assert.deepEqual(lib.hiddenSummary(cells, 0, 4), {
+        count: 4,
+        warn: true,
+        title: "q1–q4: 3 graded · 1 judge error (q3)",
+    });
+    assert.deepEqual(lib.hiddenSummary(cells, 4, 5), {
+        count: 1,
+        warn: false,
+        title: "q5: 1 planned",
+    });
+    assert.deepEqual(lib.hiddenSummary(cells, 2, 2), { count: 0, warn: false, title: "" });
+});
+
+test("nowRows lists the running steps with a verb", () => {
+    const steps = lib.buildSteps("j", ["a"], 1);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    setRow(steps, "grading:a:q1", { state: "running" });
+
+    assert.deepEqual(
+        lib.nowRows(steps).map((r) => [r.key, r.verb]),
+        [
+            ["answer:a:q1", "answering"],
+            ["grading:a:q1", "grading"],
+        ],
+    );
 });
 
 // --- test cases file ------------------------------------------------------
@@ -855,14 +956,14 @@ const FORM_STATE = {
     ],
 };
 
-function rejects(text, message) {
+function rejects(text: string, message: string) {
     assert.throws(
         () => lib.parseCasesFile(text),
-        (e) => e instanceof lib.CasesFileError && e.message === message,
+        (e: unknown) => e instanceof lib.CasesFileError && e.message === message
     );
 }
 
-function fileOf(testCases, extra = {}) {
+function fileOf(testCases: unknown, extra: Record<string, unknown> = {}) {
     return JSON.stringify({ version: 1, test_cases: testCases, ...extra });
 }
 
@@ -963,4 +1064,57 @@ test("parseCasesFile limits the number of cases and the size in bytes", () => {
     rejects("x".repeat(lib.CASES_MAX_BYTES + 1), lib.CASES_TOO_LARGE);
     // fewer characters than the limit, but more bytes
     rejects("я".repeat(lib.CASES_MAX_BYTES / 2 + 1), lib.CASES_TOO_LARGE);
+});
+
+// --- who is in memory ---------------------------------------------------------
+
+test("buildMatrix: a candidate is loaded only while its own answers are in progress", () => {
+    const steps = lib.buildSteps("j", ["a", "b"], 2);
+    const loaded = () => lib.buildMatrix(steps, 2, (m) => m).map((r) => r.loaded);
+
+    assert.deepEqual(loaded(), [false, false, false]);
+    setRow(steps, "answer:a:q1", { state: "running" });
+    assert.deepEqual(loaded(), [false, true, false]);
+    // between two answers the model is still loaded
+    setRow(steps, "answer:a:q1", { state: "done" });
+    assert.deepEqual(loaded(), [false, true, false]);
+    setRow(steps, "answer:a:q2", { state: "done" });
+    setRow(steps, "answer:b:q1", { state: "running" });
+    assert.deepEqual(loaded(), [false, false, true]);
+});
+
+test("buildMatrix: a local judge is loaded for the references, then for grading and the summary", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    const judge = () => lib.buildMatrix(steps, 2, (m) => m)[0].loaded;
+
+    setRow(steps, "reference:j:q1", { state: "running" });
+    assert.equal(judge(), true);
+    setRow(steps, "reference:j:q1", { state: "done" });
+    setRow(steps, "reference:j:q2", { state: "done" });
+    assert.equal(judge(), false); // the candidates answer now
+    setRow(steps, "answer:a:q1", { state: "done" });
+    setRow(steps, "answer:a:q2", { state: "error" });
+    setRow(steps, "grading:a:q2", { state: "skipped" }); // a failed answer is skipped at once
+    assert.equal(judge(), false);
+    setRow(steps, "grading:a:q1", { state: "running" });
+    assert.equal(judge(), true);
+    setRow(steps, "grading:a:q1", { state: "done" }); // the summary is still to come
+    assert.equal(judge(), true);
+    setRow(steps, "summary:j:", { state: "done" });
+    assert.equal(judge(), false);
+});
+
+test("buildMatrix: a cloud judge is loaded from its first call to the summary", () => {
+    const steps = lib.buildSteps("j", ["a"], 1);
+    const judge = () => lib.buildMatrix(steps, 1, (m) => m, true)[0].loaded;
+
+    assert.equal(judge(), false);
+    setRow(steps, "reference:j:q1", { state: "running" });
+    assert.equal(judge(), true);
+    // waiting for an answer to grade: it still works beside the candidates
+    setRow(steps, "reference:j:q1", { state: "done" });
+    assert.equal(judge(), true);
+    setRow(steps, "grading:a:q1", { state: "done" });
+    setRow(steps, "summary:j:", { state: "done" });
+    assert.equal(judge(), false);
 });

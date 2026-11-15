@@ -226,3 +226,18 @@ def test_get_loaded_returns_none_on_error(mock_get):
     mock_get.side_effect = requests.ConnectionError("ollama is down")
 
     assert OllamaClient().get_loaded("m") is None
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_version_returns_the_version(mock_get):
+    mock_get.return_value = _response({"version": "0.21.0"})
+
+    assert OllamaClient().get_version() == "0.21.0"
+    assert mock_get.call_args.args[0].endswith("/api/version")
+
+
+@patch("core.ollama_client.requests.get")
+def test_get_version_returns_none_on_error(mock_get):
+    mock_get.side_effect = requests.ConnectionError("ollama is down")
+
+    assert OllamaClient().get_version() is None

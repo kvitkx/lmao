@@ -37,7 +37,7 @@ Pick a judge model, the candidates and your own questions. lmao runs every candi
 
 ## How scoring works
 
-The judge writes a reference answer for each question (or you provide one), then grades every answer from 0 to 100 in five bands; 70+ is a pass. The recommendation is the fastest model with a pass rate of at least 80%, otherwise the one with the best median.
+The judge writes a reference answer for each question (or you provide one), then grades every answer from 0 to 100 in five bands; 70+ is a pass. The recommendation is the fastest model with a pass rate of at least 70%, otherwise the one with the best median.
 
 ## Quick start
 

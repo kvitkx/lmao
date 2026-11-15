@@ -2,10 +2,9 @@
    and by `make css`; app.css itself is not committed. */
 @import "tailwindcss" source(none);
 
-/* Class names are read from the templates and from the scripts that build
-   markup (lib.js). */
+/* Class names are read from the templates and (frontend/lib.ts). */
 @source "../../templates";
-@source "../js";
+@source "../../frontend";
 
 /* nav_toggle composes these from a Jinja variable (side), so the scanner
    cannot see them in the template source. */

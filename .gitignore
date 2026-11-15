@@ -230,4 +230,5 @@ node_modules/
 # alpinejs and fonts from package-lock.json -> vendor/, fonts/
 static/css/app.css
 static/vendor/
+static/js/
 static/fonts/

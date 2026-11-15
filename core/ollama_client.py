@@ -184,3 +184,18 @@ class OllamaClient(Provider):
         except requests.RequestException as e:
             print(f"Error unloading {model}: {e}")
             return False
+
+    def get_version(self) -> str | None:
+        """Reads the version of the Ollama server.
+
+        Returns:
+            str | None: The version, or None if Ollama does not answer.
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/version", timeout=5)
+            response.raise_for_status()
+            version = response.json().get("version")
+        except requests.RequestException as e:
+            print(f"Error reading the Ollama version: {e}")
+            return None
+        return version if isinstance(version, str) else None

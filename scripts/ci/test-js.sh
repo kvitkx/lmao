@@ -11,4 +11,4 @@ docker_tool \
     --network none \
     --entrypoint node \
     "$NODE_IMAGE" \
-    --test "tests/js/*.test.js"
+    --test "tests/js/*.test.ts"

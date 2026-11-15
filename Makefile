@@ -85,8 +85,8 @@ test: ##> Run Python and JS tests, no coverage.
 	scripts/dev/test.sh $(ARGS)
 
 # What the css stage of the Dockerfile reads (see its COPY lines).
-CSS_SOURCES := Dockerfile package.json package-lock.json scripts/build-assets.sh \
-    static/css/input.css $(shell find static/js templates -type f)
+CSS_SOURCES := Dockerfile package.json package-lock.json tsconfig.json scripts/build-assets.sh \
+    static/css/input.css $(shell find frontend types templates -type f)
 
 # Rebuilt only when a source is newer. `touch`: a BuildKit cache hit exports the
 # files with their old time, and this rule would then run on every call.

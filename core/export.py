@@ -11,6 +11,8 @@ import csv
 import io
 import re
 
+from .scoring import BYTES_PER_GB
+
 CSV_COLUMNS = (
     "question",
     "tag",
@@ -21,6 +23,8 @@ CSV_COLUMNS = (
     "tps",
     "cps",
     "time_sec",
+    "tokens",
+    "chars",
 )
 
 # A cell that starts with one of these is run as a formula by spreadsheets.
@@ -41,6 +45,10 @@ _TABLE_HEAD = (
     "c/s",
     "t/s",
     "time, s",
+    "length",
+    "score/GB",
+    "tok/pass",
+    "memory GB",
 )
 
 
@@ -85,6 +93,8 @@ def to_csv(results: dict) -> str:
                 entry.get("tps"),
                 entry.get("cps"),
                 entry.get("time_sec"),
+                entry.get("tokens"),
+                entry.get("chars"),
             )
             writer.writerow(_csv_cell(value) for value in row)
 
@@ -141,6 +151,17 @@ def _recommendation(recommendation: dict) -> str:
     return f"No model was recommended ({details})."
 
 
+def _memory(stats: dict):
+    """GB in VRAM plus GB in RAM (offload), or all GB when it fits in VRAM."""
+    total = stats.get("memory_bytes")
+    if not total:
+        return None
+    vram = stats.get("vram_bytes")
+    if vram is None or vram >= total:
+        return f"{total / BYTES_PER_GB:.1f}"
+    return f"{vram / BYTES_PER_GB:.1f}+{(total - vram) / BYTES_PER_GB:.1f}"
+
+
 def _models_table(models: list) -> str:
     rows = [_row(_TABLE_HEAD), _row(["---"] * len(_TABLE_HEAD))]
     for stats in models:
@@ -160,6 +181,10 @@ def _models_table(models: list) -> str:
                     stats.get("median_cps"),
                     stats.get("median_tps"),
                     stats.get("median_time_sec"),
+                    stats.get("avg_chars"),
+                    stats.get("score_per_gb"),
+                    stats.get("tokens_per_pass"),
+                    _memory(stats),
                 ]
             )
         )

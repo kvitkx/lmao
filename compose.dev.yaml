@@ -26,11 +26,16 @@ services:
     environment:
       - HOME=/tmp
     volumes:
-      # Live sources for the class scan; the output lands in ./static/css.
+      # Live sources for the class scan and the compiler; the output lands in
+      # ./static (css, js, vendor, fonts).
       - ./static:/build/static
       - ./templates:/build/templates:ro
+      - ./frontend:/build/frontend:ro
+      - ./types:/build/types:ro
+      - ./tsconfig.json:/build/tsconfig.json:ro
       - ./scripts/build-assets.sh:/build/scripts/build-assets.sh:ro
-    # One build first, so the healthcheck passes as soon as the file exists.
+    # One build first, so the healthcheck passes as soon as the files exist.
+    # tsc watches in the background; Tailwind stays in the foreground.
     # --watch=always: Tailwind v4 stops watching when stdin closes, and it does
     # in a container without a terminal.
     command:
@@ -38,10 +43,12 @@ services:
       - -c
       - >-
         sh scripts/build-assets.sh node_modules static &&
+        ./node_modules/.bin/tsc --project tsconfig.json &&
         ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css &&
+        { ./node_modules/.bin/tsc --project tsconfig.json --watch --preserveWatchOutput & } &&
         exec ./node_modules/.bin/tailwindcss -i static/css/input.css -o static/css/app.css --watch=always
     healthcheck:
-      test: ["CMD-SHELL", "test -s static/css/app.css && test -s static/vendor/alpine.min.js && test -s static/fonts/inter-latin-300.woff2"]
+      test: ["CMD-SHELL", "test -s static/css/app.css && test -s static/js/lmao.js && test -s static/vendor/alpine.min.js && test -s static/fonts/inter-latin-300.woff2"]
       interval: 2s
       timeout: 2s
       retries: 30

@@ -2,6 +2,8 @@
 Unit tests for the aggregation and recommendation rules.
 """
 
+from pathlib import Path
+
 import pytest
 
 from core.prompts import CATEGORIES
@@ -11,6 +13,7 @@ from core.scoring import (
     CRITICAL_BELOW,
     MIN_QUESTIONS,
     PASS_MIN_SCORE,
+    PASS_RATE_THRESHOLD,
     RULE_FASTEST_ABOVE_THRESHOLD,
     RULE_HIGHEST_MEDIAN,
     RULE_NONE_GRADED,
@@ -282,7 +285,7 @@ def test_recommend_falls_back_to_highest_median_when_nobody_qualifies():
     models = [
         _stats("a", median=60, pass_rate=0.4),
         _stats("b", median=70, pass_rate=0.6),
-        _stats("c", median=70, pass_rate=0.7),
+        _stats("c", median=70, pass_rate=0.65),
     ]
 
     result = recommend(models)
@@ -311,3 +314,11 @@ def test_recommend_copes_with_a_qualified_model_without_timings():
     models = [_stats("a", time_sec=None), _stats("b", time_sec=3.0)]
 
     assert recommend(models)["model"] == "b"
+
+
+def test_the_front_end_mirrors_the_pass_constants():
+    path = Path(__file__).parent.parent / "frontend" / "details.ts"
+    source = path.read_text(encoding="utf-8")
+
+    assert f"PASS_MIN_SCORE = {PASS_MIN_SCORE};" in source
+    assert f"PASS_THRESHOLD_PCT = {round(PASS_RATE_THRESHOLD * 100)};" in source
