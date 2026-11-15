@@ -33,10 +33,8 @@ import {
     type PhaseFigures,
     type PhaseGroup,
     type Report,
-    type ReportCell,
     type Step,
     type TreeNode,
-    RESULTS_MATRIX,
     RUNNING_MATRIX,
     activeQuestion,
     buildMatrix,
@@ -130,6 +128,17 @@ interface ChecklistRow {
     meta: string;
 }
 
+interface Magics {
+    $nextTick(callback?: () => void): Promise<void>;
+    $refs: Record<string, HTMLElement>;
+}
+const magic = (self: unknown): Magics => self as Magics;
+
+interface DirectiveUtils {
+    effect(callback: () => void): unknown;
+    evaluateLater(expression: string): (callback: (value: unknown) => void) => void;
+}
+
 document.addEventListener("alpine:init", () => {
     // Builds DOM from the tree of markdownTree(): createElement and text nodes
     // only, so a model answer is never parsed as HTML.
@@ -145,14 +154,21 @@ document.addEventListener("alpine:init", () => {
     };
 
     // x-md="blocks": renders the blocks of parseMarkdown() into the element.
-    Alpine.directive("md", (root, { expression }, { effect, evaluateLater }) => {
-        const read = evaluateLater(expression);
-        effect(() =>
-            read((blocks: unknown) =>
-                root.replaceChildren(buildNode(markdownTree(blocks as MdBlock[]))),
-            ),
-        );
-    });
+    Alpine.directive(
+        "md",
+        (
+            root: HTMLElement,
+            { expression }: { expression: string },
+            { effect, evaluateLater }: DirectiveUtils,
+        ) => {
+            const read = evaluateLater(expression);
+            effect(() =>
+                read((blocks) =>
+                    root.replaceChildren(buildNode(markdownTree(blocks as MdBlock[]))),
+                ),
+            );
+        },
+    );
 
     let caseCounter = 0;
     let openToken = 0; // ignores a late response of a superseded results request
@@ -162,6 +178,9 @@ document.addEventListener("alpine:init", () => {
     let loadWatch: Step[] = []; // rows that may still show the load notice
 
     const SLOW_LOAD_MS = 8000;
+
+    const SCORES_NAME = 254;
+    const SCORES_CELL = 48;
 
     // `short` is the label of the progress segment (a quarter of the width).
     const PHASE_GROUPS: (PhaseGroup & { short: string })[] = [
@@ -244,8 +263,6 @@ document.addEventListener("alpine:init", () => {
         modelColumns: COLUMNS,
         scores: [] as ScoreRow[],
         scoreSort: { key: null, dir: "asc" } as ScoreSort,
-        scoresWidth: 0, // px, from a ResizeObserver
-        scoresStart: 0, // first visible question
 
         announcement: "", // text of the page live region
         // Clipboard API exists only in a secure context (localhost / https).
@@ -521,7 +538,7 @@ document.addEventListener("alpine:init", () => {
             this.names = shortNames(this.models);
             this.modelsLoaded = true;
             // Let x-for render the <option>s before the value is set.
-            await this.$nextTick();
+            await magic(this).$nextTick();
             if (!this.models.includes(this.judge)) {
                 this.judge = this.models[0] ?? "";
             }
@@ -550,13 +567,12 @@ document.addEventListener("alpine:init", () => {
             const token = ++openToken;
             this.activeRunId = id;
             this.view = "results";
-            if (this.$refs?.main) this.$refs.main.scrollTop = 0;
+            if (magic(this).$refs?.main) magic(this).$refs.main.scrollTop = 0;
             this.results = null;
             this.report = null;
             this.overview = null;
             this.scores = [];
             this.scoreSort = { key: null, dir: "asc" };
-            this.scoresStart = 0;
             this.resultsTab = "overview";
             this.sections = { overview: "summary", answers: "scores" };
             this.openAnswers = {};
@@ -916,7 +932,7 @@ document.addEventListener("alpine:init", () => {
         goHome(): void {
             this.view = "idle";
             if (!this.busy) this.activeRunId = null;
-            if (this.$refs?.main) this.$refs.main.scrollTop = 0;
+            if (magic(this).$refs?.main) magic(this).$refs.main.scrollTop = 0;
         },
 
         showRun(): void {
@@ -931,13 +947,13 @@ document.addEventListener("alpine:init", () => {
             if (!id) return;
             if (view && this.resultsView !== view) {
                 this.resultsView = view;
-                await this.$nextTick();
+                await magic(this).$nextTick();
             }
             // The answer text exists only when opened: open it first, so the
             // scroll lands on the final layout.
             if (id.startsWith("answer-")) {
                 this.openAnswers[id] = true;
-                await this.$nextTick();
+                await magic(this).$nextTick();
             }
             const target = document.getElementById(id);
             if (!target) return;
@@ -953,65 +969,19 @@ document.addEventListener("alpine:init", () => {
 
         // --- scores matrix of the answers tab ------------------------------
 
-        observeScores(el: HTMLElement): void {
-            const read = () => {
-                this.scoresWidth = el.clientWidth;
-            };
-            read();
-            new ResizeObserver(read).observe(el);
-        },
-
         get scoreRows(): ScoreRow[] {
             return sortScoreRows(this.scores, this.scoreSort.key, this.scoreSort.dir);
         },
 
-        // As many question columns as fit the width, from the question the user paged to.
-        get scoresWindow(): ColumnWindow {
-            const total = this.report?.questionHeads.length ?? 0;
-            const fit = columnsThatFit(this.scoresWidth, total, RESULTS_MATRIX);
-            return columnWindow(total, fit, 0, this.scoresStart);
-        },
-
-        get scoresOverflow(): boolean {
-            const w = this.scoresWindow;
-            return w.before + w.after > 0;
-        },
-
-        get scoresRange(): string {
-            const w = this.scoresWindow;
-            return `q${pad2(w.start)}–q${pad2(w.end - 1)}`;
-        },
-
-        // model | one column per visible question | the counter of the hidden ones
+        // model | one fixed column per question: the matrix scrolls sideways.
         get scoresGrid(): string {
-            const w = this.scoresWindow;
-            const count = w.end - w.start;
-            const cells = count ? ` repeat(${count},${RESULTS_MATRIX.cell}px)` : "";
-            const counter = this.scoresOverflow ? ` ${RESULTS_MATRIX.counter}px` : "";
-            return `grid-template-columns:${RESULTS_MATRIX.name}px${cells}${counter}`;
-        },
-
-        // The headers of the visible columns, with their place among all questions.
-        get scoresHeads(): { index: number; id: string; title: string }[] {
-            const w = this.scoresWindow;
-            return (this.report?.questionHeads ?? [])
-                .slice(w.start, w.end)
-                .map((h, i) => ({ index: w.start + i, id: h.id, title: h.title }));
-        },
-
-        visibleScoreCells(row: ScoreRow): (ReportCell & { index: number })[] {
-            const w = this.scoresWindow;
-            return row.cells.slice(w.start, w.end).map((cell, i) => ({ ...cell, index: w.start + i }));
+            const count = this.report?.questionHeads.length ?? 0;
+            const cells = count ? ` repeat(${count},${SCORES_CELL}px)` : "";
+            return `grid-template-columns:${SCORES_NAME}px${cells}`;
         },
 
         sortScores(key: number | null): void {
             this.scoreSort = nextScoreSort(this.scoreSort, key);
-        },
-
-        pageScores(direction: -1 | 1): void {
-            const w = this.scoresWindow;
-            const size = Math.max(1, w.end - w.start);
-            this.scoresStart = w.start + direction * size; // columnWindow clamps it
         },
 
         get modelRows(): TableRow[] {
@@ -1043,7 +1013,7 @@ document.addEventListener("alpine:init", () => {
         // From one tab to a block of another one: switch first, then jump.
         async showIn(tab: string, id: string | null, view: string | null = null): Promise<void> {
             this.resultsTab = tab;
-            await this.$nextTick();
+            await magic(this).$nextTick();
             await this.jumpTo(id, view);
         },
 
@@ -1091,7 +1061,7 @@ document.addEventListener("alpine:init", () => {
         // Tabs (ui.tabs): `key` is the state property, ids are tab-<key>-<value>.
         setTab(key: string, value: string): void {
             (this as unknown as Record<string, unknown>)[key] = value;
-            void this.$nextTick(() => document.getElementById(`tab-${key}-${value}`)?.focus());
+            void magic(this).$nextTick(() => document.getElementById(`tab-${key}-${value}`)?.focus());
         },
 
         // `list`: comma-separated values in tab order; `step`: +1 / -1, wraps around.

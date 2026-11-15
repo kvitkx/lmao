@@ -230,24 +230,27 @@ test("competitionRanks shares ranks and skips failed answers", () => {
 
 // --- matrix columns -------------------------------------------------------
 
+// A layout with one counter column: columnsThatFit no longer has a default.
+const ONE_COUNTER: lib.MatrixLayout = { name: 254, tail: 0, cell: 48, counter: 48, counters: 1 };
+
 test("columnsThatFit fills the width and leaves room for one counter", () => {
     // 254 (model) + 48 per question + 48 for the counter
-    assert.equal(lib.columnsThatFit(1094, 30), 16);
-    assert.equal(lib.columnsThatFit(1374, 30), 22);
-    assert.equal(lib.columnsThatFit(2494, 30), 30);
+    assert.equal(lib.columnsThatFit(1094, 30, ONE_COUNTER), 16);
+    assert.equal(lib.columnsThatFit(1374, 30, ONE_COUNTER), 22);
+    assert.equal(lib.columnsThatFit(2494, 30, ONE_COUNTER), 30);
 });
 
 test("columnsThatFit shows everything that fits without a counter", () => {
-    assert.equal(lib.columnsThatFit(1094, 17), 17);
-    assert.equal(lib.columnsThatFit(1094, 10), 10);
-    assert.equal(lib.columnsThatFit(1094, 18), 16);
+    assert.equal(lib.columnsThatFit(1094, 17, ONE_COUNTER), 17);
+    assert.equal(lib.columnsThatFit(1094, 10, ONE_COUNTER), 10);
+    assert.equal(lib.columnsThatFit(1094, 18, ONE_COUNTER), 16);
 });
 
 test("columnsThatFit copes with no room and no questions", () => {
-    assert.equal(lib.columnsThatFit(200, 30), 0);
-    assert.equal(lib.columnsThatFit(NaN, 30), 0);
-    assert.equal(lib.columnsThatFit(1094, 0), 0);
-    assert.equal(lib.columnsThatFit(310, 30), 1);
+    assert.equal(lib.columnsThatFit(200, 30, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(NaN, 30, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(1094, 0, ONE_COUNTER), 0);
+    assert.equal(lib.columnsThatFit(310, 30, ONE_COUNTER), 1);
 });
 
 test("columnWindow shows everything when it fits", () => {

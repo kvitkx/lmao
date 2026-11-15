@@ -257,15 +257,6 @@ export interface MatrixLayout {
     counters: 1 | 2; // counter columns that take room when not everything fits
 }
 
-// The scores matrix of the results screens: a counter on the right only.
-export const RESULTS_MATRIX: MatrixLayout = {
-    name: 254,
-    tail: 0,
-    cell: 48,
-    counter: 48,
-    counters: 1,
-};
-
 // The matrix of the running screen: both counters are always there, so the
 // columns do not jump while the window follows the run.
 export const RUNNING_MATRIX: MatrixLayout = {
@@ -281,7 +272,7 @@ export const RUNNING_MATRIX: MatrixLayout = {
 export function columnsThatFit(
     width: number,
     total: number,
-    layout: MatrixLayout = RESULTS_MATRIX,
+    layout: MatrixLayout,
 ): number {
     const room = width - layout.name - layout.tail;
     if (!(room >= layout.cell) || !(total > 0)) return 0;
