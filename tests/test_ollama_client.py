@@ -241,3 +241,23 @@ def test_get_version_returns_none_on_error(mock_get):
     mock_get.side_effect = requests.ConnectionError("ollama is down")
 
     assert OllamaClient().get_version() is None
+
+
+def test_build_request_is_what_generate_sends():
+    client = OllamaClient()
+
+    url, payload = client.build_request(
+        "m", "hi", "sys", {"type": "object"}, False, {"seed": 1}, "10m"
+    )
+
+    assert url == f"{client.base_url}/api/generate"
+    assert payload == {
+        "model": "m",
+        "prompt": "hi",
+        "system": "sys",
+        "stream": False,
+        "keep_alive": "10m",
+        "format": {"type": "object"},
+        "think": False,
+        "options": {"seed": 1},
+    }

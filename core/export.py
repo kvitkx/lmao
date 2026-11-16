@@ -137,6 +137,9 @@ def _meta(results: dict) -> str:
         f"judge: {_line(results.get('judge_model'))}",
         f"mode: {_line(results.get('mode'))}",
     ]
+    status = results.get("status")
+    if status and status != "completed":
+        parts.append(f"status: {_line(status)}")
     if results.get("finished_at"):
         parts.append(f"finished: {_line(results['finished_at'])}")
     return " · ".join(parts)

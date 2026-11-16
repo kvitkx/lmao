@@ -347,3 +347,17 @@ def test_generate_hides_the_key_if_the_server_echoes_it(mock_post):
     result = _client().generate("m", "hi")
 
     assert result == {"success": False, "error": "401: Bad key *** given"}
+
+
+def test_build_request_is_what_generate_sends():
+    url, payload = _client().build_request(
+        "m", "hi", "sys", SCHEMA, False, {"temperature": 0, "num_predict": 5}, "10m"
+    )
+
+    assert url == "https://api.example.com/v1/chat/completions"
+    assert payload["messages"] == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+    ]
+    assert (payload["temperature"], payload["max_tokens"]) == (0, 5)
+    assert payload["response_format"]["type"] == "json_schema"

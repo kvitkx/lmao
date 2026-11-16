@@ -9,6 +9,10 @@ Local mode runs the phases strictly one after another and keeps one model in
 VRAM at a time. Cloud mode (a judge running remotely) runs the judge calls in a
 thread pool while the candidates still generate one by one: references are made
 and every answer is graded as soon as it is ready.
+
+Every step is saved as it finishes (`_Checkpoint`). A run can therefore be
+stopped between two steps and resumed later, also after an error or after the
+server died: a resumed run skips the steps that are already done.
 """
 
 import json
@@ -49,6 +53,14 @@ HISTORY_DIR = os.path.join(DATA_DIR, "history")
 MODE_LOCAL = "local"
 MODE_CLOUD = "cloud"
 
+# State of a whole run in evaluation_results.json.
+RUN_RUNNING = "running"
+RUN_COMPLETED = "completed"
+RUN_STOPPED = "stopped"
+RUN_ERROR = "error"
+# A file that still says "running" belongs to a run whose server died.
+RESUMABLE_RUNS = (RUN_STOPPED, RUN_ERROR, RUN_RUNNING)
+
 PHASE_REFERENCE = "reference"
 PHASE_ANSWER = "answer"
 PHASE_GRADING = "grading"
@@ -78,6 +90,15 @@ _SUMMED_METRICS = (
 )
 
 
+class RunCancelled(Exception):
+    """Raised between two steps when the run was asked to stop."""
+
+
+def step_key(phase: str, model: str | None = None, question: str | None = None) -> str:
+    """The id of a step. Same shape as the key of the rows in the UI."""
+    return f"{phase}:{model or ''}:{question or ''}"
+
+
 def _judge_options(attempt: int = 0) -> dict:
     """Deterministic judge options. The seed changes per attempt, because an
     identical retry at temperature 0 would return the identical reply."""
@@ -86,6 +107,20 @@ def _judge_options(attempt: int = 0) -> dict:
         "seed": JUDGE_SEED + attempt,
         "num_ctx": JUDGE_NUM_CTX,
         "num_predict": JUDGE_NUM_PREDICT,
+    }
+
+
+def judge_kwargs(system_prompt: str, attempt: int = 0, format=None) -> dict:
+    """What every judge call sends besides the prompt.
+
+    One place for the run and for the request preview, so they cannot drift.
+    """
+    return {
+        "system_prompt": system_prompt,
+        "format": format,
+        "think": False,
+        "options": _judge_options(attempt),
+        "keep_alive": KEEP_ALIVE,
     }
 
 
@@ -124,34 +159,186 @@ def _new_question(index: int, test_case: dict) -> dict:
     }
 
 
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
 def _write_json(path: str, data: dict) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    """Writes through a temporary file: a crash never leaves half a file."""
+    temporary = f"{path}.tmp"
+    with open(temporary, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(temporary, path)
+
+
+def _read_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError, ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _entry_for(question: dict, model: str) -> dict | None:
+    return next((e for e in question["results"] if e["model_name"] == model), None)
+
+
+def _aggregate(questions: list, candidates: list, footprints: dict) -> list[dict]:
+    """Per-model aggregates of the answers saved so far."""
+    entries = {model: [] for model in candidates}
+    for question in questions:
+        for entry in question["results"]:
+            entries[entry["model_name"]].append(
+                {
+                    "status": entry["status"],
+                    "score": entry["score"],
+                    "no_reference": question["no_reference"],
+                    "tps": entry["tps"],
+                    "cps": entry["cps"],
+                    "time_sec": entry["time_sec"],
+                    "tokens": entry["tokens"],
+                    "chars": entry["chars"],
+                }
+            )
+    return [
+        summarize_model(model, entries[model], footprints[model])
+        for model in candidates
+    ]
+
+
+def replay_events(saved: dict) -> list[dict]:
+    """Rebuilds the events of the steps a saved run has finished.
+
+    A resumed run gets a fresh event stream. These events put the UI in the
+    state the run was left in. A skipped grading (a failed answer) counts as
+    finished but has no event, as in a live run.
+
+    Args:
+        saved (dict): The content of evaluation_results.json.
+
+    Returns:
+        list[dict]: The `*_done` events, with the progress at each of them.
+    """
+    judge = saved["judge_model"]
+    total = saved["progress"]["total"]
+    finished = set(saved["finished_steps"])
+    questions = saved["questions_results"]
+    candidates = saved["candidates"]
+    events = []
+    done = 0
+
+    def add(event_type, phase, model, question, **extra):
+        events.append(
+            {
+                "type": event_type,
+                "phase": phase,
+                "model": model,
+                "question": question,
+                "progress": {"done": done, "total": total},
+                **extra,
+            }
+        )
+
+    for question in questions:
+        if step_key(PHASE_REFERENCE, judge, question["id"]) in finished:
+            done += 1
+            add(
+                "reference_done",
+                PHASE_REFERENCE,
+                judge,
+                question["id"],
+                success=not question["no_reference"],
+                source=question["reference"]["source"],
+            )
+
+    for model in candidates:
+        for question in questions:
+            if step_key(PHASE_ANSWER, model, question["id"]) in finished:
+                done += 1
+                entry = _entry_for(question, model)
+                add(
+                    "answer_done",
+                    PHASE_ANSWER,
+                    model,
+                    question["id"],
+                    success=entry["status"] != STATUS_GENERATION_ERROR,
+                    error=entry["error"],
+                )
+
+    for model in candidates:
+        for question in questions:
+            if step_key(PHASE_GRADING, model, question["id"]) not in finished:
+                continue
+            done += 1
+            entry = _entry_for(question, model)
+            if entry["status"] == STATUS_GENERATION_ERROR:
+                continue
+            failed = entry["status"] == STATUS_JUDGE_ERROR
+            add(
+                "grading_done",
+                PHASE_GRADING,
+                model,
+                question["id"],
+                success=not failed,
+                error=entry["error"] if failed else None,
+            )
+
+    if step_key(PHASE_SUMMARY, judge) in finished:
+        done += 1
+        add("summary_done", PHASE_SUMMARY, judge, None, success=True)
+
+    return events
 
 
 class _Run:
-    """Progress counter and event emitter of one evaluation run.
+    """Progress, stop flag and event emitter of one evaluation run.
 
-    Cloud mode reports from several threads, so the counter and the callback
-    sit behind one lock and events stay in the same order as the progress.
-    It also carries the provider of the run's judge, which can differ from the
-    provider of the candidates.
+    Cloud mode reports from several threads, so the finished steps and the
+    callback sit behind one lock and events stay in the same order as the
+    progress. It also carries the provider of the run's judge, which can differ
+    from the provider of the candidates.
+
+    Attributes:
+        finished (set[str]): Keys of the finished steps. A resumed run starts
+            with the keys of the saved run.
     """
 
     def __init__(
-        self, task_id: str, callback: Callable, total: int, judge_provider: Provider
+        self,
+        task_id: str,
+        callback: Callable,
+        total: int,
+        judge_provider: Provider,
+        cancel: threading.Event | None = None,
+        finished=(),
+        on_step: Callable | None = None,
     ):
         self.task_id = task_id
         self.callback = callback
         self.total = total
         self.judge_provider = judge_provider
-        self.done = 0
+        self.cancel = cancel or threading.Event()
+        self.finished = set(finished)
+        self.on_step = on_step
         self._lock = threading.Lock()
 
-    def advance(self) -> None:
+    @property
+    def done(self) -> int:
+        return len(self.finished)
+
+    def check(self) -> None:
+        """Called between steps: stops the run if it was asked to stop."""
+        if self.cancel.is_set():
+            raise RunCancelled()
+
+    def is_done(self, phase: str, model=None, question=None) -> bool:
+        return step_key(phase, model, question) in self.finished
+
+    def advance(self, phase: str, model=None, question=None) -> None:
         """Marks one step as finished without an event (a skipped step)."""
         with self._lock:
-            self.done += 1
+            self.finished.add(step_key(phase, model, question))
 
     def emit(self, event_type, phase, model=None, question=None, **extra) -> None:
         """Pushes an event carrying the phase, model, question and progress."""
@@ -159,9 +346,14 @@ class _Run:
             self._send(event_type, phase, model, question, extra)
 
     def complete(self, event_type, phase, model=None, question=None, **extra) -> None:
-        """Marks one step as finished and reports it as a single update."""
+        """Marks one step as finished, saves the run and reports a single update.
+
+        The run is saved first, so the UI is never ahead of the disk.
+        """
         with self._lock:
-            self.done += 1
+            self.finished.add(step_key(phase, model, question))
+            if self.on_step:
+                self.on_step()
             self._send(event_type, phase, model, question, extra)
 
     def _send(self, event_type, phase, model, question, extra) -> None:
@@ -174,6 +366,64 @@ class _Run:
                 "question": question,
                 "progress": {"done": self.done, "total": self.total},
                 **extra,
+            },
+        )
+
+
+class _Checkpoint:
+    """Writes the files of a run after every step.
+
+    The results file always holds a valid summary (aggregates of what is graded
+    so far, without the judge's text), so every state of a run can be shown.
+    """
+
+    def __init__(
+        self,
+        folder: str,
+        header: dict,
+        questions: list,
+        candidates: list,
+        metrics: dict,
+        footprints: dict,
+    ):
+        self.folder = folder
+        self.header = header
+        self.questions = questions
+        self.candidates = candidates
+        self.metrics = metrics
+        self.footprints = footprints
+        self.run: _Run | None = None
+
+    def save(self, status: str, summary: dict | None = None, finished_at=None) -> None:
+        models = _aggregate(self.questions, self.candidates, self.footprints)
+        if summary is None:
+            summary = {
+                "models": models,
+                "recommendation": recommend(models),
+                "text": "",
+            }
+
+        _write_json(
+            os.path.join(self.folder, "technical_metrics.json"),
+            {
+                "task_id": self.header["task_id"],
+                "judge_model": self.header["judge_model"],
+                "mode": self.header["mode"],
+                "metrics": self.metrics,
+                "footprints": self.footprints,
+            },
+        )
+        _write_json(
+            os.path.join(self.folder, "evaluation_results.json"),
+            {
+                "schema_version": SCHEMA_VERSION,
+                **self.header,
+                "status": status,
+                "progress": {"done": self.run.done, "total": self.run.total},
+                "finished_steps": sorted(self.run.finished),
+                "finished_at": finished_at,
+                "questions_results": self.questions,
+                "summary": summary,
             },
         )
 
@@ -236,85 +486,105 @@ class EvaluationPipeline:
         format=None,
     ) -> dict:
         return run.judge_provider.generate(
-            judge,
-            prompt,
-            system_prompt=system_prompt,
-            format=format,
-            think=False,
-            options=_judge_options(attempt),
-            keep_alive=KEEP_ALIVE,
+            judge, prompt, **judge_kwargs(system_prompt, attempt, format)
         )
+
+    def _run_info(self) -> dict:
+        """How the run is made: written once, kept when the run is resumed."""
+        return {
+            "started_at": _now(),
+            "lmao_version": lmao_version(),
+            "ollama_version": self.provider.get_version(),
+            "candidate_params": {"think": False, **CANDIDATE_OPTIONS},
+            "judge_params": _judge_options(),
+        }
 
     def run_evaluation(
         self,
         task_id: str,
-        payload: dict,
+        payload: dict | None,
         update_status_cb: Callable,
         judge_provider: Provider | None = None,
+        saved: dict | None = None,
+        cancel: threading.Event | None = None,
     ) -> None:
         """Executes the full evaluation process for a given payload.
 
         Args:
             task_id (str): The unique identifier for the current run.
-            payload (dict): Configuration data from the UI (candidates, judge,
-                judge_provider, base_rationale, test_cases with an optional
-                reference each).
+            payload (dict | None): Configuration data from the UI (candidates,
+                judge, judge_provider, base_rationale, test_cases with an
+                optional reference each). None when `saved` is given.
             update_status_cb (Callable): Pushes events to the app stream.
             judge_provider (Provider, optional): Serves the judge. Defaults to
                 the provider of the candidates (the local Ollama).
+            saved (dict, optional): The content of evaluation_results.json of a
+                stopped or failed run. The run continues from it and skips the
+                steps it has finished.
+            cancel (threading.Event, optional): Set to stop the run between two
+                steps. A step in progress is not interrupted.
         """
-        started_at = datetime.now().isoformat(timespec="seconds")
-        judge = payload.get("judge")
-        judge_kind = payload.get("judge_provider", JUDGE_OLLAMA)
-        cloud = judge_kind != JUDGE_OLLAMA
-        candidates = list(dict.fromkeys(payload.get("candidates", [])))
-        base_rationale = payload.get("base_rationale", "")
-        questions = [
-            _new_question(index, test_case)
-            for index, test_case in enumerate(payload.get("test_cases", []), 1)
-        ]
-
         run_folder = os.path.join(self.history_dir, task_id)
         os.makedirs(run_folder, exist_ok=True)
 
-        run = _Run(
-            task_id,
-            update_status_cb,
-            total=len(questions) * (1 + 2 * len(candidates)) + 1,
-            judge_provider=(
-                judge_provider if judge_provider is not None else self.provider
-            ),
-        )
-        metrics = {model: _empty_metrics() for model in candidates}
+        if saved is None:
+            judge = payload.get("judge")
+            judge_kind = payload.get("judge_provider", JUDGE_OLLAMA)
+            candidates = list(dict.fromkeys(payload.get("candidates", [])))
+            base_rationale = payload.get("base_rationale", "")
+            questions = [
+                _new_question(index, test_case)
+                for index, test_case in enumerate(payload.get("test_cases", []), 1)
+            ]
+            finished = set()
+            technical = {}
+            run_info = self._run_info()
+        else:
+            judge = saved["judge_model"]
+            judge_kind = saved["judge_provider"]
+            candidates = saved["candidates"]
+            base_rationale = saved["base_rationale"]
+            questions = saved["questions_results"]
+            finished = set(saved["finished_steps"])
+            # An answer saved without its step was cut off by a crash: redo it.
+            for question in questions:
+                question["results"] = [
+                    entry
+                    for entry in question["results"]
+                    if step_key(PHASE_ANSWER, entry["model_name"], question["id"])
+                    in finished
+                ]
+            technical = _read_json(os.path.join(run_folder, "technical_metrics.json"))
+            run_info = saved.get("run") or self._run_info()
+
+        cloud = judge_kind != JUDGE_OLLAMA
+        mode = MODE_CLOUD if cloud else MODE_LOCAL
+
+        known_metrics = technical.get("metrics", {})
+        known_footprints = technical.get("footprints", {})
+        metrics = {
+            model: known_metrics.get(model) or _empty_metrics() for model in candidates
+        }
         sizes = self.provider.get_model_sizes()
-        footprints = {
-            model: {
+        footprints = {}
+        for model in candidates:
+            footprint = {
                 "size_bytes": sizes.get(model) or None,
                 "memory_bytes": None,
                 "vram_bytes": None,
             }
-            for model in candidates
-        }
+            footprint.update(
+                {
+                    k: v
+                    for k, v in known_footprints.get(model, {}).items()
+                    if v is not None
+                }
+            )
+            footprints[model] = footprint
 
-        runner = self._run_cloud if cloud else self._run_local
-        summary = runner(
-            run, judge, candidates, questions, metrics, footprints, base_rationale
-        )
-
-        mode = MODE_CLOUD if cloud else MODE_LOCAL
-        _write_json(
-            os.path.join(run_folder, "technical_metrics.json"),
+        checkpoint = _Checkpoint(
+            run_folder,
             {
-                "task_id": task_id,
-                "judge_model": judge,
-                "mode": mode,
-                "metrics": metrics,
-            },
-        )
-        _write_json(
-            os.path.join(run_folder, "evaluation_results.json"),
-            {
-                "schema_version": SCHEMA_VERSION,
                 "task_id": task_id,
                 "judge_model": judge,
                 "judge_provider": judge_kind,
@@ -322,19 +592,51 @@ class EvaluationPipeline:
                 # An OpenAI judge lives at the API: it cannot be a local candidate.
                 "judge_is_candidate": judge_kind != JUDGE_OPENAI
                 and judge in candidates,
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "run": {
-                    "started_at": started_at,
-                    "lmao_version": lmao_version(),
-                    "ollama_version": self.provider.get_version(),
-                    "candidate_params": {"think": False, **CANDIDATE_OPTIONS},
-                    "judge_params": _judge_options(),
-                },
-                "questions_results": questions,
-                "summary": summary,
+                "candidates": candidates,
+                "base_rationale": base_rationale,
+                "run": run_info,
             },
+            questions,
+            candidates,
+            metrics,
+            footprints,
         )
+        total = len(questions) * (1 + 2 * len(candidates)) + 1
+        run = _Run(
+            task_id,
+            update_status_cb,
+            total=total,
+            judge_provider=(
+                judge_provider if judge_provider is not None else self.provider
+            ),
+            cancel=cancel,
+            finished=finished,
+            on_step=lambda: checkpoint.save(RUN_RUNNING),
+        )
+        checkpoint.run = run
+        checkpoint.save(RUN_RUNNING)
 
+        runner = self._run_cloud if cloud else self._run_local
+        try:
+            summary = runner(
+                run, judge, candidates, questions, metrics, footprints, base_rationale
+            )
+        except RunCancelled:
+            checkpoint.save(RUN_STOPPED, finished_at=_now())
+            update_status_cb(
+                task_id,
+                {
+                    "type": "cancelled",
+                    "message": "Run stopped.",
+                    "progress": {"done": run.done, "total": total},
+                },
+            )
+            return
+        except Exception:
+            checkpoint.save(RUN_ERROR, finished_at=_now())
+            raise
+
+        checkpoint.save(RUN_COMPLETED, summary=summary, finished_at=_now())
         update_status_cb(
             task_id,
             {"type": "completed", "message": "All tasks completed successfully."},
@@ -346,9 +648,15 @@ class EvaluationPipeline:
         self, run, judge, candidates, questions, metrics, footprints, base_rationale
     ) -> dict:
         """A, B, C and D strictly one after another, one model in VRAM at a time."""
-        with self._loaded(judge):
-            for question in questions:
-                self._make_reference(run, judge, question)
+        pending = [
+            question
+            for question in questions
+            if not run.is_done(PHASE_REFERENCE, judge, question["id"])
+        ]
+        if pending:
+            with self._loaded(judge):
+                for question in pending:
+                    self._make_reference(run, judge, question)
 
         for model in candidates:
             self._answer_all(run, model, questions, metrics[model], footprints[model])
@@ -365,7 +673,8 @@ class EvaluationPipeline:
         self, run, judge, candidates, questions, metrics, footprints, base_rationale
     ) -> dict:
         """Judge calls run in a pool while the candidates generate one by one."""
-        with ThreadPoolExecutor(max_workers=CLOUD_WORKERS) as pool:
+        pool = ThreadPoolExecutor(max_workers=CLOUD_WORKERS)
+        try:
             references = {
                 question["id"]: pool.submit(self._make_reference, run, judge, question)
                 for question in questions
@@ -385,6 +694,11 @@ class EvaluationPipeline:
                     )
                 )
 
+            # Answers saved before a stop: grade what is still ungraded.
+            for question in questions:
+                for entry in question["results"]:
+                    grade_when_answered(question, entry)
+
             for model in candidates:
                 self._answer_all(
                     run,
@@ -398,6 +712,10 @@ class EvaluationPipeline:
             # Surface any exception raised in a worker thread.
             for future in [*references.values(), *gradings]:
                 future.result()
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+        pool.shutdown(wait=True)
 
         return self._summarize(run, judge, questions, candidates, footprints)
 
@@ -412,6 +730,9 @@ class EvaluationPipeline:
     # --- A: references ------------------------------------------------------
 
     def _make_reference(self, run: _Run, judge: str, question: dict) -> None:
+        if run.is_done(PHASE_REFERENCE, judge, question["id"]):
+            return
+        run.check()
         run.emit("reference_start", PHASE_REFERENCE, judge, question["id"])
 
         if question["reference"]["source"] != SOURCE_PROVIDED:
@@ -452,21 +773,31 @@ class EvaluationPipeline:
         footprint: dict,
         on_answer: Callable | None = None,
     ) -> None:
-        """One candidate answers every question with the model loaded once.
+        """One candidate answers the questions it has not answered yet.
 
+        The model is loaded once, and only if something is left to answer.
         After the first answer that was generated, the memory the loaded model
-        takes is read once.
+        takes is read once (unless a resumed run already has it).
 
         Args:
             footprint (dict): Updated in place with memory_bytes and vram_bytes.
             on_answer (Callable, optional): Called with the question and the
                 saved entry right after each answer.
         """
+        pending = [
+            question
+            for question in questions
+            if not run.is_done(PHASE_ANSWER, model, question["id"])
+        ]
+        if not pending:
+            return
+
         run.emit("candidate_start", PHASE_ANSWER, model)
 
-        measured = False
+        measured = footprint["memory_bytes"] is not None
         with self._loaded(model):
-            for question in questions:
+            for question in pending:
+                run.check()
                 entry = self._answer(run, model, question, metrics)
                 if not measured and entry["status"] != STATUS_GENERATION_ERROR:
                     measured = True
@@ -551,11 +882,16 @@ class EvaluationPipeline:
     def _grade_entry(
         self, run: _Run, judge: str, question: dict, base_rationale: str, entry: dict
     ) -> None:
+        model = entry["model_name"]
+        if run.is_done(PHASE_GRADING, model, question["id"]):
+            return
+        run.check()
+
         if entry["status"] == STATUS_GENERATION_ERROR:
-            run.advance()
+            run.advance(PHASE_GRADING, model, question["id"])
             return
 
-        run.emit("grading_start", PHASE_GRADING, entry["model_name"], question["id"])
+        run.emit("grading_start", PHASE_GRADING, model, question["id"])
         grade, error = self._grade(run, judge, question, base_rationale, entry)
         if grade:
             entry.update(grade)
@@ -565,7 +901,7 @@ class EvaluationPipeline:
         run.complete(
             "grading_done",
             PHASE_GRADING,
-            entry["model_name"],
+            model,
             question["id"],
             success=grade is not None,
             error=error,
@@ -616,28 +952,10 @@ class EvaluationPipeline:
     def _summarize(
         self, run: _Run, judge: str, questions: list, candidates: list, footprints: dict
     ) -> dict:
+        run.check()
         run.emit("summary_start", PHASE_SUMMARY, judge)
 
-        entries = {model: [] for model in candidates}
-        for question in questions:
-            for entry in question["results"]:
-                entries[entry["model_name"]].append(
-                    {
-                        "status": entry["status"],
-                        "score": entry["score"],
-                        "no_reference": question["no_reference"],
-                        "tps": entry["tps"],
-                        "cps": entry["cps"],
-                        "time_sec": entry["time_sec"],
-                        "tokens": entry["tokens"],
-                        "chars": entry["chars"],
-                    }
-                )
-
-        models = [
-            summarize_model(model, entries[model], footprints[model])
-            for model in candidates
-        ]
+        models = _aggregate(questions, candidates, footprints)
         recommendation = recommend(models)
 
         result = self._judge_generate(

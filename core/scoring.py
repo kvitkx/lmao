@@ -73,6 +73,9 @@ def summarize_model(
             scores.append(0)
         elif status == STATUS_JUDGE_ERROR:
             judge_errors += 1
+        elif entry["score"] is None:
+            # Answered but not graded yet: a stopped run is saved like this.
+            continue
         elif entry["no_reference"]:
             n_no_reference += 1
         elif status == STATUS_TRUNCATED:

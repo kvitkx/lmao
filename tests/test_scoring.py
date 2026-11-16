@@ -322,3 +322,26 @@ def test_the_front_end_mirrors_the_pass_constants():
 
     assert f"PASS_MIN_SCORE = {PASS_MIN_SCORE};" in source
     assert f"PASS_THRESHOLD_PCT = {round(PASS_RATE_THRESHOLD * 100)};" in source
+
+
+def test_an_answer_that_is_not_graded_yet_counts_for_speed_but_not_for_the_score():
+    entries = [
+        _entry(score=90, tps=10.0, time_sec=1.0),
+        _entry(score=None, tps=30.0, time_sec=3.0),
+        _entry(status=STATUS_TRUNCATED, score=None, no_reference=True),
+    ]
+
+    result = summarize_model("m", entries)
+
+    assert result["n"] == 1
+    assert result["median"] == 90
+    assert result["n_no_reference"] == 0
+    assert result["median_tps"] == 30.0
+    assert result["median_time_sec"] == 2.0
+
+
+def test_a_run_with_nothing_graded_yet_recommends_nothing():
+    stats = [summarize_model("m", [_entry(score=None)])]
+
+    assert stats[0]["n"] == 0
+    assert recommend(stats)["rule"] == RULE_NONE_GRADED

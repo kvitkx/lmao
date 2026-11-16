@@ -12,6 +12,7 @@ export type Category =
 export type Status = "ok" | "truncated" | "generation_error" | "judge_error";
 export type ReferenceSource = "generated" | "provided" | "none";
 export type Mode = "local" | "cloud";
+export type RunStatus = "running" | "completed" | "stopped" | "error";
 export type JudgeProvider = "ollama" | "ollama_cloud" | "openai";
 export type Confidence = "high" | "low";
 export type RecommendationRule =
@@ -120,7 +121,15 @@ export interface Results {
     judge_provider: JudgeProvider;
     mode: Mode;
     judge_is_candidate: boolean;
-    finished_at: string;
+    /** "running" in a file means the server died mid-run: treat it as stopped. */
+    status?: RunStatus;
+    progress?: { done: number; total: number };
+    /** Keys phase:model:question of the finished steps; a resumed run skips them. */
+    finished_steps?: string[];
+    candidates?: string[];
+    base_rationale?: string;
+    /** null while the run is in progress. */
+    finished_at: string | null;
     run?: RunInfo;
     questions_results: Question[];
     summary: Summary;
