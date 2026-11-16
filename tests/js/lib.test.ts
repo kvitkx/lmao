@@ -1118,3 +1118,75 @@ test("buildMatrix: a cloud judge is loaded from its first call to the summary", 
     setRow(steps, "summary:j:", { state: "done" });
     assert.equal(judge(), false);
 });
+
+// --- stopped run ------------------------------------------------------------
+
+test("buildMatrix: a stopped run shows its pending steps as stopped and loads nothing", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+    setRow(steps, "reference:j:q1", { state: "done" });
+    setRow(steps, "answer:a:q1", { state: "done" });
+
+    const live = lib.buildMatrix(steps, 2, (m) => m);
+    const [reference, a] = lib.buildMatrix(steps, 2, (m) => m, false, true);
+
+    assert.deepEqual(
+        reference.cells.map((c) => c.state),
+        ["graded", "stopped"],
+    );
+    assert.deepEqual(
+        a.cells.map((c) => c.state),
+        ["ready", "stopped"],
+    );
+    assert.deepEqual([reference.loaded, a.loaded], [false, false]);
+    assert.deepEqual([live[0].loaded, live[1].loaded], [true, true]);
+    assert.equal(a.cells[1].title, "a · q2: stopped");
+});
+
+test("buildMatrix: a row that is all stopped counts as queued", () => {
+    const steps = lib.buildSteps("j", ["a"], 2);
+
+    const rows = lib.buildMatrix(steps, 2, (m) => m, false, true);
+
+    assert.ok(rows.every((r) => r.state === "queued"));
+    assert.ok(rows.every((r) => r.cells.every((c) => c.state === "stopped")));
+});
+
+test("CELL_LEGEND lists every state once, in the order of the design", () => {
+    assert.deepEqual(
+        lib.CELL_LEGEND.map((s) => [s.state, s.label]),
+        [
+            ["planned", "planned"],
+            ["answering", "answering"],
+            ["ready", "answer ready"],
+            ["grading", "grading"],
+            ["graded", "graded"],
+            ["generation_error", "generation error"],
+            ["judge_error", "judge error"],
+            ["stopped", "stopped"],
+        ],
+    );
+});
+
+test("hiddenSummary counts stopped cells", () => {
+    const cell = (state: lib.CellState): lib.MatrixCellInfo => ({ state, title: "" });
+
+    assert.deepEqual(lib.hiddenSummary([cell("graded"), cell("stopped"), cell("stopped")], 0, 3), {
+        count: 3,
+        warn: false,
+        title: "q1–q3: 1 graded · 2 stopped",
+    });
+});
+
+test("buildReport: a run that did not finish says so and recommends only so far", () => {
+    const data = runFixture();
+    data.status = "stopped";
+    data.progress = { done: 31, total: 73 };
+
+    const report = lib.buildReport(data);
+
+    assert.equal(report.verdict.label, "recommended so far");
+    assert.deepEqual(report.notes, [
+        "the run did not finish: 31 of 73 steps are done. resume continues from here.",
+        "low confidence: too few graded questions.",
+    ]);
+});

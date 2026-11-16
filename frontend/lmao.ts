@@ -36,6 +36,7 @@ import {
     type Step,
     type TreeNode,
     RUNNING_MATRIX,
+    CELL_LEGEND,
     activeQuestion,
     buildMatrix,
     columnWindow,
@@ -76,9 +77,17 @@ interface SseEvent {
     message?: string;
 }
 
+// What a run is made of: enough to build its rows again when it is resumed.
+interface RunConfig {
+    judge: string;
+    cloud: boolean;
+    candidates: string[];
+    questions: number;
+}
+
 interface RunState {
     id: string | null;
-    status: "idle" | "running" | "done" | "error";
+    status: "idle" | "running" | "stopping" | "stopped" | "done" | "error";
     steps: Step[];
     pos: Record<string, number>; // step key -> index in `steps` (a lookup through the proxy stays reactive)
     seen: Record<string, boolean>; // load groups and phases that already had a first call
@@ -89,6 +98,9 @@ interface RunState {
     endedAt: number | null;
     now: number;
     error: string;
+    resumable: boolean; // the server failed the run: it can be resumed
+    attention: boolean; // finished while another screen was open
+    config: RunConfig | null;
     phases: Record<string, PhaseFigures>; // phase -> figures, see updateRun()
     questions: number;
     active: number; // the question in progress (0-based), the anchor of the matrix window
@@ -118,6 +130,8 @@ interface TopStatus {
     tone: string;
     dot: boolean;
     go: boolean;
+    stop: boolean;
+    open: boolean;
     text: string;
 }
 
@@ -214,6 +228,9 @@ document.addEventListener("alpine:init", () => {
         endedAt: null,
         now: 0,
         error: "",
+        resumable: false,
+        attention: false,
+        config: null,
         phases: phaseStats([], PHASE_GROUPS),
         questions: 0,
         active: 0,
@@ -233,6 +250,7 @@ document.addEventListener("alpine:init", () => {
         sections: { overview: "summary", answers: "scores" } as Record<string, string>, // the section nav, per tab
 
         phaseGroups: PHASE_GROUPS,
+        cellLegend: CELL_LEGEND,
 
         models: [] as string[],
         names: {} as Record<string, string>, // full model name -> display name (see shortNames)
@@ -251,6 +269,7 @@ document.addEventListener("alpine:init", () => {
         historyError: "",
         activeRunId: null as string | null,
         resultsError: "",
+        controlError: "", // stop and resume
         openAnswers: {} as Record<string, boolean>, // eval block anchor -> true: its answer text is rendered
         run: freshRun(),
         matrixWidth: 0, // px, from a ResizeObserver
@@ -288,15 +307,19 @@ document.addEventListener("alpine:init", () => {
             return pad2(index);
         },
 
-        // A run is in progress: the form and the archive are locked, on every
-        // screen (the wordmark can lead away from the running screen).
+        // A run is in progress (or stopping): the form is locked, on every screen
+        // (the wordmark can lead away from the running screen). The archive is not.
         get busy(): boolean {
-            return this.run.status === "running";
+            return this.run.status === "running" || this.run.status === "stopping";
         },
 
         get pageTitle(): string {
-            if (this.run.status === "running") {
-                return `lmao | ${fmtClock(this.elapsed)} ${this.run.done} / ${this.run.total}`;
+            if (this.busy) {
+                const lead = this.run.status === "stopping" ? "stopping" : fmtClock(this.elapsed);
+                return `lmao | ${lead} ${this.run.done} / ${this.run.total}`;
+            }
+            if (this.run.status === "stopped" && this.view === "running") {
+                return `lmao | stopped ${this.run.done} / ${this.run.total}`;
             }
             if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
             return "lmao";
@@ -305,6 +328,12 @@ document.addEventListener("alpine:init", () => {
         // The four bars of the icon are the four phases of a run.
         get faviconBars(): BarState[] {
             return barStates(this.run.phases, this.run.status);
+        },
+
+        // The opened run can be continued: it was stopped or failed.
+        get resumable(): boolean {
+            const status = this.results?.status;
+            return Boolean(status) && status !== "completed" && !this.busy;
         },
 
         get runTitle(): string | null {
@@ -323,33 +352,45 @@ document.addEventListener("alpine:init", () => {
         },
 
         // Centre of the topbar. Built from the existing state only.
-        // `go`: the run is in progress but another screen is shown.
+        // `go`: a run is in progress but another screen is shown. `stop`: the run
+        // can be stopped. `open`: a run finished while another screen was open.
         get topStatus(): TopStatus {
-            if (this.run.status === "running") {
+            const run = this.run;
+            const figures = `${fmtClock(this.elapsed)} · ${run.done} / ${run.total}`;
+            const base = { dot: false, go: false, stop: false, open: false };
+            if (this.busy) {
+                const stopping = run.status === "stopping";
                 return {
                     tone: "text-fg",
                     dot: true,
                     go: this.view !== "running",
-                    text: `running · ${fmtClock(this.elapsed)} · ${this.run.done} / ${this.run.total}`,
+                    stop: !stopping,
+                    open: false,
+                    text: `${stopping ? "stopping" : "running"} · ${figures}`,
                 };
             }
-            if (this.view === "running" && this.run.status === "error") {
-                return { tone: "text-warn", dot: false, go: false, text: "stopped" };
+            if (this.view === "running" && run.status === "stopped") {
+                return { ...base, tone: "text-fg-muted", text: `stopped · ${figures}` };
+            }
+            if (this.view === "running" && run.status === "error") {
+                return { ...base, tone: "text-warn", text: `failed · ${figures}` };
+            }
+            if (run.attention) {
+                return { ...base, tone: "text-fg", open: true, text: `finished · ${figures}` };
             }
             if (this.view === "results") {
-                return { tone: "text-fg", dot: false, go: false, text: this.runTitle || "" };
+                return { ...base, tone: "text-fg", text: this.runTitle || "" };
             }
             if (!this.modelsLoaded) {
-                return { tone: "text-fg-muted", dot: false, go: false, text: "connecting…" };
+                return { ...base, tone: "text-fg-muted", text: "connecting…" };
             }
             if (this.models.length === 0) {
-                return { tone: "text-warn", dot: false, go: false, text: "no models found" };
+                return { ...base, tone: "text-warn", text: "no models found" };
             }
             const n = this.models.length;
             return {
+                ...base,
                 tone: "text-fg-muted",
-                dot: false,
-                go: false,
                 text: `ollama · ${n} model${n === 1 ? "" : "s"}`,
             };
         },
@@ -365,7 +406,13 @@ document.addEventListener("alpine:init", () => {
         updateRun(): void {
             const run = this.run;
             run.phases = phaseStats(run.steps, this.phaseGroups);
-            run.matrix = buildMatrix(run.steps, run.questions, (m) => this.label(m), run.cloud);
+            run.matrix = buildMatrix(
+                run.steps,
+                run.questions,
+                (m) => this.label(m),
+                run.cloud,
+                run.status === "stopped",
+            );
             run.current = nowRows(run.steps);
             const active = activeQuestion(run.steps);
             // Between two steps nothing runs: keep the last question.
@@ -452,9 +499,11 @@ document.addEventListener("alpine:init", () => {
             this.followCurrent = false;
         },
 
-        // The mark of a cell, 18px (the template adds the ring and the dots):
-        // outline = waiting for the next step, filled = progress, warn = error.
-        // The only animation is the breathing of the live marks.
+        // The mark of a cell, 18px (12px in the legend): outline = waiting for the
+        // next step, filled = progress, warn = error. The only animation is the
+        // breathing of the live marks. Every state is a class and never an x-show:
+        // Alpine shows an x-show element one frame later but hides it at once, so a
+        // step that finished within a frame (0.0 s) left its old mark on the cell.
         cellClass(state: CellState): string {
             const classes: Record<CellState, string> = {
                 planned: "border border-line",
@@ -462,10 +511,22 @@ document.addEventListener("alpine:init", () => {
                 ready: "border border-fg",
                 grading: "border border-fg",
                 graded: "bg-fg",
-                generation_error: "border border-warn",
-                judge_error: "border-2 border-fg",
+                generation_error: "bg-warn",
+                judge_error: "border border-fg",
+                stopped: "border border-fg-muted",
             };
             return classes[state];
+        },
+
+        // The small square (or dash) inside the mark; hidden when a state has none.
+        cellMark(state: CellState, small = false): string {
+            const inset = small ? "inset-2" : "inset-3";
+            const marks: Partial<Record<CellState, string>> = {
+                grading: `${inset} bg-link animate-breathe motion-reduce:animate-none`,
+                judge_error: `${inset} bg-warn`,
+                stopped: `${small ? "inset-x-2" : "inset-x-3"} top-1/2 h-2 -translate-y-1/2 bg-fg-muted`,
+            };
+            return marks[state] ?? "hidden";
         },
 
         // Blue only while the model is in memory, white once it is done.
@@ -560,10 +621,10 @@ document.addEventListener("alpine:init", () => {
             this.historyLoaded = true;
         },
 
-        // Opens a saved run. Disabled while a run is in progress: the running
-        // screen would be lost.
+        // Opens a saved run. Allowed while a run is in progress: that run keeps its
+        // own state in `this.run`, and the topbar leads back to it.
         async openRun(id: string): Promise<void> {
-            if (this.busy) return;
+            if (id === this.run.id) this.run.attention = false;
             const token = ++openToken;
             this.activeRunId = id;
             this.view = "results";
@@ -720,7 +781,12 @@ document.addEventListener("alpine:init", () => {
                 if (!response.ok) {
                     throw new Error(data.error || `request failed (${response.status})`);
                 }
-                this.startRun(data.task_id, payload);
+                this.startRun(data.task_id, {
+                    judge: payload.judge,
+                    cloud: payload.judge_provider !== "ollama",
+                    candidates: payload.candidates,
+                    questions: payload.test_cases.length,
+                });
             } catch (e) {
                 this.formError = errorText(e);
             } finally {
@@ -730,12 +796,12 @@ document.addEventListener("alpine:init", () => {
 
         // --- running --------------------------------------------------------
 
-        startRun(taskId: string, payload: EvaluatePayload): void {
+        startRun(taskId: string, config: RunConfig): void {
             this.stopStream();
             const steps = buildSteps(
-                payload.judge,
-                payload.candidates,
-                payload.test_cases.length,
+                config.judge,
+                config.candidates,
+                config.questions,
                 this.names,
             );
             const pos: Record<string, number> = {};
@@ -748,10 +814,11 @@ document.addEventListener("alpine:init", () => {
                 status: "running",
                 steps,
                 pos,
-                cloud: payload.judge_provider !== "ollama",
+                cloud: config.cloud,
+                config,
                 // Corrected by the first event that carries `progress`.
-                total: totalSteps(payload.test_cases.length, new Set(payload.candidates).size),
-                questions: payload.test_cases.length,
+                total: totalSteps(config.questions, new Set(config.candidates).size),
+                questions: config.questions,
                 startedAt: now,
                 now,
             };
@@ -759,7 +826,8 @@ document.addEventListener("alpine:init", () => {
             this.matrixStart = 0;
             this.updateRun();
             loadWatch = [];
-            this.activeRunId = taskId;
+            this.activeRunId = null; // the running screen is not an archive item
+            this.controlError = "";
             this.setupOpen = false;
             this.view = "running";
 
@@ -818,8 +886,13 @@ document.addEventListener("alpine:init", () => {
             }
 
             if (event.type === "completed") return this.finishRun();
+            if (event.type === "cancelling") {
+                this.run.status = "stopping";
+                return;
+            }
+            if (event.type === "cancelled") return this.stoppedRun();
             if (event.type === "error") {
-                return this.failRun(event.message || "the evaluation failed.");
+                return this.failRun(event.message || "the evaluation failed.", true);
             }
 
             const match = /^([a-z]+)_(start|done)$/.exec(event.type || "");
@@ -901,12 +974,18 @@ document.addEventListener("alpine:init", () => {
             this.run.status = "done";
             this.run.endedAt = Date.now();
             this.stopStream();
-            this.announce("evaluation finished. opening the results.");
+            // Someone browsing the archive is not pulled away from it.
+            const watching = this.view === "running";
+            this.announce(
+                watching ? "evaluation finished. opening the results." : "evaluation finished.",
+            );
             void this.loadHistory();
-            if (this.run.id) void this.openRun(this.run.id);
+            if (!this.run.id) return;
+            if (watching) void this.openRun(this.run.id);
+            else this.run.attention = true;
         },
 
-        failRun(message: string): void {
+        failRun(message: string, resumable = false): void {
             // Rows that were in flight will never finish: stop their animation.
             this.run.steps.forEach((step) => {
                 if (step.state === "running") {
@@ -917,8 +996,84 @@ document.addEventListener("alpine:init", () => {
             this.updateRun();
             this.run.status = "error";
             this.run.error = message; // announced by the role="alert" notice
+            this.run.resumable = resumable;
             this.run.endedAt = Date.now();
             this.stopStream();
+            void this.loadHistory(); // a failed run is in the archive and can be resumed
+        },
+
+        // The server confirmed the stop: the last call has finished.
+        stoppedRun(): void {
+            this.run.status = "stopped";
+            this.run.endedAt = Date.now();
+            this.stopStream();
+            this.updateRun();
+            void this.loadHistory();
+            this.announce(`run stopped. ${this.run.done} of ${this.run.total} steps are done.`);
+        },
+
+        // The step in progress is not interrupted: the run stops after it.
+        async stopRun(): Promise<void> {
+            const id = this.run.id;
+            if (this.run.status !== "running" || !id) return;
+            this.controlError = "";
+            this.run.status = "stopping"; // at once: the server may take a moment
+            try {
+                const response = await fetch(`/api/evaluate/${encodeURIComponent(id)}/cancel`, {
+                    method: "POST",
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+            } catch (e) {
+                // Nothing was stopped: the run goes on.
+                if (this.run.status === "stopping") this.run.status = "running";
+                this.controlError = errorText(e);
+            }
+        },
+
+        // From the stopped screen or from the archive. The server replays the
+        // finished steps, so the rows are built the same way as for a live run.
+        async resumeRun(id: string): Promise<void> {
+            if (this.busy) return;
+            this.controlError = "";
+            try {
+                const config =
+                    this.run.id === id && this.run.config ? this.run.config : await this.configOf(id);
+                const response = await fetch(`/api/evaluate/${encodeURIComponent(id)}/resume`, {
+                    method: "POST",
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.startRun(data.task_id, config);
+            } catch (e) {
+                this.controlError = errorText(e);
+            }
+        },
+
+        // The rows of a saved run, read from its results file.
+        async configOf(id: string): Promise<RunConfig> {
+            const response = await fetch(`/api/results/${encodeURIComponent(id)}`);
+            const data: Partial<ApiResults> & { error?: string } = await response
+                .json()
+                .catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
+            if (
+                !data.judge_model ||
+                !Array.isArray(data.candidates) ||
+                !Array.isArray(data.questions_results)
+            ) {
+                throw new Error("this run cannot be resumed: its file has an unexpected format.");
+            }
+            return {
+                judge: data.judge_model,
+                cloud: data.judge_provider !== "ollama",
+                candidates: data.candidates,
+                questions: data.questions_results.length,
+            };
         },
 
         // Back to the form: after an error the setup panel may still be closed.
@@ -931,13 +1086,13 @@ document.addEventListener("alpine:init", () => {
         // the topbar status and the first screen lead back to it.
         goHome(): void {
             this.view = "idle";
-            if (!this.busy) this.activeRunId = null;
+            this.activeRunId = null;
             if (magic(this).$refs?.main) magic(this).$refs.main.scrollTop = 0;
         },
 
         showRun(): void {
             this.view = "running";
-            this.activeRunId = this.run.id;
+            this.activeRunId = null;
         },
 
         // Comparison table -> a card or an eval block in 03 view. Both 03 views

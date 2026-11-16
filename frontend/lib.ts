@@ -315,7 +315,8 @@ export type CellState =
     | "grading"
     | "graded"
     | "generation_error"
-    | "judge_error";
+    | "judge_error"
+    | "stopped";
 
 export interface MatrixCellInfo {
     state: CellState;
@@ -341,7 +342,14 @@ const CELL_TEXT: Record<CellState, string> = {
     graded: "graded",
     generation_error: "generation error",
     judge_error: "judge error",
+    stopped: "stopped",
 };
+
+// The legend under the matrix: every state once, in the order of the design.
+export const CELL_LEGEND = (Object.keys(CELL_TEXT) as CellState[]).map((state) => ({
+    state,
+    label: CELL_TEXT[state],
+}));
 
 const CELL_ORDER: CellState[] = [
     "graded",
@@ -351,6 +359,7 @@ const CELL_ORDER: CellState[] = [
     "planned",
     "generation_error",
     "judge_error",
+    "stopped",
 ];
 
 function isErrorCell(state: CellState): boolean {
@@ -363,16 +372,25 @@ function stepSeconds(step: Step | undefined): number | null {
     return sec >= 0 ? sec : null;
 }
 
-function referenceCell(step: Step | undefined): CellState {
-    if (!step) return "planned";
+// A step still to come: planned, or stopped once the run was stopped.
+function pending(stopped: boolean): CellState {
+    return stopped ? "stopped" : "planned";
+}
+
+function referenceCell(step: Step | undefined, stopped: boolean): CellState {
+    if (!step) return pending(stopped);
     if (step.state === "running") return "answering";
     if (step.state === "done") return "graded";
     if (step.state === "error") return "generation_error";
-    return "planned";
+    return pending(stopped);
 }
 
-function candidateCell(answer: Step | undefined, grading: Step | undefined): CellState {
-    if (!answer || answer.state === "queued") return "planned";
+function candidateCell(
+    answer: Step | undefined,
+    grading: Step | undefined,
+    stopped: boolean,
+): CellState {
+    if (!answer || answer.state === "queued") return pending(stopped);
     if (answer.state === "running") return "answering";
     if (answer.state === "error") return "generation_error";
     if (!grading || grading.state === "queued") return "ready";
@@ -393,7 +411,8 @@ function cellInfo(
 }
 
 function rowState(cells: MatrixCellInfo[]): GroupState {
-    if (cells.every((c) => c.state === "planned")) return "queued";
+    const idle = (s: CellState) => s === "planned" || s === "stopped";
+    if (cells.every((c) => idle(c.state))) return "queued";
     const final = (s: CellState) => s === "graded" || isErrorCell(s);
     return cells.every((c) => final(c.state)) ? "done" : "running";
 }
@@ -422,12 +441,14 @@ function inProgress(steps: (Step | undefined)[]): boolean {
 
 // The reference row and one row per candidate, a cell per question. The state
 // of a cell comes from the answer and grading steps, so no new events. `cloud`:
-// the judge runs remotely, beside the candidates.
+// the judge runs remotely, beside the candidates. `stopped`: the run was
+// stopped, so the steps still to come are `stopped` and nothing is in memory.
 export function buildMatrix(
     steps: Step[],
     questionCount: number,
     display: (model: string) => string,
     cloud = false,
+    stopped = false,
 ): MatrixRow[] {
     const byKey = new Map(steps.map((s) => [s.key, s]));
     const candidates: string[] = [];
@@ -441,15 +462,17 @@ export function buildMatrix(
     const referenceSteps = ids.map((id) => byKey.get(stepKey("reference", judge, id)));
     const referenceCells = ids.map((id, i) => {
         const step = referenceSteps[i];
-        return cellInfo(`reference · ${display(judge)}`, id, referenceCell(step), step);
+        return cellInfo(`reference · ${display(judge)}`, id, referenceCell(step, stopped), step);
     });
     // The judge is in memory while it works: for the references, then again for
     // grading and the summary (a local judge is loaded twice). A cloud judge
     // works beside the candidates, from its first call to the summary.
     const judgeSteps = steps.filter((s) => s.phase === "grading" || s.phase === "summary");
-    const judgeLoaded = cloud
-        ? inProgress([...referenceSteps, ...judgeSteps])
-        : inProgress(referenceSteps) || inProgress(judgeSteps);
+    const judgeLoaded =
+        !stopped &&
+        (cloud
+            ? inProgress([...referenceSteps, ...judgeSteps])
+            : inProgress(referenceSteps) || inProgress(judgeSteps));
 
     const rows: MatrixRow[] = judge
         ? [
@@ -470,7 +493,7 @@ export function buildMatrix(
         const answers = ids.map((id) => byKey.get(stepKey("answer", model, id)));
         const cells = ids.map((id, i) => {
             const grading = byKey.get(stepKey("grading", model, id));
-            const state = candidateCell(answers[i], grading);
+            const state = candidateCell(answers[i], grading, stopped);
             const graded = state === "grading" || state === "graded" || state === "judge_error";
             return cellInfo(display(model), id, state, graded ? grading : answers[i]);
         });
@@ -480,7 +503,7 @@ export function buildMatrix(
             sub: "",
             reference: false,
             state: rowState(cells),
-            loaded: inProgress(answers),
+            loaded: !stopped && inProgress(answers),
             time: totalTime(answers),
             cells,
         });
@@ -1101,6 +1124,8 @@ export interface HistoryRun {
     models_tested: number;
     questions_count: number;
     judge_model: string;
+    status?: string; // completed, stopped or error
+    progress?: { done: number; total: number } | null;
 }
 
 // Run time in ms: the id ends with YYYYMMDD_HHMMSS; the timestamp field is the fallback.
@@ -1468,7 +1493,13 @@ export function buildReport(raw: unknown): Readonly<Report> {
     const names = shortNames([...summaryModels.map((s) => s.model), rec.model]);
     const display = (m: string) => names[m] || shortName(m);
 
+    const unfinished = data.status !== undefined && data.status !== "completed";
     const notes: string[] = [];
+    if (unfinished && data.progress) {
+        notes.push(
+            `the run did not finish: ${data.progress.done} of ${data.progress.total} steps are done. resume continues from here.`,
+        );
+    }
     if (data.judge_is_candidate) {
         notes.push("the judge is also a candidate: its own score may be biased.");
     }
@@ -1534,7 +1565,11 @@ export function buildReport(raw: unknown): Readonly<Report> {
         verdict: {
             model: rec.model || null,
             short: rec.model ? display(rec.model) : "",
-            label: rec.model ? "recommended" : "no recommendation",
+            label: rec.model
+                ? unfinished
+                    ? "recommended so far"
+                    : "recommended"
+                : "no recommendation",
             rule: (rec.rule && RULE_LABELS[rec.rule]) || rec.rule || "",
             figures: rec.model ? verdictFigures(summaryModels, rec.model) : [],
         },

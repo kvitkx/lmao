@@ -165,12 +165,27 @@
 
     {{ ui.warn_notice("run.status === 'error'", "run.error",
                       action="dismissRun()", action_label="back to setup") }}
+    <div x-show="run.status === 'error' && run.resumable" x-cloak class="flex items-center gap-12">
+        <button type="button" @click="resumeRun(run.id)"
+                class="bg-fg text-bg px-22 py-13 hover:bg-fg-muted">resume</button>
+    </div>
+    {{ ui.warn_notice("controlError", "controlError") }}
+    {{ ui.info_strip("run.status === 'stopping'", "'stopping after the current call'",
+                     "'the model call in progress is not interrupted: a large local model can take up to 10 minutes. finished steps are kept.'") }}
+    {{ ui.info_strip("run.status === 'stopped'", "'run stopped · ' + run.done + ' of ' + run.total + ' steps done'",
+                     "'finished answers and grades are saved in the archive. resume continues from the last finished step, also after a restart.'") }}
+    <div x-show="run.status === 'stopped'" x-cloak class="flex items-center gap-12">
+        <button type="button" @click="resumeRun(run.id)"
+                class="bg-fg text-bg px-22 py-13 hover:bg-fg-muted">resume</button>
+        <button type="button" @click="dismissRun()"
+                class="border border-fg-muted text-fg px-22 py-13 hover:border-fg">back to setup</button>
+    </div>
 
     {# models x questions: as many question columns as fit the width #}
     <section class="flex flex-col">
         <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
             <span>models × questions</span>
-            <span x-text="run.cloud ? 'cloud judge · grading runs in parallel' : 'local judge · one model in VRAM at a time'"></span>
+            <span x-text="(run.cloud ? 'cloud judge' : 'local judge') + (run.status === 'stopped' ? ' · stopped · resume continues from here' : (run.cloud ? ' · grading runs in parallel' : ' · one model in VRAM at a time'))"></span>
         </div>
 
         {# window controls: only while some questions do not fit #}
@@ -212,13 +227,9 @@
                     <template x-for="(c, ci) in visibleCells(row)" :key="ci">
                         <div class="flex items-center justify-center h-40" role="img"
                              :title="c.title" :aria-label="c.title">
+                            {# every mark is a class, never x-show: see cellClass in lmao.ts #}
                             <span class="relative block size-18" :class="cellClass(c.state)">
-                                {# answering: the whole square breathes, the ring with it #}
-                                <span x-show="c.state === 'answering'" class="absolute -inset-4 border border-fg"></span>
-                                {# grading: only the inner square breathes #}
-                                <span x-show="c.state === 'grading'"
-                                      class="absolute inset-3 bg-fg animate-breathe motion-reduce:animate-none"></span>
-                                <span x-show="c.state === 'judge_error'" class="absolute inset-0 bg-warn"></span>
+                                <span class="absolute" :class="cellMark(c.state)"></span>
                             </span>
                         </div>
                     </template>
@@ -234,14 +245,15 @@
 
         {# legend: shape and fill, never colour alone #}
         <div class="flex flex-col gap-8 py-15 text-fg-muted">
-            <div class="flex flex-wrap items-center gap-x-22 gap-y-12">
-                <span class="flex items-center gap-12"><span class="relative block size-18 m-4 bg-link"><span class="absolute -inset-4 border border-fg"></span></span>answering</span>
-                <span class="flex items-center gap-8"><span class="block size-18 border border-fg"></span>answer ready</span>
-                <span class="flex items-center gap-8"><span class="relative block size-18 border border-fg"><span class="absolute inset-3 bg-fg"></span></span>grading</span>
-                <span class="flex items-center gap-8"><span class="block size-18 bg-fg"></span>graded</span>
-                <span class="flex items-center gap-8"><span class="block size-18 border border-warn"></span>generation error</span>
-                <span class="flex items-center gap-8"><span class="relative block size-18 border-2 border-fg"><span class="absolute inset-0 bg-warn"></span></span>judge error</span>
-                <span class="flex items-center gap-8"><span class="block size-18 border border-line"></span>planned</span>
+            <div class="flex flex-wrap items-center gap-x-22 gap-y-12 [&_*]:animate-none!">
+                <template x-for="s in cellLegend" :key="s.state">
+                    <span class="flex items-center gap-8">
+                        <span class="relative block size-12 shrink-0" :class="cellClass(s.state)">
+                            <span class="absolute" :class="cellMark(s.state, true)"></span>
+                        </span>
+                        <span x-text="s.label"></span>
+                    </span>
+                </template>
             </div>
             <div class="flex flex-wrap gap-x-22 gap-y-8">
                 <span x-show="matrixOverflow" x-cloak>‹ 6 · hidden questions, warn if one has an error</span>
@@ -287,9 +299,9 @@
 
     <template x-for="r in history" :key="r.task_id">
         {# archive-item #}
-        <button type="button" @click="openRun(r.task_id)" :disabled="busy"
+        <button type="button" @click="openRun(r.task_id)"
                 :aria-current="activeRunId === r.task_id ? 'true' : null"
-                class="block w-full text-left py-15 border-b border-line enabled:hover:bg-bg disabled:cursor-not-allowed">
+                class="block w-full text-left py-15 border-b border-line hover:bg-bg">
             <span class="flex items-center gap-8 text-subheading"
                   :class="activeRunId === r.task_id ? 'text-fg' : 'text-fg-muted'">
                 <span x-show="activeRunId === r.task_id" class="size-6 shrink-0 bg-fg" aria-hidden="true"></span>
@@ -299,6 +311,8 @@
                 <span class="block" x-text="r.timestamp"></span>
                 <span class="block" x-text="r.models_tested + ' models · ' + r.questions_count + ' qs'"></span>
                 <span class="block break-words" x-text="'judge: ' + (r.judge_model || '–')"></span>
+                <span x-show="r.status && r.status !== 'completed'" class="block"
+                      x-text="(r.status === 'error' ? 'failed' : 'stopped') + (r.progress ? ' · ' + r.progress.done + ' / ' + r.progress.total + ' steps' : '')"></span>
             </span>
         </button>
     </template>

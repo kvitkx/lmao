@@ -30,6 +30,7 @@
 {# results #}
 <div x-show="view === 'results'" x-cloak class="flex flex-col gap-33">
     {{ ui.warn_notice("resultsError", "resultsError") }}
+    {{ ui.warn_notice("controlError", "controlError") }}
     <div x-show="!resultsError && !report" class="text-fg-muted">loading…</div>
 
     <template x-if="report && overview">
@@ -40,6 +41,8 @@
                     <div class="text-heading break-words" x-text="runTitle"></div>
                 </div>
                 <div class="shrink-0 flex items-center gap-15 text-fg-muted print:hidden">
+                    <button type="button" x-show="resumable" x-cloak @click="resumeRun(activeRunId)"
+                            class="text-fg hover:text-fg-muted">resume</button>
                     <span>export</span>
                     {%- for fmt in ("json", "csv", "md") %}
                     <a :href="'/api/results/' + encodeURIComponent(activeRunId) + '/export?format={{ fmt }}'"

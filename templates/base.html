@@ -32,6 +32,10 @@
             {{ ui.activity_dot("topStatus.dot") }}
             <span class="truncate" :class="topStatus.dot && 'tabular-nums'"
                   x-text="topStatus.text" :title="topStatus.text"></span>
+            <button type="button" x-show="topStatus.stop" x-cloak @click="stopRun()"
+                    class="shrink-0 text-fg-muted hover:text-fg">stop</button>
+            <button type="button" x-show="topStatus.open" x-cloak @click="openRun(run.id)"
+                    class="shrink-0 text-fg hover:text-fg-muted">open results</button>
             <button type="button" x-show="topStatus.go" x-cloak @click="showRun()"
                     class="shrink-0 text-fg-muted hover:text-fg">back to run</button>
         </div>

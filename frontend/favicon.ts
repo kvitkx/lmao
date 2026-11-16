@@ -31,13 +31,17 @@ export function faviconHref(states: BarState[]): string {
     return `data:image/svg+xml,${encodeURIComponent(faviconSvg(states))}`;
 }
 
-// The bars of a run: while it runs they follow the phases; after an error what
-// was in flight goes dark; without a run (and when it is over) all are done.
+// The bars of a run: while it runs (or is stopping) they follow the phases;
+// after an error or a stop what was in flight goes dark; without a run (and
+// when it is over) all are done.
 export function barStates(phases: Record<string, { state: string }>, status: string): BarState[] {
-    if (status !== "running" && status !== "error") return PHASES.map((): BarState => "done");
+    const live = status === "running" || status === "stopping";
+    if (!live && status !== "error" && status !== "stopped") {
+        return PHASES.map((): BarState => "done");
+    }
     return PHASES.map((phase): BarState => {
         const state = phases[phase]?.state;
         if (state === "done") return "done";
-        return state === "running" && status === "running" ? "active" : "off";
+        return state === "running" && live ? "active" : "off";
     });
 }
