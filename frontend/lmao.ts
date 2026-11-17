@@ -3,6 +3,28 @@
 
 import type { ApiResults } from "../types/results.js";
 import {
+    budgetFigures as figuresOf,
+    connectionBody,
+    formOf,
+    hostOf,
+    judgeChoices as judgeModelsOf,
+    judgeLatency,
+    maskedKey as maskKey,
+    preflightMeta as metaOf,
+    previewText,
+    routeOf,
+    type Budget,
+    type Connection,
+    type ConnectionBody,
+    type ConnectionForm,
+    type Figure,
+    type JudgeProvider,
+    type PreflightCheck,
+    type PreflightReport,
+    type Preview,
+    type Route,
+} from "./lib.ts";
+import {
     CASES_MAX_BYTES,
     CASES_MAX_COUNT,
     CASES_TOO_LARGE,
@@ -208,6 +230,10 @@ document.addEventListener("alpine:init", () => {
     let source: EventSource | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
     let loadWatch: Step[] = []; // rows that may still show the load notice
+    // The estimate of the budget follows the form; the request waits until the typing stops.
+    let estimateTimer: ReturnType<typeof setTimeout> | null = null;
+    let estimateToken = 0; // ignores a late reply of a superseded request
+    let estimateKeyLast = "";
 
     const SLOW_LOAD_MS = 8000;
 
@@ -274,7 +300,21 @@ document.addEventListener("alpine:init", () => {
         names: {} as Record<string, string>, // full model name -> display name (see shortNames)
         modelsLoaded: false,
         judge: "",
-        judgeCloud: false,
+        judgeProvider: "ollama" as JudgeProvider,
+        apiModel: "", // the model an openai judge names
+        connection: null as Connection | null, // the saved connection: there is no key in it
+        connectionLoaded: false,
+        connectionEditing: false,
+        connectionBusy: false,
+        connectionError: "",
+        connectionRev: 0, // changes with the saved connection: the estimate depends on its prices
+        connectionForm: formOf(null, "") as ConnectionForm,
+        preflight: null as PreflightReport | null,
+        preflightBusy: false,
+        budget: null as Budget | null,
+        preview: null as Preview | null,
+        estimating: false,
+        estimateError: "",
         selected: [] as string[],
         baseRationale: "",
         cases: [newCase()] as TestCase[],
@@ -309,6 +349,24 @@ document.addEventListener("alpine:init", () => {
         init(): void {
             void this.loadModels();
             void this.loadHistory();
+            void this.loadConnection();
+            // A judge that is not among the models of its provider becomes the first one.
+            Alpine.effect(() => this.ensureJudge());
+            Alpine.effect(() => {
+                const key = this.estimateKey;
+                if (key === estimateKeyLast) return;
+                estimateKeyLast = key;
+                if (estimateTimer) clearTimeout(estimateTimer);
+                if (!key) {
+                    estimateToken += 1;
+                    this.budget = null;
+                    this.preview = null;
+                    this.estimateError = "";
+                    this.estimating = false;
+                    return;
+                }
+                estimateTimer = setTimeout(() => void this.refreshEstimate(key), 400);
+            });
             // The tab shows the state of the run: its title and its icon.
             let icon = "";
             Alpine.effect(() => {
@@ -407,10 +465,13 @@ document.addEventListener("alpine:init", () => {
                 return { ...base, tone: "text-warn", text: "no models found" };
             }
             const n = this.models.length;
+            const latency = this.judgeProvider === "openai" ? judgeLatency(this.preflight) : null;
+            const judgeNote =
+                latency === null ? "" : ` · judge ${hostOf(this.connection?.base_url)} ${latency} ms`;
             return {
                 ...base,
                 tone: "text-fg-muted",
-                text: `ollama · ${n} model${n === 1 ? "" : "s"}`,
+                text: `ollama · ${n} model${n === 1 ? "" : "s"}${judgeNote}`,
             };
         },
 
@@ -619,10 +680,198 @@ document.addEventListener("alpine:init", () => {
             this.modelsLoaded = true;
             // Let x-for render the <option>s before the value is set.
             await magic(this).$nextTick();
-            if (!this.models.includes(this.judge)) {
-                this.judge = this.models[0] ?? "";
-            }
+            this.ensureJudge();
             this.selected = this.selected.filter((m) => this.models.includes(m));
+        },
+
+        // --- judge ----------------------------------------------------------
+
+        get remoteJudge(): boolean {
+            return this.judgeProvider !== "ollama";
+        },
+
+        // The model the judge calls name.
+        get judgeName(): string {
+            return this.judgeProvider === "openai" ? this.apiModel.trim() : this.judge;
+        },
+
+        get judgeChoices(): string[] {
+            return judgeModelsOf(this.models, this.judgeProvider);
+        },
+
+        ensureJudge(): void {
+            if (this.judgeProvider === "openai") return;
+            const list = this.judgeChoices;
+            if (!list.includes(this.judge)) this.judge = list[0] ?? "";
+        },
+
+        get route(): Route | null {
+            return routeOf(this.judgeProvider, this.selected.length, this.connection?.base_url ?? null);
+        },
+
+        // --- openai connection ----------------------------------------------
+
+        get connectionHost(): string {
+            return hostOf(this.connection?.base_url) || (this.connection?.base_url ?? "");
+        },
+
+        get maskedKey(): string {
+            return maskKey(this.connection?.key_last4 ?? "");
+        },
+
+        preflightMeta(check: PreflightCheck): string {
+            return metaOf(check);
+        },
+
+        async loadConnection(): Promise<void> {
+            try {
+                const response = await fetch("/api/connection");
+                const data: { connection?: Connection | null } = await response.json();
+                this.connection = data.connection ?? null;
+            } catch (e) {
+                console.error("Failed to load the connection:", e);
+                this.connection = null;
+            }
+            if (this.connection && !this.apiModel) this.apiModel = this.connection.model;
+            this.connectionLoaded = true;
+        },
+
+        editConnection(): void {
+            this.connectionForm = formOf(this.connection, this.apiModel);
+            this.connectionError = "";
+            this.connectionEditing = true;
+        },
+
+        cancelConnection(): void {
+            this.connectionForm = formOf(null, "");
+            this.connectionEditing = false;
+            this.connectionError = "";
+        },
+
+        // True when the connection is saved. An empty key keeps the saved one.
+        async saveConnection(): Promise<boolean> {
+            this.connectionError = "";
+            let body: ConnectionBody;
+            try {
+                body = connectionBody({ ...this.connectionForm, model: this.apiModel });
+            } catch (e) {
+                this.connectionError = errorText(e);
+                return false;
+            }
+            this.connectionBusy = true;
+            try {
+                const response = await fetch("/api/connection", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.connection = data.connection;
+                this.connectionForm = formOf(null, ""); // the typed key is not kept
+                this.connectionEditing = false;
+                this.connectionRev += 1;
+                this.preflight = null;
+                return true;
+            } catch (e) {
+                this.connectionError = errorText(e);
+                return false;
+            } finally {
+                this.connectionBusy = false;
+            }
+        },
+
+        // The key never comes from the request: the form saves first, then the
+        // saved connection is tested.
+        async testConnection(): Promise<void> {
+            if (this.connectionEditing && !(await this.saveConnection())) return;
+            if (!this.connection) return;
+            const model = this.apiModel.trim();
+            if (!model) {
+                this.connectionError = "enter the judge model to test.";
+                return;
+            }
+            this.connectionError = "";
+            this.preflightBusy = true;
+            try {
+                const response = await fetch("/api/connection/test", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ model }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.preflight = data as PreflightReport;
+                this.announce(this.preflight.ok ? "connection test passed." : "connection test failed.");
+            } catch (e) {
+                this.connectionError = errorText(e);
+            } finally {
+                this.preflightBusy = false;
+            }
+        },
+
+        async removeConnection(): Promise<void> {
+            this.connectionError = "";
+            try {
+                const response = await fetch("/api/connection", { method: "DELETE" });
+                if (!response.ok) throw new Error(`request failed (${response.status})`);
+                this.connection = null;
+                this.connectionEditing = false;
+                this.connectionRev += 1;
+                this.preflight = null;
+            } catch (e) {
+                this.connectionError = errorText(e);
+            }
+        },
+
+        // --- budget and request preview -------------------------------------
+
+        // Empty while there is nothing to estimate: a local judge sends nothing out.
+        get estimateKey(): string {
+            if (this.judgeProvider === "ollama") return "";
+            if (this.judgeProvider === "openai" && (!this.connection || this.connectionEditing)) return "";
+            const payload = this.buildPayload(true);
+            if (!payload.judge || !payload.candidates.length || !payload.test_cases.length) return "";
+            return JSON.stringify({ payload, rev: this.connectionRev });
+        },
+
+        async refreshEstimate(key: string): Promise<void> {
+            const token = ++estimateToken;
+            this.estimating = true;
+            const { payload } = JSON.parse(key) as { payload: EvaluatePayload };
+            const post = async (url: string) => {
+                try {
+                    const response = await fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    return { ok: response.ok, data };
+                } catch (e) {
+                    return { ok: false, data: { error: errorText(e) } };
+                }
+            };
+            const [budget, preview] = await Promise.all([post("/api/budget"), post("/api/preview")]);
+            if (token !== estimateToken) return;
+            this.estimating = false;
+            this.budget = budget.ok ? (budget.data as Budget) : null;
+            this.preview = preview.ok ? (preview.data as Preview) : null;
+            const failed = !budget.ok ? budget : !preview.ok ? preview : null;
+            this.estimateError = failed ? failed.data.error || "the estimate failed." : "";
+        },
+
+        get budgetFigures(): Figure[] {
+            if (!this.budget) return [];
+            return figuresOf(this.budget, this.judgeProvider === "openai" ? this.judgeName : null);
+        },
+
+        get previewBody(): string {
+            return this.preview ? previewText(this.preview) : "";
         },
 
         // --- archive --------------------------------------------------------
@@ -762,7 +1011,11 @@ document.addEventListener("alpine:init", () => {
         // --- start ----------------------------------------------------------
 
         validate(): string {
-            if (!this.judge) {
+            if (this.judgeProvider === "openai") {
+                if (!this.connection) return "connect the openai api first.";
+                if (this.connectionEditing) return "save the connection first.";
+                if (!this.judgeName) return "enter the judge model.";
+            } else if (!this.judgeName) {
                 return "choose a judge model.";
             }
             if (this.selected.length === 0) {
@@ -776,13 +1029,17 @@ document.addEventListener("alpine:init", () => {
             return "";
         },
 
-        buildPayload(): EvaluatePayload {
+        // `estimate`: only the cases that have a question, the way the budget and
+        // the preview take them while the form is still being filled.
+        buildPayload(estimate = false): EvaluatePayload {
             return {
-                judge: this.judge,
-                judge_provider: this.judgeCloud ? "ollama_cloud" : "ollama",
+                judge: this.judgeName,
+                judge_provider: this.judgeProvider,
                 candidates: [...this.selected],
                 base_rationale: this.baseRationale.trim(),
-                test_cases: this.cases.map((c) => payloadCase(c)),
+                test_cases: this.cases
+                    .filter((c) => !estimate || c.question.trim())
+                    .map((c) => payloadCase(c)),
             };
         },
 

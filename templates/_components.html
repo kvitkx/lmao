@@ -61,14 +61,14 @@
 {%- endmacro %}
 
 {# field/input (4:6), textarea variant when rows > 0. #}
-{% macro field(label, model, rows=0, placeholder="") -%}
+{% macro field(label, model, rows=0, placeholder="", type="text", enter="", placeholder_expr="") -%}
 <label class="flex flex-col gap-8">
     <span class="text-fg-muted">{{ label }}</span>
     {%- if rows %}
     <textarea x-model="{{ model }}" rows="{{ rows }}"{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}
               class="w-full resize-y bg-bg border border-line px-12 py-10 text-fg placeholder:text-fg-muted focus:border-fg outline-none"></textarea>
     {%- else %}
-    <input type="text" x-model="{{ model }}"{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+    <input type="{{ type }}" x-model="{{ model }}"{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if placeholder_expr %} :placeholder="{{ placeholder_expr }}"{% endif %}{% if enter %} @keydown.enter.prevent="{{ enter }}"{% endif %}{% if type == "password" %} autocomplete="off"{% endif %}
            class="w-full bg-bg border border-line px-12 py-10 text-fg placeholder:text-fg-muted focus:border-fg outline-none">
     {%- endif %}
 </label>
@@ -96,15 +96,34 @@
 {%- endmacro %}
 
 {# status-row (4:68): state | label | meta (state_text: the word shown instead of the state) #}
-{% macro status_row(state, label, meta, title_expr="", state_text="") -%}
+{% macro status_row(state, label, meta, title_expr="", state_text="", mono=False) -%}
 <div class="flex items-start gap-15 py-10 border-b border-line">
     <div class="w-72 shrink-0 flex items-center gap-8" :class="stateClass({{ state }})">
         {{ activity_dot(state ~ " === 'running'") }}
         <span x-text="{{ state_text or state }}"></span>
     </div>
-    <div class="flex-1 min-w-0 break-words" :class="isMuted({{ state }}) && 'text-fg-muted'"
+    <div class="flex-1 min-w-0 break-words{% if mono %} font-mono{% endif %}" :class="isMuted({{ state }}) && 'text-fg-muted'"
          x-text="{{ label }}"{% if title_expr %} :title="{{ title_expr }}"{% endif %}></div>
     <div class="max-w-320 break-words text-fg-muted tabular-nums" x-text="{{ meta }}"></div>
+</div>
+{%- endmacro %}
+
+{# Code box: a titled block of monospaced text with a note and an optional copy action.
+   `text` and `curl` are Alpine expressions. #}
+{% macro code_box(title, note, text, curl="") -%}
+<div x-data="{ copied: false }" class="bg-surface border border-line p-15 flex flex-col gap-12">
+    <div class="flex justify-between items-center gap-15 text-fg-muted">
+        <span class="text-fg">{{ title }}</span>
+        <span class="flex items-center gap-15">
+            <span>{{ note }}</span>
+            {%- if curl %}
+            <button type="button" x-show="canCopy"
+                    @click="copyText({{ curl }}).then((ok) => { copied = ok; setTimeout(() => (copied = false), 1500); })"
+                    class="hover:text-fg" x-text="copied ? 'copied' : 'copy as curl'"></button>
+            {%- endif %}
+        </span>
+    </div>
+    <pre class="font-mono text-caption font-light whitespace-pre overflow-auto max-h-320 text-fg-muted" x-text="{{ text }}"></pre>
 </div>
 {%- endmacro %}
 
@@ -204,7 +223,7 @@
 {# view-tab (33:228) as a tablist. `state` is the Alpine property,
    `items` a list of (value, text). Arrows cycle, Home/End jump.
    Panel id: panel-<state>, tab ids: tab-<state>-<value>. #}
-{% macro tabs(state, items, label) -%}
+{% macro tabs(state, items, label, pad="px-15") -%}
 {%- set values = items|map("first")|join(",") %}
 <div class="flex print:hidden" role="tablist" aria-label="{{ label }}"
      @keydown.arrow-right.prevent="cycleTab('{{ state }}', '{{ values }}', 1)"
@@ -215,7 +234,7 @@
     <button type="button" role="tab" id="tab-{{ state }}-{{ value }}"
             :aria-selected="{{ state }} === '{{ value }}'" :tabindex="{{ state }} === '{{ value }}' ? 0 : -1"
             aria-controls="panel-{{ state }}" @click="{{ state }} = '{{ value }}'"
-            class="px-15 py-9 border"
+            class="{{ pad }} py-9 border"
             :class="{{ state }} === '{{ value }}' ? 'bg-fg text-bg border-fg' : 'border-line text-fg-muted hover:text-fg'">{{ text }}</button>
     {%- endfor %}
 </div>

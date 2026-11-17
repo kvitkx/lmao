@@ -7,28 +7,95 @@
 
     <div class="flex flex-col gap-22">
 
-        {# 01 judge model #}
-        <div class="flex flex-col gap-8">
-            <label class="flex flex-col gap-8">
-                <span class="text-fg-muted">01 judge model</span>
-                <span class="relative block">
-                    <select x-model="judge" :disabled="models.length === 0"
-                            class="w-full appearance-none bg-bg border border-line pl-12 pr-36 py-10 text-fg focus:border-fg outline-none disabled:text-fg-muted">
-                        <option value="" disabled class="bg-bg">select judge</option>
-                        <template x-for="m in models" :key="m">
-                            <option :value="m" x-text="label(m)" :title="m" class="bg-bg"></option>
-                        </template>
-                    </select>
-                    <svg class="absolute right-12 top-1/2 -translate-y-1/2 pointer-events-none text-fg-muted"
-                         width="12" height="12" viewBox="0 0 12 12" fill="none"
-                         stroke="currentColor" aria-hidden="true">
-                        <path d="M2 4l4 4 4-4"/>
-                    </svg>
-                </span>
-            </label>
+        {# 01 judge: where it runs, then the model #}
+        <div class="flex flex-col gap-12">
+            <div class="flex flex-col gap-8">
+                <span class="text-fg-muted">01 judge</span>
+                {{ ui.tabs("judgeProvider", [("ollama", "local"), ("ollama_cloud", "ollama cloud"), ("openai", "openai api")], "judge provider", pad="px-10") }}
+            </div>
 
-            {{ ui.checkbox_row("judgeCloud", text="cloud judge",
-                               hint="grades in parallel. prompts and answers leave this machine.") }}
+            <div id="panel-judgeProvider" role="tabpanel" :aria-labelledby="'tab-judgeProvider-' + judgeProvider"
+                 class="flex flex-col gap-12">
+
+                {# local and ollama cloud: an installed model #}
+                <div x-show="judgeProvider !== 'openai'" class="flex flex-col gap-8">
+                    <label class="flex flex-col gap-8">
+                        <span class="sr-only" x-text="judgeProvider === 'ollama' ? 'local judge model' : 'ollama cloud judge model'"></span>
+                        <span class="relative block">
+                            <select @change="judge = $event.target.value" :disabled="judgeChoices.length === 0"
+                                    class="w-full appearance-none bg-bg border border-line pl-12 pr-36 py-10 text-fg focus:border-fg outline-none disabled:text-fg-muted">
+                                <option value="" disabled :selected="!judge" class="bg-bg"
+                                        x-text="judgeChoices.length ? 'select judge' : (judgeProvider === 'ollama' ? 'no local models' : 'no cloud models')"></option>
+                                <template x-for="m in judgeChoices" :key="m">
+                                    <option :value="m" :selected="m === judge" x-text="label(m)" :title="m" class="bg-bg"></option>
+                                </template>
+                            </select>
+                            <svg class="absolute right-12 top-1/2 -translate-y-1/2 pointer-events-none text-fg-muted"
+                                 width="12" height="12" viewBox="0 0 12 12" fill="none"
+                                 stroke="currentColor" aria-hidden="true">
+                                <path d="M2 4l4 4 4-4"/>
+                            </svg>
+                        </span>
+                    </label>
+                    <p x-show="judgeProvider === 'ollama_cloud'" class="text-fg-muted">grades in parallel. prompts and answers leave this machine.</p>
+                    <p x-show="judgeProvider === 'ollama_cloud' && !judgeChoices.length" class="text-fg-muted">cloud models are named …-cloud: pull one with ollama.</p>
+                </div>
+
+                {# openai api: a model and the saved connection #}
+                <div x-show="judgeProvider === 'openai'" x-cloak class="flex flex-col gap-12">
+                    {{ ui.field("model", "apiModel", placeholder="e.g. gpt-4.1-mini") }}
+
+                    <div class="border border-line p-15 flex flex-col gap-12">
+                        <div class="flex justify-between items-center gap-15">
+                            <span class="text-fg">connection · openai</span>
+                            <button type="button" x-show="connectionEditing && connection" x-cloak @click="cancelConnection()"
+                                    class="text-fg-muted hover:text-fg">cancel</button>
+                        </div>
+
+                        {# no connection #}
+                        <div x-show="connectionLoaded && !connection && !connectionEditing" x-cloak class="flex flex-col gap-12">
+                            <p class="text-fg-muted">no connection saved. the openai judge needs a base url and an api key.</p>
+                            <button type="button" @click="editConnection()"
+                                    class="self-start border border-fg-muted text-fg px-15 py-9 hover:border-fg">connect</button>
+                        </div>
+
+                        {# saved #}
+                        <div x-show="connection && !connectionEditing" x-cloak class="flex flex-col gap-12">
+                            <div class="flex flex-col gap-4">
+                                <span class="break-words" x-text="connectionHost"></span>
+                                <span class="text-fg-muted" x-text="maskedKey + ' · stored on the server'"></span>
+                            </div>
+                            <div class="flex items-center gap-15 text-fg-muted">
+                                <button type="button" @click="editConnection()" class="hover:text-fg">edit</button>
+                                <button type="button" @click="testConnection()" :disabled="preflightBusy"
+                                        class="enabled:hover:text-fg disabled:cursor-not-allowed"
+                                        x-text="preflightBusy ? 'testing…' : 'test'"></button>
+                                <button type="button" @click="removeConnection()" class="hover:text-fg">remove</button>
+                            </div>
+                        </div>
+
+                        {# editing #}
+                        <div x-show="connectionEditing" x-cloak class="flex flex-col gap-12">
+                            {{ ui.field("base url", "connectionForm.base_url", placeholder="https://api.openai.com/v1", enter="saveConnection()") }}
+                            {{ ui.field("api key", "connectionForm.api_key", type="password", enter="saveConnection()",
+                                        placeholder_expr="connection ? maskedKey + ' · empty keeps it' : ''") }}
+                            <div class="grid grid-cols-2 gap-12">
+                                {{ ui.field("price in / 1M", "connectionForm.price_in", placeholder="optional", enter="saveConnection()") }}
+                                {{ ui.field("price out / 1M", "connectionForm.price_out", placeholder="optional", enter="saveConnection()") }}
+                            </div>
+                            <p class="text-fg-muted">stored on the server as plain text, never shown again. the prices only feed the budget estimate.</p>
+                            <div class="flex items-center gap-12">
+                                <button type="button" @click="testConnection()" :disabled="connectionBusy || preflightBusy"
+                                        class="border border-fg-muted text-fg px-15 py-9 hover:border-fg disabled:text-fg-muted disabled:cursor-not-allowed">test</button>
+                                <button type="button" @click="saveConnection()" :disabled="connectionBusy"
+                                        class="bg-fg text-bg px-15 py-9 hover:bg-fg-muted disabled:bg-line disabled:text-fg-muted disabled:cursor-not-allowed">save</button>
+                            </div>
+                        </div>
+
+                        {{ ui.warn_notice("connectionError", "connectionError") }}
+                    </div>
+                </div>
+            </div>
         </div>
 
         {# 02 candidates #}
@@ -125,6 +192,69 @@
                 {{ ui.status_row("r.state", "r.label", "r.meta") }}
             </template>
         </div>
+        {# a remote judge: where the data goes #}
+        <section x-show="route" x-cloak class="flex flex-col gap-15">
+            {{ ui.section_label("route") }}
+            <div class="grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-x-8">
+                <div class="min-w-0 border border-line px-12 py-10 break-words" x-text="route?.from"></div>
+                <div class="flex flex-col items-center text-fg-muted">
+                    <span>answers</span>
+                    <span aria-hidden="true">→</span>
+                </div>
+                <div class="min-w-0 border border-fg px-12 py-10 break-words" x-text="route?.via"></div>
+                <div class="flex flex-col items-center text-fg-muted">
+                    <span>prompt →</span>
+                    <span>← grade</span>
+                </div>
+                <div class="min-w-0 border border-line px-12 py-10 break-words" x-text="route?.to"></div>
+            </div>
+            <div class="flex justify-between gap-15 text-fg-muted">
+                <span>this machine</span>
+                <span :class="route && !route.secure && 'text-warn'" x-text="route?.note"></span>
+            </div>
+        </section>
+
+        {# openai: what the connection can do #}
+        <section x-show="judgeProvider === 'openai' && connection" x-cloak class="flex flex-col">
+            <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+                <span>preflight</span>
+                <button type="button" @click="testConnection()" :disabled="preflightBusy"
+                        class="enabled:hover:text-fg disabled:cursor-not-allowed"
+                        x-text="preflightBusy ? 'testing…' : (preflight ? 'run again' : 'run')"></button>
+            </div>
+            <div x-show="!preflight && !preflightBusy" class="py-12 text-fg-muted">not run yet. the test sends two tiny requests to the api.</div>
+            <template x-for="c in (preflight ? preflight.checks : [])" :key="c.key">
+                {{ ui.status_row("c.state", "c.label", "preflightMeta(c)", mono=True) }}
+            </template>
+        </section>
+
+        {# a remote judge: what a run costs #}
+        <section x-show="remoteJudge && (budget || estimateError)" x-cloak class="flex flex-col">
+            <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+                <span>budget · estimate for this run</span>
+                <span x-show="estimating">estimating…</span>
+            </div>
+            <div x-show="budget" class="grid grid-cols-4 border-b border-line">
+                <template x-for="(f, fi) in budgetFigures" :key="f.label">
+                    <div class="min-w-0 py-15 flex flex-col gap-4" :class="fi ? 'pl-15 border-l border-line' : 'pr-15'">
+                        <span class="text-fg-muted" x-text="f.label"></span>
+                        <span class="flex flex-wrap items-baseline gap-x-6">
+                            <span class="text-heading-sm font-thin tabular-nums" x-text="f.value"></span>
+                            <span class="text-fg-muted" x-text="f.unit"></span>
+                        </span>
+                        <span class="text-fg-muted break-words" x-text="f.caption"></span>
+                    </div>
+                </template>
+            </div>
+            <div x-show="estimateError" class="pt-12 text-fg-muted break-words" x-text="estimateError"></div>
+        </section>
+
+        {# a remote judge: the real shape of one grading call #}
+        <section x-show="preview" x-cloak class="flex flex-col gap-12">
+            {{ ui.section_label("request preview") }}
+            {{ ui.code_box("grading call · no model names", "key redacted", "previewBody", curl="preview ? preview.curl : ''") }}
+        </section>
+
         <div class="flex items-center gap-12">
             <button type="button" x-show="busy" x-cloak @click="showRun()"
                     class="border border-fg-muted text-fg px-22 py-13 hover:border-fg">back to run</button>
