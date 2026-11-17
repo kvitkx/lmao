@@ -124,6 +124,31 @@
 </div>
 {%- endmacro %}
 
+{# Fold head: a row that opens and closes its card. `open` is an Alpine
+   expression, `toggle` the action. #}
+{% macro fold_head(title, metrics, open, toggle, title_tip="") -%}
+<button type="button" @click="{{ toggle }}" :aria-expanded="{{ open }}"
+        class="w-full flex justify-between items-center gap-15 p-22 text-left hover:bg-bg">
+    <span class="min-w-0 flex items-center gap-12">
+        <span aria-hidden="true" class="w-8 shrink-0 text-fg-muted" x-text="{{ open }} ? '–' : '+'"></span>
+        <span class="text-subheading min-w-0 break-words" x-text="{{ title }}"{% if title_tip %} :title="{{ title_tip }}"{% endif %}></span>
+    </span>
+    <span class="min-w-0 flex items-center gap-15 text-fg-muted">
+        <span class="min-w-0 break-words text-right" x-text="{{ metrics }}"></span>
+        <span class="shrink-0" x-text="{{ open }} ? 'hide' : 'show'"></span>
+    </span>
+</button>
+{%- endmacro %}
+
+{# `N more ...` row that shows the rest. `count` and `action` are Alpine expressions. #}
+{% macro more_row(count, label, action) -%}
+<button type="button" x-show="{{ count }} > 0" x-cloak @click="{{ action }}"
+        class="w-full flex justify-between py-12 border-b border-line text-fg-muted hover:text-fg">
+    <span><span x-text="{{ count }}"></span> {{ label }}</span>
+    <span>show all</span>
+</button>
+{%- endmacro %}
+
 {# Eval block. Expects the entry as `e` in scope (x-for="e in ..."). `anchor` is
    the DOM id the comparison table jumps to; tabindex -1 lets it take the focus. #}
 {% macro eval_block(head, first, head_title="", anchor="e.anchor") -%}

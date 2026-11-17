@@ -75,3 +75,63 @@ test("nextScoreSort: the best on top first, a second click reverses", () => {
     assert.deepEqual(answers.nextScoreSort({ key: 2, dir: "asc" }, null), { key: null, dir: "asc" });
     assert.deepEqual(answers.nextScoreSort(start, null), { key: null, dir: "desc" });
 });
+
+// --- folds ------------------------------------------------------------------
+
+const answerEntries = (...ids: string[]): any[] => ids.map((anchor) => ({ anchor }));
+const manyEntries = (n: number): any[] => answerEntries(...Array.from({ length: n }, (_, i) => `a${i}`));
+
+test("visible and hiddenCount follow the limit and `show all`", () => {
+    assert.deepEqual(answers.visible([1, 2, 3, 4, 5], 3, false), [1, 2, 3]);
+    assert.deepEqual(answers.visible([1, 2, 3, 4, 5], 3, true), [1, 2, 3, 4, 5]);
+    assert.equal(answers.hiddenCount(5, 3, false), 2);
+    assert.equal(answers.hiddenCount(5, 3, true), 0);
+    assert.equal(answers.hiddenCount(2, 3, false), 0);
+});
+
+test("initialFolds opens the best model and the first questions", () => {
+    const folds = answers.initialFolds(
+        [{ anchor: "m-a" }, { anchor: "m-b" }],
+        [{ anchor: "q1" }, { anchor: "q2" }, { anchor: "q3" }],
+    );
+
+    assert.deepEqual(folds.models, { "m-a": true });
+    assert.deepEqual(folds.questions, { q1: true, q2: true });
+    assert.equal(folds.allQuestions, false);
+    assert.deepEqual(answers.initialFolds([], []).models, {});
+});
+
+test("withRevealed opens the model of an answer and shows all answers when it is hidden", () => {
+    const models: any[] = [
+        { anchor: "m-a", entries: manyEntries(6) },
+        { anchor: "m-b", entries: answerEntries("b0") },
+    ];
+    const folds = answers.initialFolds(models, []);
+
+    const near = answers.withRevealed(folds, models, [], "a1");
+    const far = answers.withRevealed(folds, models, [], "a5");
+    const other = answers.withRevealed(folds, models, [], "b0");
+
+    assert.equal(near.allAnswers["m-a"], undefined);
+    assert.equal(far.allAnswers["m-a"], true);
+    assert.deepEqual(other.models, { "m-a": true, "m-b": true });
+    assert.deepEqual(folds.allAnswers, {}); // the input is not changed
+});
+
+test("withRevealed opens a question card and shows all cards when it is hidden", () => {
+    const cards: any[] = Array.from({ length: 9 }, (_, i) => ({
+        anchor: `q${i}`,
+        entries: answerEntries(`e${i}`),
+    }));
+    const folds = answers.initialFolds([], cards);
+
+    const early = answers.withRevealed(folds, [], cards, "q4");
+    const late = answers.withRevealed(folds, [], cards, "e8");
+    const none = answers.withRevealed(folds, [], cards, "nothing");
+
+    assert.equal(early.questions.q4, true);
+    assert.equal(early.allQuestions, false);
+    assert.equal(late.questions.q8, true);
+    assert.equal(late.allQuestions, true);
+    assert.deepEqual(none, folds);
+});

@@ -32,7 +32,11 @@ import {
     type PayloadCase,
     type PhaseFigures,
     type PhaseGroup,
+    type EvalEntry,
+    type QuestionCard,
     type Report,
+    type ReportModel,
+    type ReportReference,
     type Step,
     type TreeNode,
     RUNNING_MATRIX,
@@ -60,7 +64,21 @@ import {
     type SortKey,
     type TableRow,
 } from "./overview.ts";
-import { buildScoreRows, nextScoreSort, sortScoreRows, type ScoreRow, type ScoreSort } from "./answers.ts";
+import {
+    ANSWERS_SHOWN,
+    QUESTIONS_SHOWN,
+    REFERENCES_SHOWN,
+    buildScoreRows,
+    hiddenCount,
+    initialFolds,
+    nextScoreSort,
+    sortScoreRows,
+    visible,
+    withRevealed,
+    type Folds,
+    type ScoreRow,
+    type ScoreSort,
+} from "./answers.ts";
 import { barStates, faviconHref, type BarState } from "./favicon.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
@@ -271,6 +289,7 @@ document.addEventListener("alpine:init", () => {
         resultsError: "",
         controlError: "", // stop and resume
         openAnswers: {} as Record<string, boolean>, // eval block anchor -> true: its answer text is rendered
+        folds: initialFolds([], []) as Folds, // which model rows and question cards are opened
         run: freshRun(),
         matrixWidth: 0, // px, from a ResizeObserver
         followCurrent: true,
@@ -637,6 +656,7 @@ document.addEventListener("alpine:init", () => {
             this.resultsTab = "overview";
             this.sections = { overview: "summary", answers: "scores" };
             this.openAnswers = {};
+            this.folds = initialFolds([], []);
             this.resultsError = "";
             try {
                 const response = await fetch(`/api/results/${encodeURIComponent(id)}`);
@@ -663,6 +683,7 @@ document.addEventListener("alpine:init", () => {
                 this.overview = buildOverview(data as ApiResults);
                 this.scores = buildScoreRows(report.models, this.overview.models);
                 this.report = report;
+                this.folds = initialFolds(report.models, report.questionCards);
                 this.results = data as ApiResults;
             } catch (e) {
                 console.error("Failed to open run:", e);
@@ -1104,6 +1125,14 @@ document.addEventListener("alpine:init", () => {
                 this.resultsView = view;
                 await magic(this).$nextTick();
             }
+            // A folded row or a hidden answer is not in the DOM: open it first.
+            this.folds = withRevealed(
+                this.folds,
+                this.report?.models ?? [],
+                this.report?.questionCards ?? [],
+                id,
+            );
+            await magic(this).$nextTick();
             // The answer text exists only when opened: open it first, so the
             // scroll lands on the final layout.
             if (id.startsWith("answer-")) {
@@ -1188,6 +1217,55 @@ document.addEventListener("alpine:init", () => {
 
         toggleAnswer(id: string): void {
             this.openAnswers[id] = !this.openAnswers[id];
+        },
+
+        // --- folds of the answers tab ---------------------------------------
+
+        isFoldOpen(kind: "models" | "questions", anchor: string): boolean {
+            return Boolean(this.folds[kind][anchor]);
+        },
+
+        toggleFold(kind: "models" | "questions", anchor: string): void {
+            this.folds = {
+                ...this.folds,
+                [kind]: { ...this.folds[kind], [anchor]: !this.folds[kind][anchor] },
+            };
+        },
+
+        shownEntries(model: ReportModel): EvalEntry[] {
+            return visible(model.entries, ANSWERS_SHOWN, Boolean(this.folds.allAnswers[model.anchor]));
+        },
+
+        hiddenAnswers(model: ReportModel): number {
+            return hiddenCount(
+                model.entries.length,
+                ANSWERS_SHOWN,
+                Boolean(this.folds.allAnswers[model.anchor]),
+            );
+        },
+
+        showAllAnswers(anchor: string): void {
+            this.folds = { ...this.folds, allAnswers: { ...this.folds.allAnswers, [anchor]: true } };
+        },
+
+        get visibleCards(): QuestionCard[] {
+            const cards = this.report?.questionCards ?? [];
+            return visible(cards, QUESTIONS_SHOWN, this.folds.allQuestions);
+        },
+
+        get hiddenCards(): number {
+            const total = this.report?.questionCards.length ?? 0;
+            return hiddenCount(total, QUESTIONS_SHOWN, this.folds.allQuestions);
+        },
+
+        get visibleReferences(): ReportReference[] {
+            const list = this.report?.references ?? [];
+            return visible(list, REFERENCES_SHOWN, this.folds.allReferences);
+        },
+
+        get hiddenReferences(): number {
+            const total = this.report?.references.length ?? 0;
+            return hiddenCount(total, REFERENCES_SHOWN, this.folds.allReferences);
         },
 
         // [ and ] toggle the panels, Esc goes to the first screen.

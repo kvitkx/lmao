@@ -1442,6 +1442,7 @@ export interface ReportModel {
     cells: ReportCell[];
     entries: EvalEntry[];
     distribution: Distribution;
+    summaryLine: string; // the folded row: mean, median, pass, errors
     metricsLine: string;
 }
 
@@ -1542,6 +1543,12 @@ export function buildReport(raw: unknown): Readonly<Report> {
             cells,
             entries,
             distribution: buildDistribution(results),
+            summaryLine: [
+                `mean ${fmtNum(stats.mean)}`,
+                `median ${fmtNum(stats.median)}`,
+                `pass ${pass}`,
+                `errors ${fmtNum(stats.errors)}`,
+            ].join(" · "),
             metricsLine: [
                 `mean ${fmtNum(stats.mean)}`,
                 `median ${fmtNum(stats.median)}`,

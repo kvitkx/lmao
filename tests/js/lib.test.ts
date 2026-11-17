@@ -714,6 +714,7 @@ test("buildReport: verdict and notes", () => {
 test("buildReport: model rows", () => {
     const [a, b] = lib.buildReport(runFixture()).models;
 
+    assert.equal(a.summaryLine, "mean 95 · median 95 · pass 100% · errors 0");
     assert.equal(
         a.metricsLine,
         "mean 95 · median 95 · pass 100% · fails 0 · critical 0 · errors 0 · judge errors 0 · 250 c/s · 50 t/s · 2.5 s total",
