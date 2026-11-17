@@ -116,9 +116,15 @@ def run_preflight(provider: Provider, model: str) -> dict:
     """
     names, ms = _timed(provider.get_models)
     if not names:
-        detail = "no models: the API is unreachable or rejects the key"
+        reason = getattr(provider, "last_error", "")
+        detail = (
+            f"no models ({reason}): check the base url, the key and the network"
+            if reason
+            else "no models: the API is unreachable or rejects the key"
+        )
         first = _check("models", STATE_ERROR, detail, ms)
-    elif model not in names:
+    # Some APIs (Google) list the same model as "models/<name>".
+    elif model not in names and f"models/{model}" not in names:
         detail = f"{len(names)} listed, but not {model!r}"
         first = _check("models", STATE_ERROR, detail, ms)
     else:

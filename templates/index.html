@@ -7,15 +7,13 @@
 
     <div class="flex flex-col gap-22">
 
-        {# 01 judge: where it runs, then the model #}
-        <div class="flex flex-col gap-12">
-            <div class="flex flex-col gap-8">
-                <span class="text-fg-muted">01 judge</span>
-                {{ ui.tabs("judgeProvider", [("ollama", "local"), ("ollama_cloud", "ollama cloud"), ("openai", "openai api")], "judge provider", pad="px-10") }}
-            </div>
+        {# 01 judge: where it runs, then what it is #}
+        <div class="flex flex-col gap-8">
+            {{ ui.section_label("01 judge") }}
+            {{ ui.tabs("judgeProvider", [("ollama", "local"), ("ollama_cloud", "ollama cloud"), ("openai", "openai api")], "judge provider", fill=True) }}
 
             <div id="panel-judgeProvider" role="tabpanel" :aria-labelledby="'tab-judgeProvider-' + judgeProvider"
-                 class="flex flex-col gap-12">
+                 class="flex flex-col gap-8">
 
                 {# local and ollama cloud: an installed model #}
                 <div x-show="judgeProvider !== 'openai'" class="flex flex-col gap-8">
@@ -41,59 +39,66 @@
                     <p x-show="judgeProvider === 'ollama_cloud' && !judgeChoices.length" class="text-fg-muted">cloud models are named …-cloud: pull one with ollama.</p>
                 </div>
 
-                {# openai api: a model and the saved connection #}
-                <div x-show="judgeProvider === 'openai'" x-cloak class="flex flex-col gap-12">
-                    {{ ui.field("model", "apiModel", placeholder="e.g. gpt-4.1-mini") }}
+                {# openai api: the saved connection is the judge #}
+                <div x-show="judgeProvider === 'openai'" x-cloak class="flex flex-col gap-8">
 
-                    <div class="border border-line p-15 flex flex-col gap-12">
-                        <div class="flex justify-between items-center gap-15">
-                            <span class="text-fg">connection · openai</span>
-                            <button type="button" x-show="connectionEditing && connection" x-cloak @click="cancelConnection()"
-                                    class="text-fg-muted hover:text-fg">cancel</button>
-                        </div>
-
-                        {# no connection #}
-                        <div x-show="connectionLoaded && !connection && !connectionEditing" x-cloak class="flex flex-col gap-12">
-                            <p class="text-fg-muted">no connection saved. the openai judge needs a base url and an api key.</p>
-                            <button type="button" @click="editConnection()"
-                                    class="self-start border border-fg-muted text-fg px-15 py-9 hover:border-fg">connect</button>
-                        </div>
-
-                        {# saved #}
-                        <div x-show="connection && !connectionEditing" x-cloak class="flex flex-col gap-12">
-                            <div class="flex flex-col gap-4">
-                                <span class="break-words" x-text="connectionHost"></span>
-                                <span class="text-fg-muted" x-text="maskedKey + ' · stored on the server'"></span>
-                            </div>
-                            <div class="flex items-center gap-15 text-fg-muted">
-                                <button type="button" @click="editConnection()" class="hover:text-fg">edit</button>
-                                <button type="button" @click="testConnection()" :disabled="preflightBusy"
-                                        class="enabled:hover:text-fg disabled:cursor-not-allowed"
-                                        x-text="preflightBusy ? 'testing…' : 'test'"></button>
-                                <button type="button" @click="removeConnection()" class="hover:text-fg">remove</button>
-                            </div>
-                        </div>
-
-                        {# editing #}
-                        <div x-show="connectionEditing" x-cloak class="flex flex-col gap-12">
-                            {{ ui.field("base url", "connectionForm.base_url", placeholder="https://api.openai.com/v1", enter="saveConnection()") }}
-                            {{ ui.field("api key", "connectionForm.api_key", type="password", enter="saveConnection()",
-                                        placeholder_expr="connection ? maskedKey + ' · empty keeps it' : ''") }}
-                            <div class="grid grid-cols-2 gap-12">
-                                {{ ui.field("price in / 1M", "connectionForm.price_in", placeholder="optional", enter="saveConnection()") }}
-                                {{ ui.field("price out / 1M", "connectionForm.price_out", placeholder="optional", enter="saveConnection()") }}
-                            </div>
-                            <p class="text-fg-muted">stored on the server as plain text, never shown again. the prices only feed the budget estimate.</p>
-                            <div class="flex items-center gap-12">
-                                <button type="button" @click="testConnection()" :disabled="connectionBusy || preflightBusy"
-                                        class="border border-fg-muted text-fg px-15 py-9 hover:border-fg disabled:text-fg-muted disabled:cursor-not-allowed">test</button>
-                                <button type="button" @click="saveConnection()" :disabled="connectionBusy"
-                                        class="bg-fg text-bg px-15 py-9 hover:bg-fg-muted disabled:bg-line disabled:text-fg-muted disabled:cursor-not-allowed">save</button>
-                            </div>
-                        </div>
-
-                        {{ ui.warn_notice("connectionError", "connectionError") }}
+                    {# no connection #}
+                    <div x-show="connectionLoaded && !connection && !connectionEditing" x-cloak
+                         class="border border-line p-15 flex flex-col gap-12">
+                        <span>no connection</span>
+                        <p class="text-fg-muted">the judge needs an endpoint and an api key.</p>
+                        <button type="button" @click="editConnection()"
+                                class="w-full text-left border border-fg-muted text-fg px-22 py-13 hover:border-fg">connect</button>
                     </div>
+
+                    {# saved: the spec sheet and the result of the last test #}
+                    <div x-show="connection && !connectionEditing" x-cloak class="flex flex-col gap-8">
+                        <div class="border border-line p-12 flex flex-col gap-8">
+                            <template x-for="r in specRows" :key="r.label">
+                                <div class="flex gap-12">
+                                    <span class="w-72 shrink-0 text-fg-muted" x-text="r.label"></span>
+                                    <span class="min-w-0 break-words" x-text="r.value"></span>
+                                </div>
+                            </template>
+                            <div class="h-px bg-line" aria-hidden="true"></div>
+                            <div class="flex items-center gap-8" :class="connectionStatus.tone">
+                                {{ ui.activity_dot("connectionStatus.dot") }}
+                                <span class="min-w-0 break-words" x-text="connectionStatus.text"></span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-15 text-fg-muted">
+                            <button type="button" @click="editConnection()" class="hover:text-fg">edit connection</button>
+                            <button type="button" @click="testConnection()" :disabled="preflightBusy"
+                                    class="enabled:hover:text-fg disabled:cursor-not-allowed">test</button>
+                        </div>
+                    </div>
+
+                    {# editing #}
+                    <div x-show="connectionEditing" x-cloak class="border border-line p-15 flex flex-col gap-12">
+                        <div class="flex justify-between items-center gap-15">
+                            <span>connection · openai</span>
+                            <button type="button" @click="cancelConnection()" class="text-fg-muted hover:text-fg">cancel</button>
+                        </div>
+                        {{ ui.field("base url", "connectionForm.base_url", placeholder="https://api.openai.com/v1", enter="saveConnection()") }}
+                        {{ ui.field("api key", "connectionForm.api_key", type="password", enter="saveConnection()",
+                                    placeholder_expr="connection ? maskedKey + ' · empty keeps it' : ''") }}
+                        {{ ui.field("model", "connectionForm.model", placeholder="e.g. gpt-4.1-mini", enter="saveConnection()") }}
+                        <div class="grid grid-cols-2 gap-12">
+                            {{ ui.field("price in, $/1M", "connectionForm.price_in", placeholder="optional", enter="saveConnection()") }}
+                            {{ ui.field("price out, $/1M", "connectionForm.price_out", placeholder="optional", enter="saveConnection()") }}
+                        </div>
+                        <p class="text-fg-muted">stored on the server, never shown again</p>
+                        <div class="flex items-center gap-15 text-fg-muted">
+                            <button type="button" @click="testConnection()" :disabled="connectionBusy || preflightBusy"
+                                    class="enabled:hover:text-fg disabled:cursor-not-allowed">test</button>
+                            <button type="button" @click="saveConnection()" :disabled="connectionBusy"
+                                    class="text-fg enabled:hover:text-fg-muted disabled:cursor-not-allowed">save</button>
+                            <button type="button" x-show="connection" x-cloak @click="removeConnection()"
+                                    class="hover:text-fg">remove</button>
+                        </div>
+                    </div>
+
+                    {{ ui.warn_notice("connectionError", "connectionError") }}
                 </div>
             </div>
         </div>
@@ -229,24 +234,21 @@
         </section>
 
         {# a remote judge: what a run costs #}
-        <section x-show="remoteJudge && (budget || estimateError)" x-cloak class="flex flex-col">
+        <section x-show="remoteJudge && (budget || estimateError)" x-cloak class="flex flex-col gap-15">
             <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
                 <span>budget · estimate for this run</span>
                 <span x-show="estimating">estimating…</span>
             </div>
-            <div x-show="budget" class="grid grid-cols-4 border-b border-line">
+            <div x-show="budget" class="grid grid-cols-4 border-y border-line">
                 <template x-for="(f, fi) in budgetFigures" :key="f.label">
-                    <div class="min-w-0 py-15 flex flex-col gap-4" :class="fi ? 'pl-15 border-l border-line' : 'pr-15'">
+                    <div class="min-w-0 p-15 flex flex-col gap-4" :class="fi ? 'border-l border-line' : 'pl-0'" :title="f.title">
                         <span class="text-fg-muted" x-text="f.label"></span>
-                        <span class="flex flex-wrap items-baseline gap-x-6">
-                            <span class="text-heading-sm font-thin tabular-nums" x-text="f.value"></span>
-                            <span class="text-fg-muted" x-text="f.unit"></span>
-                        </span>
+                        <span class="text-heading-sm font-light tabular-nums break-words" x-text="f.value"></span>
                         <span class="text-fg-muted break-words" x-text="f.caption"></span>
                     </div>
                 </template>
             </div>
-            <div x-show="estimateError" class="pt-12 text-fg-muted break-words" x-text="estimateError"></div>
+            <div x-show="estimateError" class="text-fg-muted break-words" x-text="estimateError"></div>
         </section>
 
         {# a remote judge: the real shape of one grading call #}

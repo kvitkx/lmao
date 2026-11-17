@@ -223,9 +223,9 @@
 {# view-tab (33:228) as a tablist. `state` is the Alpine property,
    `items` a list of (value, text). Arrows cycle, Home/End jump.
    Panel id: panel-<state>, tab ids: tab-<state>-<value>. #}
-{% macro tabs(state, items, label, pad="px-15") -%}
+{% macro tabs(state, items, label, pad="px-15", fill=False) -%}
 {%- set values = items|map("first")|join(",") %}
-<div class="flex print:hidden" role="tablist" aria-label="{{ label }}"
+<div class="flex print:hidden{% if fill %} w-full{% endif %}" role="tablist" aria-label="{{ label }}"
      @keydown.arrow-right.prevent="cycleTab('{{ state }}', '{{ values }}', 1)"
      @keydown.arrow-left.prevent="cycleTab('{{ state }}', '{{ values }}', -1)"
      @keydown.home.prevent="setTab('{{ state }}', '{{ items[0][0] }}')"
@@ -234,7 +234,7 @@
     <button type="button" role="tab" id="tab-{{ state }}-{{ value }}"
             :aria-selected="{{ state }} === '{{ value }}'" :tabindex="{{ state }} === '{{ value }}' ? 0 : -1"
             aria-controls="panel-{{ state }}" @click="{{ state }} = '{{ value }}'"
-            class="{{ pad }} py-9 border"
+            class="{{ pad }} py-9 border{% if fill %} flex-auto text-center{% endif %}"
             :class="{{ state }} === '{{ value }}' ? 'bg-fg text-bg border-fg' : 'border-line text-fg-muted hover:text-fg'">{{ text }}</button>
     {%- endfor %}
 </div>

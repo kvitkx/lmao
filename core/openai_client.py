@@ -81,6 +81,7 @@ class OpenAIClient(Provider):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.json_schema = True
+        self.last_error = ""
 
     def __repr__(self) -> str:
         return f"OpenAIClient(base_url={self.base_url!r}, api_key='***')"
@@ -102,6 +103,7 @@ class OpenAIClient(Provider):
         Returns:
             list: A list of model id strings. Empty on any error.
         """
+        self.last_error = ""
         try:
             response = requests.get(
                 f"{self.base_url}/models",
@@ -112,6 +114,8 @@ class OpenAIClient(Provider):
             return [model["id"] for model in response.json().get("data", [])]
         except Exception as e:
             # Only the type: the text of an exception is not ours to trust.
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            self.last_error = f"HTTP {status}" if status else type(e).__name__
             print(f"Error fetching models: {type(e).__name__}")
             return []
 

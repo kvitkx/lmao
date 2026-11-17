@@ -13,16 +13,20 @@ import {
     preflightMeta as metaOf,
     previewText,
     routeOf,
+    connectionStatus as statusOf,
+    specRows as specRowsOf,
     type Budget,
     type Connection,
     type ConnectionBody,
     type ConnectionForm,
+    type ConnectionStatus,
     type Figure,
     type JudgeProvider,
     type PreflightCheck,
     type PreflightReport,
     type Preview,
     type Route,
+    type SpecRow,
 } from "./lib.ts";
 import {
     CASES_MAX_BYTES,
@@ -301,7 +305,6 @@ document.addEventListener("alpine:init", () => {
         modelsLoaded: false,
         judge: "",
         judgeProvider: "ollama" as JudgeProvider,
-        apiModel: "", // the model an openai judge names
         connection: null as Connection | null, // the saved connection: there is no key in it
         connectionLoaded: false,
         connectionEditing: false,
@@ -618,13 +621,19 @@ document.addEventListener("alpine:init", () => {
         // First screen: the state of the form as status rows.
         get checklist(): ChecklistRow[] {
             let judge: { state: string; meta: string };
-            if (!this.modelsLoaded) judge = { state: "queued", meta: "loading models…" };
+            if (this.judgeProvider === "openai") {
+                if (this.connectionEditing) judge = { state: "queued", meta: "editing connection" };
+                else if (!this.connectionLoaded) judge = { state: "queued", meta: "loading connection…" };
+                else if (!this.connection) judge = { state: "error", meta: "no connection saved" };
+                else if (!this.judgeName) judge = { state: "queued", meta: "set the judge model" };
+                else judge = { state: "done", meta: `${this.judgeName} · ${hostOf(this.connection.base_url)}` };
+            } else if (!this.modelsLoaded) judge = { state: "queued", meta: "loading models…" };
             else if (this.models.length === 0) {
                 judge = { state: "error", meta: "no models. is ollama running?" };
             } else if (this.judge) {
                 judge = {
                     state: "done",
-                    meta: this.label(this.judge) + (this.judgeCloud ? " · cloud" : ""),
+                    meta: this.label(this.judge) + (this.judgeProvider === "ollama_cloud" ? " · cloud" : ""),
                 };
             } else judge = { state: "queued", meta: "not selected" };
 
@@ -692,7 +701,7 @@ document.addEventListener("alpine:init", () => {
 
         // The model the judge calls name.
         get judgeName(): string {
-            return this.judgeProvider === "openai" ? this.apiModel.trim() : this.judge;
+            return this.judgeProvider === "openai" ? (this.connection?.model ?? "") : this.judge;
         },
 
         get judgeChoices(): string[] {
@@ -719,6 +728,16 @@ document.addEventListener("alpine:init", () => {
             return maskKey(this.connection?.key_last4 ?? "");
         },
 
+        get specRows(): SpecRow[] {
+            if (!this.connection) return [];
+            const body = this.preview?.body as { seed?: unknown } | undefined;
+            return specRowsOf(this.connection, this.preflight, body?.seed);
+        },
+
+        get connectionStatus(): ConnectionStatus {
+            return statusOf(this.preflight, this.preflightBusy);
+        },
+
         preflightMeta(check: PreflightCheck): string {
             return metaOf(check);
         },
@@ -732,12 +751,11 @@ document.addEventListener("alpine:init", () => {
                 console.error("Failed to load the connection:", e);
                 this.connection = null;
             }
-            if (this.connection && !this.apiModel) this.apiModel = this.connection.model;
             this.connectionLoaded = true;
         },
 
         editConnection(): void {
-            this.connectionForm = formOf(this.connection, this.apiModel);
+            this.connectionForm = formOf(this.connection, this.connection?.model ?? "");
             this.connectionError = "";
             this.connectionEditing = true;
         },
@@ -753,7 +771,7 @@ document.addEventListener("alpine:init", () => {
             this.connectionError = "";
             let body: ConnectionBody;
             try {
-                body = connectionBody({ ...this.connectionForm, model: this.apiModel });
+                body = connectionBody(this.connectionForm);
             } catch (e) {
                 this.connectionError = errorText(e);
                 return false;
@@ -788,9 +806,8 @@ document.addEventListener("alpine:init", () => {
         async testConnection(): Promise<void> {
             if (this.connectionEditing && !(await this.saveConnection())) return;
             if (!this.connection) return;
-            const model = this.apiModel.trim();
-            if (!model) {
-                this.connectionError = "enter the judge model to test.";
+            if (!this.connection.model) {
+                this.connectionError = "set the judge model in the connection first.";
                 return;
             }
             this.connectionError = "";
@@ -799,7 +816,7 @@ document.addEventListener("alpine:init", () => {
                 const response = await fetch("/api/connection/test", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ model }),
+                    body: JSON.stringify({}),
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) {
@@ -1014,7 +1031,7 @@ document.addEventListener("alpine:init", () => {
             if (this.judgeProvider === "openai") {
                 if (!this.connection) return "connect the openai api first.";
                 if (this.connectionEditing) return "save the connection first.";
-                if (!this.judgeName) return "enter the judge model.";
+                if (!this.judgeName) return "set the judge model in the connection.";
             } else if (!this.judgeName) {
                 return "choose a judge model.";
             }

@@ -361,3 +361,23 @@ def test_build_request_is_what_generate_sends():
     ]
     assert (payload["temperature"], payload["max_tokens"]) == (0, 5)
     assert payload["response_format"]["type"] == "json_schema"
+
+
+@patch("core.openai_client.requests.get")
+def test_get_models_remembers_why_it_failed(mock_get):
+    client = _client()
+    response = _response({}, status=404)
+    response.raise_for_status.side_effect = requests.HTTPError("404", response=response)
+    mock_get.return_value = response
+
+    assert client.get_models() == []
+    assert client.last_error == "HTTP 404"
+
+    mock_get.side_effect = requests.ConnectionError("down")
+    assert client.get_models() == []
+    assert client.last_error == "ConnectionError"
+
+    mock_get.side_effect = None
+    mock_get.return_value = _response({"data": [{"id": "a"}]})
+    assert client.get_models() == ["a"]
+    assert client.last_error == ""

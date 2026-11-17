@@ -1362,6 +1362,7 @@ export interface Figure {
     value: string;
     unit: string;
     caption: string;
+    title?: string; // the exact range behind a rounded value
 }
 
 // Four key figures of the recommended model, each with its place in the run.
@@ -1825,17 +1826,23 @@ export interface Budget {
     cost: Range | null;
 }
 
-// Four key figures of the budget block. `model` is the judge model the prices
-// belong to, or null when the provider has no prices (ollama cloud).
+// Four key figures of the budget block: one short value each, the range is the
+// tooltip. `model` is the judge model the prices belong to, or null when the
+// provider has no prices (ollama cloud).
 export function budgetFigures(budget: Budget, model: string | null): Figure[] {
     const { judge_calls: calls, tokens } = budget;
+    const mid = (range: Range) => (range.low + range.high) / 2;
+    const span = (range: Range, fmt: (n: number) => string) => `${fmt(range.low)}–${fmt(range.high)}`;
+
     let cost: Figure;
     if (budget.cost) {
+        const dollars = (n: number) => `$${fmtMoney(n)}`;
         cost = {
             label: "cost",
-            value: fmtRange(budget.cost, fmtMoney),
+            value: dollars(mid(budget.cost)),
             unit: "",
-            caption: `${model} at your prices`,
+            caption: `${model} list price`,
+            title: span(budget.cost, dollars),
         };
     } else {
         const caption = model === null ? "not priced" : "set the prices in the connection";
@@ -1850,16 +1857,18 @@ export function budgetFigures(budget: Budget, model: string | null): Figure[] {
         },
         {
             label: "tokens",
-            value: fmtRange(tokens.total, fmtCount),
+            value: `~${fmtCount(mid(tokens.total))}`,
             unit: "",
-            caption: `in ${fmtRange(tokens.input, fmtCount)} · out ${fmtRange(tokens.output, fmtCount)}`,
+            caption: `in ~${fmtCount(mid(tokens.input))} · out ~${fmtCount(mid(tokens.output))}`,
+            title: `${span(tokens.total, fmtCount)} tokens`,
         },
         cost,
         {
             label: "sent out",
-            value: fmtRange(budget.sent_chars, fmtCount),
-            unit: "chars",
+            value: `${calls.grades} answers`,
+            unit: "",
             caption: "graded blind, no names",
+            title: `${span(budget.sent_chars, fmtCount)} characters`,
         },
     ];
 }
@@ -2006,4 +2015,69 @@ export function previewText(preview: Preview): string {
         "",
         JSON.stringify(preview.body, null, 2),
     ].join("\n");
+}
+
+// --- the saved connection as a spec sheet -----------------------------------
+
+export interface SpecRow {
+    label: string;
+    value: string;
+}
+
+// 'https://api.openai.com/v1/' -> 'api.openai.com/v1'
+export function endpointOf(url: unknown): string {
+    try {
+        const parsed = new URL(String(url));
+        return `${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`;
+    } catch {
+        return String(url ?? "");
+    }
+}
+
+// What is known about the judge call. `output` is known after a test; `seed` is
+// the one the request preview sends.
+export function specRows(
+    connection: Connection,
+    report: PreflightReport | null,
+    seed: unknown,
+): SpecRow[] {
+    const structured = report?.checks.find((c) => c.key === "structured");
+    let output = "–";
+    if (structured?.state === "done") {
+        const schema = !/plain JSON/i.test(structured.detail);
+        output = [schema ? "json_schema" : "json object", typeof seed === "number" ? `seed ${seed}` : ""]
+            .filter(Boolean)
+            .join(" · ");
+    }
+    return [
+        { label: "source", value: "openai-compatible" },
+        { label: "endpoint", value: endpointOf(connection.base_url) },
+        { label: "model", value: connection.model || "–" },
+        { label: "auth", value: `Bearer ${maskedKey(connection.key_last4)}` },
+        { label: "output", value: output },
+        { label: "egress", value: "remote · answers sent" },
+    ];
+}
+
+export interface ConnectionStatus {
+    dot: boolean;
+    tone: string;
+    text: string;
+}
+
+// The line under the spec sheet: the result of the last test.
+export function connectionStatus(report: PreflightReport | null, busy: boolean): ConnectionStatus {
+    if (busy) return { dot: true, tone: "text-fg", text: "testing…" };
+    if (!report) return { dot: false, tone: "text-fg-muted", text: "not tested yet" };
+    if (report.ok) {
+        const models = report.checks.find((c) => c.key === "models");
+        const count = /^(\d+) listed/.exec(models?.detail ?? "")?.[1];
+        const parts = ["reachable"];
+        if (models?.ms != null) parts.push(`${models.ms} ms`);
+        if (count) parts.push(`${count} model${count === "1" ? "" : "s"}`);
+        return { dot: true, tone: "text-fg", text: parts.join(" · ") };
+    }
+    const failed = report.checks.find((c) => c.state === "error");
+    const text = failed ? `${failed.label} · ${failed.detail}` : "the test failed";
+    return { dot: false, tone: "text-warn", text };
 }

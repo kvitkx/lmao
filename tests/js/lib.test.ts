@@ -1241,9 +1241,9 @@ test("budgetFigures: calls, tokens, cost and what is sent out", () => {
         lib.budgetFigures(BUDGET, "gpt-4.1-mini").map((f) => [f.label, f.value, f.unit, f.caption]),
         [
             ["judge calls", "7", "", "2 refs · 4 grades · 1 summary"],
-            ["tokens", "13k–14k", "", "in ~12k · out 600–2k"],
-            ["cost", "0.0042–0.120", "", "gpt-4.1-mini at your prices"],
-            ["sent out", "48k–50k", "chars", "graded blind, no names"],
+            ["tokens", "~14k", "", "in ~12k · out ~1.3k"],
+            ["cost", "$0.062", "", "gpt-4.1-mini list price"],
+            ["sent out", "4 answers", "", "graded blind, no names"],
         ],
     );
 });
@@ -1368,5 +1368,81 @@ test("previewText lays out the request like a request", () => {
     assert.equal(
         lib.previewText(preview),
         'POST https://x/v1/chat/completions\nContent-Type: application/json\nAuthorization: Bearer ***\n\n{\n  "model": "m"\n}',
+    );
+});
+
+test("budgetFigures keeps the exact range in the tooltip", () => {
+    const [, tokens, cost, sent] = lib.budgetFigures(BUDGET, "m");
+
+    assert.equal(tokens.title, "13k–14k tokens");
+    assert.equal(cost.title, "$0.0042–$0.120");
+    assert.equal(sent.title, "48k–50k characters");
+});
+
+test("endpointOf drops the scheme and a trailing slash", () => {
+    assert.equal(lib.endpointOf("https://api.openai.com/v1/"), "api.openai.com/v1");
+    assert.equal(lib.endpointOf("http://localhost:1234"), "localhost:1234");
+});
+
+const CONNECTION: lib.Connection = {
+    base_url: "https://api.openai.com/v1/",
+    model: "gpt-4.1-mini",
+    price_in: null,
+    price_out: null,
+    key_last4: "a1b2",
+};
+
+const check = (
+    key: string,
+    state: lib.PreflightCheck["state"],
+    detail: string,
+    ms: number | null = null,
+): lib.PreflightCheck => ({ key, label: key, state, detail, ms });
+
+test("specRows: the output is known after a test, the seed comes from the preview", () => {
+    const untested = lib.specRows(CONNECTION, null, undefined);
+    const schema = lib.specRows(
+        CONNECTION,
+        { ok: true, checks: [check("structured", "done", "schema accepted")] },
+        42,
+    );
+    const plain = lib.specRows(
+        CONNECTION,
+        { ok: true, checks: [check("structured", "done", "plain JSON object: the server rejected the schema")] },
+        undefined,
+    );
+
+    assert.deepEqual(untested.map((r) => [r.label, r.value]), [
+        ["source", "openai-compatible"],
+        ["endpoint", "api.openai.com/v1"],
+        ["model", "gpt-4.1-mini"],
+        ["auth", "Bearer ••••a1b2"],
+        ["output", "–"],
+        ["egress", "remote · answers sent"],
+    ]);
+    assert.equal(schema[4].value, "json_schema · seed 42");
+    assert.equal(plain[4].value, "json object");
+});
+
+test("connectionStatus: testing, not tested, reachable and failed", () => {
+    const ok = (detail: string): lib.PreflightReport => ({
+        ok: true,
+        checks: [check("models", "done", detail, 142)],
+    });
+
+    assert.deepEqual(lib.connectionStatus(null, true), { dot: true, tone: "text-fg", text: "testing…" });
+    assert.deepEqual(lib.connectionStatus(null, false), {
+        dot: false,
+        tone: "text-fg-muted",
+        text: "not tested yet",
+    });
+    assert.equal(lib.connectionStatus(ok("12 listed"), false).text, "reachable · 142 ms · 12 models");
+    assert.equal(lib.connectionStatus(ok("1 listed"), false).text, "reachable · 142 ms · 1 model");
+    assert.deepEqual(
+        lib.connectionStatus(
+            { ok: false, checks: [check("models", "error", "no models (HTTP 404)")] },
+            false,
+        ),
+        { dot: false, tone: "text-warn", text: "models · no models (HTTP 404)" },
     );
 });
