@@ -135,3 +135,24 @@ test("withRevealed opens a question card and shows all cards when it is hidden",
     assert.equal(late.allQuestions, true);
     assert.deepEqual(none, folds);
 });
+
+
+test("withRevealed opens only the view that is shown", () => {
+    const models: any[] = [{ anchor: "m-a", entries: manyEntries(6) }];
+    const cards: any[] = Array.from({ length: 9 }, (_, i) => ({
+        anchor: `q${i}`,
+        entries: answerEntries(i === 8 ? "a5" : `e${i}`),
+    }));
+    const folds = answers.initialFolds([], []);
+
+    const inModels = answers.withRevealed(folds, models, cards, "a5", "model");
+    const inQuestions = answers.withRevealed(folds, models, cards, "a5", "question");
+
+    assert.deepEqual(inModels.models, { "m-a": true });
+    assert.equal(inModels.allAnswers["m-a"], true);
+    assert.deepEqual(inModels.questions, {});
+    assert.equal(inModels.allQuestions, false);
+    assert.deepEqual(inQuestions.models, {});
+    assert.deepEqual(inQuestions.questions, { q8: true });
+    assert.equal(inQuestions.allQuestions, true);
+});

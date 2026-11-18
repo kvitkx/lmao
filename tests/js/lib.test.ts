@@ -621,6 +621,18 @@ function runFixture(): any {
         judge_model: "j",
         mode: "local",
         judge_is_candidate: false,
+        status: "completed",
+        progress: { done: 6, total: 6 },
+        finished_steps: [
+            "reference:j:q1",
+            "answer:a:q1",
+            "answer:b:q1",
+            "grading:a:q1",
+            "grading:b:q1",
+            "summary:j:",
+        ],
+        candidates: ["a", "b"],
+        base_rationale: "",
         finished_at: "2026-01-01T12:00:30",
         questions_results: [
             {

@@ -1495,9 +1495,9 @@ export function buildReport(raw: unknown): Readonly<Report> {
     const names = shortNames([...summaryModels.map((s) => s.model), rec.model]);
     const display = (m: string) => names[m] || shortName(m);
 
-    const unfinished = data.status !== undefined && data.status !== "completed";
+    const unfinished = data.status !== "completed";
     const notes: string[] = [];
-    if (unfinished && data.progress) {
+    if (unfinished) {
         notes.push(
             `the run did not finish: ${data.progress.done} of ${data.progress.total} steps are done. resume continues from here.`,
         );

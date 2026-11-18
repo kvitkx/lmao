@@ -143,6 +143,7 @@ interface RunState {
     now: number;
     error: string;
     resumable: boolean; // the server failed the run: it can be resumed
+    reconnectable: boolean; // the stream broke: the run may still go on, the stream can be reopened
     attention: boolean; // finished while another screen was open
     config: RunConfig | null;
     phases: Record<string, PhaseFigures>; // phase -> figures, see updateRun()
@@ -277,6 +278,7 @@ document.addEventListener("alpine:init", () => {
         now: 0,
         error: "",
         resumable: false,
+        reconnectable: false,
         attention: false,
         config: null,
         phases: phaseStats([], PHASE_GROUPS),
@@ -454,6 +456,18 @@ document.addEventListener("alpine:init", () => {
             }
             if (this.view === "running" && run.status === "error") {
                 return { ...base, tone: "text-warn", text: `failed · ${figures}` };
+            }
+            if (
+                (run.status === "stopped" || run.status === "error") &&
+                this.view !== "running"
+            ) {
+                const failed = run.status === "error";
+                return {
+                    ...base,
+                    tone: failed ? "text-warn" : "text-fg-muted",
+                    go: true,
+                    text: `${failed ? "failed" : "stopped"} · ${figures}`,
+                };
             }
             if (run.attention) {
                 return { ...base, tone: "text-fg", open: true, text: `finished · ${figures}` };
@@ -906,6 +920,44 @@ document.addEventListener("alpine:init", () => {
             this.historyLoaded = true;
         },
 
+        async renameRun(id: string, title: string): Promise<boolean> {
+            try {
+                const response = await fetch(`/api/results/${encodeURIComponent(id)}/title`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                await this.loadHistory();
+                return true;
+            } catch (e) {
+                this.historyError = errorText(e);
+                return false;
+            }
+        },
+
+        async deleteRun(id: string): Promise<boolean> {
+            try {
+                const response = await fetch(`/api/results/${encodeURIComponent(id)}`, {
+                    method: "DELETE",
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                if (this.activeRunId === id) this.goHome();
+                if (this.run.id === id) this.run = freshRun();
+                await this.loadHistory();
+                return true;
+            } catch (e) {
+                this.historyError = errorText(e);
+                return false;
+            }
+        },
+
         // Opens a saved run. Allowed while a run is in progress: that run keeps its
         // own state in `this.run`, and the topbar leads back to it.
         async openRun(id: string): Promise<void> {
@@ -1135,7 +1187,9 @@ document.addEventListener("alpine:init", () => {
             source.onerror = () => {
                 if (this.run.status !== "running") return;
                 this.failRun(
-                    "connection to the server was lost. the run may still finish: check the archive.",
+                    "connection to the server was lost. the run may still be going: reconnect to see it.",
+                    false,
+                    true,
                 );
             };
         },
@@ -1280,7 +1334,7 @@ document.addEventListener("alpine:init", () => {
             else this.run.attention = true;
         },
 
-        failRun(message: string, resumable = false): void {
+        failRun(message: string, resumable = false, reconnectable = false): void {
             // Rows that were in flight will never finish: stop their animation.
             this.run.steps.forEach((step) => {
                 if (step.state === "running") {
@@ -1292,6 +1346,7 @@ document.addEventListener("alpine:init", () => {
             this.run.status = "error";
             this.run.error = message; // announced by the role="alert" notice
             this.run.resumable = resumable;
+            this.run.reconnectable = reconnectable;
             this.run.endedAt = Date.now();
             this.stopStream();
             void this.loadHistory(); // a failed run is in the archive and can be resumed
@@ -1328,6 +1383,15 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        // The stream broke but the run may still be going: open it again. The
+        // server replays the events from the start, so the rows are rebuilt.
+        reconnectRun(): void {
+            const { id, config, startedAt } = this.run;
+            if (!id || !config) return;
+            this.startRun(id, config);
+            if (startedAt) this.run.startedAt = startedAt; // the clock keeps running
+        },
+
         // From the stopped screen or from the archive. The server replays the
         // finished steps, so the rows are built the same way as for a live run.
         async resumeRun(id: string): Promise<void> {
@@ -1339,6 +1403,8 @@ document.addEventListener("alpine:init", () => {
                 const response = await fetch(`/api/evaluate/${encodeURIComponent(id)}/resume`, {
                     method: "POST",
                 });
+                // Still going on the server: connect to it instead of resuming.
+                if (response.status === 409 && this.run.id === id) return this.reconnectRun();
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) {
                     throw new Error(data.error || `request failed (${response.status})`);
@@ -1373,6 +1439,7 @@ document.addEventListener("alpine:init", () => {
 
         // Back to the form: after an error the setup panel may still be closed.
         dismissRun(): void {
+            this.run = freshRun();
             this.view = "idle";
             this.setupOpen = true;
         },
@@ -1405,6 +1472,7 @@ document.addEventListener("alpine:init", () => {
                 this.report?.models ?? [],
                 this.report?.questionCards ?? [],
                 id,
+                this.resultsView as "model" | "question",
             );
             await magic(this).$nextTick();
             // The answer text exists only when opened: open it first, so the

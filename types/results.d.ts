@@ -122,12 +122,12 @@ export interface Results {
     mode: Mode;
     judge_is_candidate: boolean;
     /** "running" in a file means the server died mid-run: treat it as stopped. */
-    status?: RunStatus;
-    progress?: { done: number; total: number };
+    status: RunStatus;
+    progress: { done: number; total: number };
     /** Keys phase:model:question of the finished steps; a resumed run skips them. */
-    finished_steps?: string[];
-    candidates?: string[];
-    base_rationale?: string;
+    finished_steps: string[];
+    candidates: string[];
+    base_rationale: string;
     /** null while the run is in progress. */
     finished_at: string | null;
     run?: RunInfo;

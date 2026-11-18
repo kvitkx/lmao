@@ -94,13 +94,17 @@ export function initialFolds(
     };
 }
 
+export type AnswersView = "model" | "question";
+
 // Opens whatever holds the block with this id, so that it is rendered before a
 // jump. The id of a model, a question or an answer; any other id changes nothing.
+// `view`: only the shown view is opened (null: both).
 export function withRevealed(
     folds: Folds,
     models: Pick<ReportModel, "anchor" | "entries">[],
     cards: Pick<QuestionCard, "anchor" | "entries">[],
     id: string,
+    view: AnswersView | null = null,
 ): Folds {
     const next: Folds = {
         ...folds,
@@ -108,17 +112,21 @@ export function withRevealed(
         questions: { ...folds.questions },
         allAnswers: { ...folds.allAnswers },
     };
-    for (const model of models) {
-        const at = model.entries.findIndex((e) => e.anchor === id);
-        if (model.anchor !== id && at < 0) continue;
-        next.models[model.anchor] = true;
-        if (at >= ANSWERS_SHOWN) next.allAnswers[model.anchor] = true;
+    if (view !== "question") {
+        for (const model of models) {
+            const at = model.entries.findIndex((e) => e.anchor === id);
+            if (model.anchor !== id && at < 0) continue;
+            next.models[model.anchor] = true;
+            if (at >= ANSWERS_SHOWN) next.allAnswers[model.anchor] = true;
+        }
     }
-    cards.forEach((card, i) => {
-        const at = card.entries.findIndex((e) => e.anchor === id);
-        if (card.anchor !== id && at < 0) return;
-        next.questions[card.anchor] = true;
-        if (i >= QUESTIONS_SHOWN) next.allQuestions = true;
-    });
+    if (view !== "model") {
+        cards.forEach((card, i) => {
+            const at = card.entries.findIndex((e) => e.anchor === id);
+            if (card.anchor !== id && at < 0) return;
+            next.questions[card.anchor] = true;
+            if (i >= QUESTIONS_SHOWN) next.allQuestions = true;
+        });
+    }
     return next;
 }

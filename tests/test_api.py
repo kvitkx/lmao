@@ -7,6 +7,7 @@ touches a real Ollama or the real ``history/`` folder.
 """
 
 import json
+import os
 import re
 import threading
 import time
@@ -732,8 +733,7 @@ def test_history_copes_with_oddly_named_runs(client):
 
     runs = {run["task_id"]: run for run in client.get("/api/history").get_json()}
 
-    assert runs["weird"]["tag_name"] == "weird"
-    assert runs["weird"]["timestamp"] == "Unknown"
+    assert "weird" not in runs
     assert runs["run_x_notadate_nottime"]["tag_name"] == "X"
     assert runs["run_x_notadate_nottime"]["timestamp"] == "notadate nottime"
 
@@ -1186,3 +1186,101 @@ def test_preview_rejects_an_invalid_payload(client, body):
 
     assert response.status_code == 400
     assert response.get_json()["error"]
+
+
+# --- run ids and paths ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "task_id", ["weird", "run_", "run_a/../../x", "run_a\n", "../run_a_1_2"]
+)
+def test_run_dir_rejects_ids_that_are_not_run_ids(task_id):
+    assert app_module._run_dir(task_id) is None
+
+
+def test_run_dir_stays_inside_the_history_directory():
+    folder = app_module._run_dir("run_a_20260101_000000")
+
+    assert folder.startswith(os.path.realpath(app_module.pipeline.history_dir) + os.sep)
+
+
+# --- delete and rename ------------------------------------------------------
+
+
+def test_delete_removes_the_run_folder(client):
+    task_id = _save_run()
+
+    response = client.delete(f"/api/results/{task_id}")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"task_id": task_id}
+    assert not Path("data/history", task_id).exists()
+    assert client.get("/api/history").get_json() == []
+
+
+def test_delete_refuses_a_run_in_progress(client):
+    task_id = _save_run()
+    app_module.TASKS[task_id] = {"status": "started", "events": []}
+
+    response = client.delete(f"/api/results/{task_id}")
+
+    assert response.status_code == 409
+    assert Path("data/history", task_id).exists()
+
+
+def test_delete_rejects_unknown_and_unsafe_ids(client):
+    assert client.delete("/api/results/run_x_20260101_000000").status_code == 404
+    unsafe = client.delete("/api/results/.hidden")
+    assert unsafe.status_code == 400
+    assert unsafe.get_json() == {"error": "Invalid task_id"}
+
+
+def test_delete_works_for_a_stopped_run(client):
+    _save_partial()
+
+    response = client.delete(f"/api/results/{RESUME_ID}")
+
+    assert response.status_code == 200
+    assert not Path("data/history", RESUME_ID).exists()
+
+
+def test_rename_sets_the_title_shown_in_the_archive(client):
+    task_id = _save_run()
+
+    response = client.put(f"/api/results/{task_id}/title", json={"title": "  my  run "})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"task_id": task_id, "title": "my run"}
+    [run] = client.get("/api/history").get_json()
+    assert run["tag_name"] == "my run"
+
+
+def test_an_empty_title_restores_the_default_name(client):
+    task_id = _save_run()
+    client.put(f"/api/results/{task_id}/title", json={"title": "mine"})
+
+    response = client.put(f"/api/results/{task_id}/title", json={"title": " "})
+
+    assert response.get_json()["title"] is None
+    assert not Path("data/history", task_id, "meta.json").exists()
+    assert client.get("/api/history").get_json()[0]["tag_name"] == "X"
+
+
+@pytest.mark.parametrize("body", [{}, {"title": 5}, {"title": "x" * 81}, [1]])
+def test_rename_rejects_a_bad_title(client, body):
+    task_id = _save_run()
+
+    response = client.put(f"/api/results/{task_id}/title", json=body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
+def test_rename_unknown_and_unsafe_ids(client):
+    missing = client.put(
+        "/api/results/run_x_20260101_000000/title", json={"title": "a"}
+    )
+    unsafe = client.put("/api/results/.hidden/title", json={"title": "a"})
+
+    assert missing.status_code == 404
+    assert unsafe.status_code == 400

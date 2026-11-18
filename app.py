@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -57,6 +58,8 @@ pipeline = EvaluationPipeline(ollama_client)
 connection_store = ConnectionStore(os.path.join(DATA_DIR, "connection.json"))
 
 _SAFE_TAG_RE = re.compile(r"[^a-zA-Z0-9_-]")
+_RUN_ID_RE = re.compile(r"run_[A-Za-z0-9_-]+")
+MAX_TITLE_LENGTH = 80
 _OPTIONAL_TEXT_FIELDS = ("tag", "specific_rationale", "reference")
 
 # An SSE stream that writes nothing never notices a closed connection, and
@@ -182,10 +185,27 @@ def _read_json(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _run_dir(task_id: str) -> str | None:
+    """The folder of a run, or None if the id is not a run id.
+
+    The id must look like run_<tag>_<date>_<time>, and the resolved path must
+    stay inside the history directory.
+    """
+    if not isinstance(task_id, str) or not _RUN_ID_RE.fullmatch(task_id):
+        return None
+    base = os.path.realpath(pipeline.history_dir)
+    path = os.path.realpath(os.path.join(base, task_id))
+    if not path.startswith(base + os.sep):
+        return None
+    return path
+
+
 def _read_run(task_id: str) -> dict | None:
     """Reads the results of a run, or None if it is missing or not schema v2."""
-    path = os.path.join(pipeline.history_dir, task_id, "evaluation_results.json")
-    data = _read_json(path)
+    folder = _run_dir(task_id)
+    if folder is None:
+        return None
+    data = _read_json(os.path.join(folder, "evaluation_results.json"))
     if data is None or data.get("schema_version") != SCHEMA_VERSION:
         return None
     return data
@@ -224,9 +244,7 @@ def _load_run(task_id: str) -> tuple[dict | None, tuple | None]:
     if results is None:
         return None, (jsonify({"error": "Results not found or not ready"}), 404)
 
-    metrics_path = os.path.join(
-        pipeline.history_dir, safe_task_id, "technical_metrics.json"
-    )
+    metrics_path = os.path.join(_run_dir(safe_task_id) or "", "technical_metrics.json")
     metrics = (_read_json(metrics_path) or {}).get("metrics", {})
     return {**results, "metrics": metrics}, None
 
@@ -244,6 +262,12 @@ def _run_status(data: dict) -> str:
     belongs to a run whose server died: it counts as stopped."""
     status = data.get("status", RUN_COMPLETED)
     return RUN_STOPPED if status == RUN_RUNNING else status
+
+
+def _title_of(folder: str) -> str | None:
+    """The name a run was given, or None for the default one."""
+    title = (_read_json(os.path.join(folder, "meta.json")) or {}).get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else None
 
 
 def _resolve_providers(judge: str, candidates: list, kind: str):
@@ -473,10 +497,11 @@ def get_history():
             continue
 
         tag_name, timestamp = _parse_task_id(task_id)
+        title = _title_of(_run_dir(task_id))
         runs.append(
             {
                 "task_id": task_id,
-                "tag_name": tag_name,
+                "tag_name": title or tag_name,
                 "timestamp": timestamp,
                 "models_tested": len(data["summary"]["models"]),
                 "questions_count": len(data["questions_results"]),
@@ -540,6 +565,61 @@ def export_results(task_id: str):
     response.headers["Content-Disposition"] = f'attachment; filename="{task_id}.{fmt}"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route("/api/results/<task_id>", methods=["DELETE"])
+def delete_run(task_id: str):
+    """Deletes a saved run. A run in progress cannot be deleted.
+
+    Returns:
+        Response: 200 with the task id; 400 for an invalid id, 404 for a
+            missing run and 409 while the run is in progress.
+    """
+    folder = _run_dir(task_id)
+    if folder is None:
+        return jsonify({"error": "Invalid task_id"}), 400
+    if TASKS.get(task_id, {}).get("status") == "started":
+        return jsonify({"error": "The run is in progress."}), 409
+    if not os.path.isdir(folder):
+        return jsonify({"error": "Results not found or not ready"}), 404
+
+    shutil.rmtree(folder)
+    TASKS.pop(task_id, None)
+    return jsonify({"task_id": task_id}), 200
+
+
+@app.route("/api/results/<task_id>/title", methods=["PUT"])
+def rename_run(task_id: str):
+    """Gives a saved run a name. An empty title restores the default one.
+
+    Returns:
+        Response: {"task_id", "title"} (title is null for the default one); 400
+            for an invalid id or title, 404 for a missing run.
+    """
+    folder = _run_dir(task_id)
+    if folder is None:
+        return jsonify({"error": "Invalid task_id"}), 400
+
+    data = request.get_json(silent=True)
+    title = data.get("title") if isinstance(data, dict) else None
+    if not isinstance(title, str):
+        return jsonify({"error": "Field 'title' must be a string."}), 400
+    title = " ".join(title.split())
+    if len(title) > MAX_TITLE_LENGTH:
+        error = f"Field 'title' is too long (max {MAX_TITLE_LENGTH})."
+        return jsonify({"error": error}), 400
+    if _read_run(task_id) is None:
+        return jsonify({"error": "Results not found or not ready"}), 404
+
+    path = os.path.join(folder, "meta.json")
+    if title:
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump({"title": title}, f, ensure_ascii=False)
+        os.replace(temporary, path)
+    elif os.path.exists(path):
+        os.remove(path)
+    return jsonify({"task_id": task_id, "title": title or None}), 200
 
 
 @app.route("/api/connection", methods=["GET"])

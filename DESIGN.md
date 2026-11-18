@@ -121,6 +121,8 @@ Status (derived from existing state only):
 | stop requested | activity dot and `stopping · 38:05 · 181 / 217`; no `stop` button |
 | running screen, run stopped | `stopped · 38:05 · 181 / 217` (muted) |
 | running screen, run failed | `failed · 38:05 · 181 / 217` (warn) |
+| running screen, connection lost | `failed · 38:05 · 181 / 217` (warn); the notice offers `reconnect` (the run may still go on the server) |
+| another screen, run stopped or failed | `stopped · …` (muted) or `failed · …` (warn) and `back to run` |
 | run finished while another screen is shown | `finished · 38:05 · 217 / 217` and `open results` |
 | results | run name |
 | idle, connecting | `connecting…` |
@@ -273,7 +275,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 
 **Stop and resume.** `stop` in the topbar asks the server to stop. The status becomes `stopping` and an info strip says that the call in flight is not interrupted (a large local model can take up to 10 minutes); the run stops between two steps, unloads its models and keeps everything finished. Then the screen shows `stopped`: an info strip with the steps done, the buttons `resume` and `back to setup`, and the steps still to come as `stopped` cells. The run is saved after every step, so `resume` also works from the archive, after an error and after a restart of the server; the stream of a resumed run starts with the events of the finished steps, so the rows fill in the same way as in a live run. Only one run is in progress at a time.
 
-**Errors.** A failed run shows a warn notice with `back to setup`, and `resume` when the server reported the failure. Rows in flight when the stream breaks become `error · interrupted`. The connection is not reopened automatically, because the server replays the stream from the start.
+**Errors.** A failed run shows a warn notice with `back to setup`, and `resume` when the server reported the failure. Rows in flight when the stream breaks become `error · interrupted`. A broken stream shows a warn notice with `reconnect`, which opens the stream again: the server replays the events from the start, so the rows are rebuilt and the clock keeps running. `resume` is offered when the server failed the run; if the run is still going, `resume` reconnects instead.
 
 ### 5.3 Results
 
@@ -330,7 +332,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 
 ### 5.4 Archive
 
-A list in the right panel. Each item: `py-15 border-b border-line`; the title (`text-subheading`; the open run is `text-fg` with a leading `size-6` filled marker, others are muted); three muted lines (date, `N models · N qs`, `judge: <full name>`). Newest first (the time is read from the end of the run id, with the stored timestamp as a fallback). A stopped or failed run has a fourth line (`stopped · 31 / 73 steps`, `failed · …`) and can be opened and resumed. Items stay open while a run is in progress. Empty and error states have their own muted line or warn notice with `reload`.
+A list in the right panel. Each item: `py-15 border-b border-line`; the title (`text-subheading`; the open run is `text-fg` with a leading `size-6` filled marker, others are muted); three muted lines (date, `N models · N qs`, `judge: <full name>`). Newest first (the time is read from the end of the run id, with the stored timestamp as a fallback). A stopped or failed run has a fourth line (`stopped · 31 / 73 steps`, `failed · …`) and can be opened and resumed. Items stay open while a run is in progress. Empty and error states have their own muted line or warn notice with `reload`. Under the lines of an item: `rename` and `delete` (muted text buttons). `rename` swaps them for a field with `save` and `cancel`; an empty name restores the default one. `delete` asks `delete this run?` with `delete` (warn) and `cancel`. A run in progress is not in the archive, so it cannot be deleted. The name is stored beside the run (`meta.json`); the run id and the file names of exports do not change.
 
 ## 6. States
 
