@@ -3,6 +3,32 @@
 
 import type { ApiResults } from "../types/results.js";
 import {
+    budgetFigures as figuresOf,
+    connectionBody,
+    formOf,
+    hostOf,
+    judgeChoices as judgeModelsOf,
+    judgeLatency,
+    maskedKey as maskKey,
+    preflightMeta as metaOf,
+    previewText,
+    routeOf,
+    connectionStatus as statusOf,
+    specRows as specRowsOf,
+    type Budget,
+    type Connection,
+    type ConnectionBody,
+    type ConnectionForm,
+    type ConnectionStatus,
+    type Figure,
+    type JudgeProvider,
+    type PreflightCheck,
+    type PreflightReport,
+    type Preview,
+    type Route,
+    type SpecRow,
+} from "./lib.ts";
+import {
     CASES_MAX_BYTES,
     CASES_MAX_COUNT,
     CASES_TOO_LARGE,
@@ -32,10 +58,15 @@ import {
     type PayloadCase,
     type PhaseFigures,
     type PhaseGroup,
+    type EvalEntry,
+    type QuestionCard,
     type Report,
+    type ReportModel,
+    type ReportReference,
     type Step,
     type TreeNode,
     RUNNING_MATRIX,
+    CELL_LEGEND,
     activeQuestion,
     buildMatrix,
     columnWindow,
@@ -59,7 +90,21 @@ import {
     type SortKey,
     type TableRow,
 } from "./overview.ts";
-import { buildScoreRows, nextScoreSort, sortScoreRows, type ScoreRow, type ScoreSort } from "./answers.ts";
+import {
+    ANSWERS_SHOWN,
+    QUESTIONS_SHOWN,
+    REFERENCES_SHOWN,
+    buildScoreRows,
+    hiddenCount,
+    initialFolds,
+    nextScoreSort,
+    sortScoreRows,
+    visible,
+    withRevealed,
+    type Folds,
+    type ScoreRow,
+    type ScoreSort,
+} from "./answers.ts";
 import { barStates, faviconHref, type BarState } from "./favicon.ts";
 
 // One event of /api/stream/<task_id>, see DESIGN.md (data contract).
@@ -76,9 +121,17 @@ interface SseEvent {
     message?: string;
 }
 
+// What a run is made of: enough to build its rows again when it is resumed.
+interface RunConfig {
+    judge: string;
+    cloud: boolean;
+    candidates: string[];
+    questions: number;
+}
+
 interface RunState {
     id: string | null;
-    status: "idle" | "running" | "done" | "error";
+    status: "idle" | "running" | "stopping" | "stopped" | "done" | "error";
     steps: Step[];
     pos: Record<string, number>; // step key -> index in `steps` (a lookup through the proxy stays reactive)
     seen: Record<string, boolean>; // load groups and phases that already had a first call
@@ -89,6 +142,10 @@ interface RunState {
     endedAt: number | null;
     now: number;
     error: string;
+    resumable: boolean; // the server failed the run: it can be resumed
+    reconnectable: boolean; // the stream broke: the run may still go on, the stream can be reopened
+    attention: boolean; // finished while another screen was open
+    config: RunConfig | null;
     phases: Record<string, PhaseFigures>; // phase -> figures, see updateRun()
     questions: number;
     active: number; // the question in progress (0-based), the anchor of the matrix window
@@ -118,6 +175,8 @@ interface TopStatus {
     tone: string;
     dot: boolean;
     go: boolean;
+    stop: boolean;
+    open: boolean;
     text: string;
 }
 
@@ -176,6 +235,10 @@ document.addEventListener("alpine:init", () => {
     let source: EventSource | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
     let loadWatch: Step[] = []; // rows that may still show the load notice
+    // The estimate of the budget follows the form; the request waits until the typing stops.
+    let estimateTimer: ReturnType<typeof setTimeout> | null = null;
+    let estimateToken = 0; // ignores a late reply of a superseded request
+    let estimateKeyLast = "";
 
     const SLOW_LOAD_MS = 8000;
 
@@ -214,6 +277,10 @@ document.addEventListener("alpine:init", () => {
         endedAt: null,
         now: 0,
         error: "",
+        resumable: false,
+        reconnectable: false,
+        attention: false,
+        config: null,
         phases: phaseStats([], PHASE_GROUPS),
         questions: 0,
         active: 0,
@@ -233,12 +300,26 @@ document.addEventListener("alpine:init", () => {
         sections: { overview: "summary", answers: "scores" } as Record<string, string>, // the section nav, per tab
 
         phaseGroups: PHASE_GROUPS,
+        cellLegend: CELL_LEGEND,
 
         models: [] as string[],
         names: {} as Record<string, string>, // full model name -> display name (see shortNames)
         modelsLoaded: false,
         judge: "",
-        judgeCloud: false,
+        judgeProvider: "ollama" as JudgeProvider,
+        connection: null as Connection | null, // the saved connection: there is no key in it
+        connectionLoaded: false,
+        connectionEditing: false,
+        connectionBusy: false,
+        connectionError: "",
+        connectionRev: 0, // changes with the saved connection: the estimate depends on its prices
+        connectionForm: formOf(null, "") as ConnectionForm,
+        preflight: null as PreflightReport | null,
+        preflightBusy: false,
+        budget: null as Budget | null,
+        preview: null as Preview | null,
+        estimating: false,
+        estimateError: "",
         selected: [] as string[],
         baseRationale: "",
         cases: [newCase()] as TestCase[],
@@ -251,7 +332,9 @@ document.addEventListener("alpine:init", () => {
         historyError: "",
         activeRunId: null as string | null,
         resultsError: "",
+        controlError: "", // stop and resume
         openAnswers: {} as Record<string, boolean>, // eval block anchor -> true: its answer text is rendered
+        folds: initialFolds([], []) as Folds, // which model rows and question cards are opened
         run: freshRun(),
         matrixWidth: 0, // px, from a ResizeObserver
         followCurrent: true,
@@ -271,6 +354,24 @@ document.addEventListener("alpine:init", () => {
         init(): void {
             void this.loadModels();
             void this.loadHistory();
+            void this.loadConnection();
+            // A judge that is not among the models of its provider becomes the first one.
+            Alpine.effect(() => this.ensureJudge());
+            Alpine.effect(() => {
+                const key = this.estimateKey;
+                if (key === estimateKeyLast) return;
+                estimateKeyLast = key;
+                if (estimateTimer) clearTimeout(estimateTimer);
+                if (!key) {
+                    estimateToken += 1;
+                    this.budget = null;
+                    this.preview = null;
+                    this.estimateError = "";
+                    this.estimating = false;
+                    return;
+                }
+                estimateTimer = setTimeout(() => void this.refreshEstimate(key), 400);
+            });
             // The tab shows the state of the run: its title and its icon.
             let icon = "";
             Alpine.effect(() => {
@@ -288,15 +389,19 @@ document.addEventListener("alpine:init", () => {
             return pad2(index);
         },
 
-        // A run is in progress: the form and the archive are locked, on every
-        // screen (the wordmark can lead away from the running screen).
+        // A run is in progress (or stopping): the form is locked, on every screen
+        // (the wordmark can lead away from the running screen). The archive is not.
         get busy(): boolean {
-            return this.run.status === "running";
+            return this.run.status === "running" || this.run.status === "stopping";
         },
 
         get pageTitle(): string {
-            if (this.run.status === "running") {
-                return `lmao | ${fmtClock(this.elapsed)} ${this.run.done} / ${this.run.total}`;
+            if (this.busy) {
+                const lead = this.run.status === "stopping" ? "stopping" : fmtClock(this.elapsed);
+                return `lmao | ${lead} ${this.run.done} / ${this.run.total}`;
+            }
+            if (this.run.status === "stopped" && this.view === "running") {
+                return `lmao | stopped ${this.run.done} / ${this.run.total}`;
             }
             if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
             return "lmao";
@@ -305,6 +410,12 @@ document.addEventListener("alpine:init", () => {
         // The four bars of the icon are the four phases of a run.
         get faviconBars(): BarState[] {
             return barStates(this.run.phases, this.run.status);
+        },
+
+        // The opened run can be continued: it was stopped or failed.
+        get resumable(): boolean {
+            const status = this.results?.status;
+            return Boolean(status) && status !== "completed" && !this.busy;
         },
 
         get runTitle(): string | null {
@@ -323,34 +434,61 @@ document.addEventListener("alpine:init", () => {
         },
 
         // Centre of the topbar. Built from the existing state only.
-        // `go`: the run is in progress but another screen is shown.
+        // `go`: a run is in progress but another screen is shown. `stop`: the run
+        // can be stopped. `open`: a run finished while another screen was open.
         get topStatus(): TopStatus {
-            if (this.run.status === "running") {
+            const run = this.run;
+            const figures = `${fmtClock(this.elapsed)} · ${run.done} / ${run.total}`;
+            const base = { dot: false, go: false, stop: false, open: false };
+            if (this.busy) {
+                const stopping = run.status === "stopping";
                 return {
                     tone: "text-fg",
                     dot: true,
                     go: this.view !== "running",
-                    text: `running · ${fmtClock(this.elapsed)} · ${this.run.done} / ${this.run.total}`,
+                    stop: !stopping,
+                    open: false,
+                    text: `${stopping ? "stopping" : "running"} · ${figures}`,
                 };
             }
-            if (this.view === "running" && this.run.status === "error") {
-                return { tone: "text-warn", dot: false, go: false, text: "stopped" };
+            if (this.view === "running" && run.status === "stopped") {
+                return { ...base, tone: "text-fg-muted", text: `stopped · ${figures}` };
+            }
+            if (this.view === "running" && run.status === "error") {
+                return { ...base, tone: "text-warn", text: `failed · ${figures}` };
+            }
+            if (
+                (run.status === "stopped" || run.status === "error") &&
+                this.view !== "running"
+            ) {
+                const failed = run.status === "error";
+                return {
+                    ...base,
+                    tone: failed ? "text-warn" : "text-fg-muted",
+                    go: true,
+                    text: `${failed ? "failed" : "stopped"} · ${figures}`,
+                };
+            }
+            if (run.attention) {
+                return { ...base, tone: "text-fg", open: true, text: `finished · ${figures}` };
             }
             if (this.view === "results") {
-                return { tone: "text-fg", dot: false, go: false, text: this.runTitle || "" };
+                return { ...base, tone: "text-fg", text: this.runTitle || "" };
             }
             if (!this.modelsLoaded) {
-                return { tone: "text-fg-muted", dot: false, go: false, text: "connecting…" };
+                return { ...base, tone: "text-fg-muted", text: "connecting…" };
             }
             if (this.models.length === 0) {
-                return { tone: "text-warn", dot: false, go: false, text: "no models found" };
+                return { ...base, tone: "text-warn", text: "no models found" };
             }
             const n = this.models.length;
+            const latency = this.judgeProvider === "openai" ? judgeLatency(this.preflight) : null;
+            const judgeNote =
+                latency === null ? "" : ` · judge ${hostOf(this.connection?.base_url)} ${latency} ms`;
             return {
+                ...base,
                 tone: "text-fg-muted",
-                dot: false,
-                go: false,
-                text: `ollama · ${n} model${n === 1 ? "" : "s"}`,
+                text: `ollama · ${n} model${n === 1 ? "" : "s"}${judgeNote}`,
             };
         },
 
@@ -365,7 +503,13 @@ document.addEventListener("alpine:init", () => {
         updateRun(): void {
             const run = this.run;
             run.phases = phaseStats(run.steps, this.phaseGroups);
-            run.matrix = buildMatrix(run.steps, run.questions, (m) => this.label(m), run.cloud);
+            run.matrix = buildMatrix(
+                run.steps,
+                run.questions,
+                (m) => this.label(m),
+                run.cloud,
+                run.status === "stopped",
+            );
             run.current = nowRows(run.steps);
             const active = activeQuestion(run.steps);
             // Between two steps nothing runs: keep the last question.
@@ -452,9 +596,11 @@ document.addEventListener("alpine:init", () => {
             this.followCurrent = false;
         },
 
-        // The mark of a cell, 18px (the template adds the ring and the dots):
-        // outline = waiting for the next step, filled = progress, warn = error.
-        // The only animation is the breathing of the live marks.
+        // The mark of a cell, 18px (12px in the legend): outline = waiting for the
+        // next step, filled = progress, warn = error. The only animation is the
+        // breathing of the live marks. Every state is a class and never an x-show:
+        // Alpine shows an x-show element one frame later but hides it at once, so a
+        // step that finished within a frame (0.0 s) left its old mark on the cell.
         cellClass(state: CellState): string {
             const classes: Record<CellState, string> = {
                 planned: "border border-line",
@@ -462,10 +608,22 @@ document.addEventListener("alpine:init", () => {
                 ready: "border border-fg",
                 grading: "border border-fg",
                 graded: "bg-fg",
-                generation_error: "border border-warn",
-                judge_error: "border-2 border-fg",
+                generation_error: "bg-warn",
+                judge_error: "border border-fg",
+                stopped: "border border-fg-muted",
             };
             return classes[state];
+        },
+
+        // The small square (or dash) inside the mark; hidden when a state has none.
+        cellMark(state: CellState, small = false): string {
+            const inset = small ? "inset-2" : "inset-3";
+            const marks: Partial<Record<CellState, string>> = {
+                grading: `${inset} bg-link animate-breathe motion-reduce:animate-none`,
+                judge_error: `${inset} bg-warn`,
+                stopped: `${small ? "inset-x-2" : "inset-x-3"} top-1/2 h-2 -translate-y-1/2 bg-fg-muted`,
+            };
+            return marks[state] ?? "hidden";
         },
 
         // Blue only while the model is in memory, white once it is done.
@@ -477,13 +635,19 @@ document.addEventListener("alpine:init", () => {
         // First screen: the state of the form as status rows.
         get checklist(): ChecklistRow[] {
             let judge: { state: string; meta: string };
-            if (!this.modelsLoaded) judge = { state: "queued", meta: "loading models…" };
+            if (this.judgeProvider === "openai") {
+                if (this.connectionEditing) judge = { state: "queued", meta: "editing connection" };
+                else if (!this.connectionLoaded) judge = { state: "queued", meta: "loading connection…" };
+                else if (!this.connection) judge = { state: "error", meta: "no connection saved" };
+                else if (!this.judgeName) judge = { state: "queued", meta: "set the judge model" };
+                else judge = { state: "done", meta: `${this.judgeName} · ${hostOf(this.connection.base_url)}` };
+            } else if (!this.modelsLoaded) judge = { state: "queued", meta: "loading models…" };
             else if (this.models.length === 0) {
                 judge = { state: "error", meta: "no models. is ollama running?" };
             } else if (this.judge) {
                 judge = {
                     state: "done",
-                    meta: this.label(this.judge) + (this.judgeCloud ? " · cloud" : ""),
+                    meta: this.label(this.judge) + (this.judgeProvider === "ollama_cloud" ? " · cloud" : ""),
                 };
             } else judge = { state: "queued", meta: "not selected" };
 
@@ -539,10 +703,206 @@ document.addEventListener("alpine:init", () => {
             this.modelsLoaded = true;
             // Let x-for render the <option>s before the value is set.
             await magic(this).$nextTick();
-            if (!this.models.includes(this.judge)) {
-                this.judge = this.models[0] ?? "";
-            }
+            this.ensureJudge();
             this.selected = this.selected.filter((m) => this.models.includes(m));
+        },
+
+        // --- judge ----------------------------------------------------------
+
+        get remoteJudge(): boolean {
+            return this.judgeProvider !== "ollama";
+        },
+
+        // The model the judge calls name.
+        get judgeName(): string {
+            return this.judgeProvider === "openai" ? (this.connection?.model ?? "") : this.judge;
+        },
+
+        get judgeChoices(): string[] {
+            return judgeModelsOf(this.models, this.judgeProvider);
+        },
+
+        ensureJudge(): void {
+            if (this.judgeProvider === "openai") return;
+            const list = this.judgeChoices;
+            if (!list.includes(this.judge)) this.judge = list[0] ?? "";
+        },
+
+        get route(): Route | null {
+            return routeOf(this.judgeProvider, this.selected.length, this.connection?.base_url ?? null);
+        },
+
+        // --- openai connection ----------------------------------------------
+
+        get connectionHost(): string {
+            return hostOf(this.connection?.base_url) || (this.connection?.base_url ?? "");
+        },
+
+        get maskedKey(): string {
+            return maskKey(this.connection?.key_last4 ?? "");
+        },
+
+        get specRows(): SpecRow[] {
+            if (!this.connection) return [];
+            const body = this.preview?.body as { seed?: unknown } | undefined;
+            return specRowsOf(this.connection, this.preflight, body?.seed);
+        },
+
+        get connectionStatus(): ConnectionStatus {
+            return statusOf(this.preflight, this.preflightBusy);
+        },
+
+        preflightMeta(check: PreflightCheck): string {
+            return metaOf(check);
+        },
+
+        async loadConnection(): Promise<void> {
+            try {
+                const response = await fetch("/api/connection");
+                const data: { connection?: Connection | null } = await response.json();
+                this.connection = data.connection ?? null;
+            } catch (e) {
+                console.error("Failed to load the connection:", e);
+                this.connection = null;
+            }
+            this.connectionLoaded = true;
+        },
+
+        editConnection(): void {
+            this.connectionForm = formOf(this.connection, this.connection?.model ?? "");
+            this.connectionError = "";
+            this.connectionEditing = true;
+        },
+
+        cancelConnection(): void {
+            this.connectionForm = formOf(null, "");
+            this.connectionEditing = false;
+            this.connectionError = "";
+        },
+
+        // True when the connection is saved. An empty key keeps the saved one.
+        async saveConnection(): Promise<boolean> {
+            this.connectionError = "";
+            let body: ConnectionBody;
+            try {
+                body = connectionBody(this.connectionForm);
+            } catch (e) {
+                this.connectionError = errorText(e);
+                return false;
+            }
+            this.connectionBusy = true;
+            try {
+                const response = await fetch("/api/connection", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.connection = data.connection;
+                this.connectionForm = formOf(null, ""); // the typed key is not kept
+                this.connectionEditing = false;
+                this.connectionRev += 1;
+                this.preflight = null;
+                return true;
+            } catch (e) {
+                this.connectionError = errorText(e);
+                return false;
+            } finally {
+                this.connectionBusy = false;
+            }
+        },
+
+        // The key never comes from the request: the form saves first, then the
+        // saved connection is tested.
+        async testConnection(): Promise<void> {
+            if (this.connectionEditing && !(await this.saveConnection())) return;
+            if (!this.connection) return;
+            if (!this.connection.model) {
+                this.connectionError = "set the judge model in the connection first.";
+                return;
+            }
+            this.connectionError = "";
+            this.preflightBusy = true;
+            try {
+                const response = await fetch("/api/connection/test", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.preflight = data as PreflightReport;
+                this.announce(this.preflight.ok ? "connection test passed." : "connection test failed.");
+            } catch (e) {
+                this.connectionError = errorText(e);
+            } finally {
+                this.preflightBusy = false;
+            }
+        },
+
+        async removeConnection(): Promise<void> {
+            this.connectionError = "";
+            try {
+                const response = await fetch("/api/connection", { method: "DELETE" });
+                if (!response.ok) throw new Error(`request failed (${response.status})`);
+                this.connection = null;
+                this.connectionEditing = false;
+                this.connectionRev += 1;
+                this.preflight = null;
+            } catch (e) {
+                this.connectionError = errorText(e);
+            }
+        },
+
+        // --- budget and request preview -------------------------------------
+
+        // Empty while there is nothing to estimate: a local judge sends nothing out.
+        get estimateKey(): string {
+            if (this.judgeProvider === "ollama") return "";
+            if (this.judgeProvider === "openai" && (!this.connection || this.connectionEditing)) return "";
+            const payload = this.buildPayload(true);
+            if (!payload.judge || !payload.candidates.length || !payload.test_cases.length) return "";
+            return JSON.stringify({ payload, rev: this.connectionRev });
+        },
+
+        async refreshEstimate(key: string): Promise<void> {
+            const token = ++estimateToken;
+            this.estimating = true;
+            const { payload } = JSON.parse(key) as { payload: EvaluatePayload };
+            const post = async (url: string) => {
+                try {
+                    const response = await fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    return { ok: response.ok, data };
+                } catch (e) {
+                    return { ok: false, data: { error: errorText(e) } };
+                }
+            };
+            const [budget, preview] = await Promise.all([post("/api/budget"), post("/api/preview")]);
+            if (token !== estimateToken) return;
+            this.estimating = false;
+            this.budget = budget.ok ? (budget.data as Budget) : null;
+            this.preview = preview.ok ? (preview.data as Preview) : null;
+            const failed = !budget.ok ? budget : !preview.ok ? preview : null;
+            this.estimateError = failed ? failed.data.error || "the estimate failed." : "";
+        },
+
+        get budgetFigures(): Figure[] {
+            if (!this.budget) return [];
+            return figuresOf(this.budget, this.judgeProvider === "openai" ? this.judgeName : null);
+        },
+
+        get previewBody(): string {
+            return this.preview ? previewText(this.preview) : "";
         },
 
         // --- archive --------------------------------------------------------
@@ -560,10 +920,48 @@ document.addEventListener("alpine:init", () => {
             this.historyLoaded = true;
         },
 
-        // Opens a saved run. Disabled while a run is in progress: the running
-        // screen would be lost.
+        async renameRun(id: string, title: string): Promise<boolean> {
+            try {
+                const response = await fetch(`/api/results/${encodeURIComponent(id)}/title`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                await this.loadHistory();
+                return true;
+            } catch (e) {
+                this.historyError = errorText(e);
+                return false;
+            }
+        },
+
+        async deleteRun(id: string): Promise<boolean> {
+            try {
+                const response = await fetch(`/api/results/${encodeURIComponent(id)}`, {
+                    method: "DELETE",
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                if (this.activeRunId === id) this.goHome();
+                if (this.run.id === id) this.run = freshRun();
+                await this.loadHistory();
+                return true;
+            } catch (e) {
+                this.historyError = errorText(e);
+                return false;
+            }
+        },
+
+        // Opens a saved run. Allowed while a run is in progress: that run keeps its
+        // own state in `this.run`, and the topbar leads back to it.
         async openRun(id: string): Promise<void> {
-            if (this.busy) return;
+            if (id === this.run.id) this.run.attention = false;
             const token = ++openToken;
             this.activeRunId = id;
             this.view = "results";
@@ -576,6 +974,7 @@ document.addEventListener("alpine:init", () => {
             this.resultsTab = "overview";
             this.sections = { overview: "summary", answers: "scores" };
             this.openAnswers = {};
+            this.folds = initialFolds([], []);
             this.resultsError = "";
             try {
                 const response = await fetch(`/api/results/${encodeURIComponent(id)}`);
@@ -602,6 +1001,7 @@ document.addEventListener("alpine:init", () => {
                 this.overview = buildOverview(data as ApiResults);
                 this.scores = buildScoreRows(report.models, this.overview.models);
                 this.report = report;
+                this.folds = initialFolds(report.models, report.questionCards);
                 this.results = data as ApiResults;
             } catch (e) {
                 console.error("Failed to open run:", e);
@@ -680,7 +1080,11 @@ document.addEventListener("alpine:init", () => {
         // --- start ----------------------------------------------------------
 
         validate(): string {
-            if (!this.judge) {
+            if (this.judgeProvider === "openai") {
+                if (!this.connection) return "connect the openai api first.";
+                if (this.connectionEditing) return "save the connection first.";
+                if (!this.judgeName) return "set the judge model in the connection.";
+            } else if (!this.judgeName) {
                 return "choose a judge model.";
             }
             if (this.selected.length === 0) {
@@ -694,13 +1098,17 @@ document.addEventListener("alpine:init", () => {
             return "";
         },
 
-        buildPayload(): EvaluatePayload {
+        // `estimate`: only the cases that have a question, the way the budget and
+        // the preview take them while the form is still being filled.
+        buildPayload(estimate = false): EvaluatePayload {
             return {
-                judge: this.judge,
-                judge_provider: this.judgeCloud ? "ollama_cloud" : "ollama",
+                judge: this.judgeName,
+                judge_provider: this.judgeProvider,
                 candidates: [...this.selected],
                 base_rationale: this.baseRationale.trim(),
-                test_cases: this.cases.map((c) => payloadCase(c)),
+                test_cases: this.cases
+                    .filter((c) => !estimate || c.question.trim())
+                    .map((c) => payloadCase(c)),
             };
         },
 
@@ -720,7 +1128,12 @@ document.addEventListener("alpine:init", () => {
                 if (!response.ok) {
                     throw new Error(data.error || `request failed (${response.status})`);
                 }
-                this.startRun(data.task_id, payload);
+                this.startRun(data.task_id, {
+                    judge: payload.judge,
+                    cloud: payload.judge_provider !== "ollama",
+                    candidates: payload.candidates,
+                    questions: payload.test_cases.length,
+                });
             } catch (e) {
                 this.formError = errorText(e);
             } finally {
@@ -730,12 +1143,12 @@ document.addEventListener("alpine:init", () => {
 
         // --- running --------------------------------------------------------
 
-        startRun(taskId: string, payload: EvaluatePayload): void {
+        startRun(taskId: string, config: RunConfig): void {
             this.stopStream();
             const steps = buildSteps(
-                payload.judge,
-                payload.candidates,
-                payload.test_cases.length,
+                config.judge,
+                config.candidates,
+                config.questions,
                 this.names,
             );
             const pos: Record<string, number> = {};
@@ -748,10 +1161,11 @@ document.addEventListener("alpine:init", () => {
                 status: "running",
                 steps,
                 pos,
-                cloud: payload.judge_provider !== "ollama",
+                cloud: config.cloud,
+                config,
                 // Corrected by the first event that carries `progress`.
-                total: totalSteps(payload.test_cases.length, new Set(payload.candidates).size),
-                questions: payload.test_cases.length,
+                total: totalSteps(config.questions, new Set(config.candidates).size),
+                questions: config.questions,
                 startedAt: now,
                 now,
             };
@@ -759,7 +1173,8 @@ document.addEventListener("alpine:init", () => {
             this.matrixStart = 0;
             this.updateRun();
             loadWatch = [];
-            this.activeRunId = taskId;
+            this.activeRunId = null; // the running screen is not an archive item
+            this.controlError = "";
             this.setupOpen = false;
             this.view = "running";
 
@@ -772,7 +1187,9 @@ document.addEventListener("alpine:init", () => {
             source.onerror = () => {
                 if (this.run.status !== "running") return;
                 this.failRun(
-                    "connection to the server was lost. the run may still finish: check the archive.",
+                    "connection to the server was lost. the run may still be going: reconnect to see it.",
+                    false,
+                    true,
                 );
             };
         },
@@ -818,8 +1235,13 @@ document.addEventListener("alpine:init", () => {
             }
 
             if (event.type === "completed") return this.finishRun();
+            if (event.type === "cancelling") {
+                this.run.status = "stopping";
+                return;
+            }
+            if (event.type === "cancelled") return this.stoppedRun();
             if (event.type === "error") {
-                return this.failRun(event.message || "the evaluation failed.");
+                return this.failRun(event.message || "the evaluation failed.", true);
             }
 
             const match = /^([a-z]+)_(start|done)$/.exec(event.type || "");
@@ -901,12 +1323,18 @@ document.addEventListener("alpine:init", () => {
             this.run.status = "done";
             this.run.endedAt = Date.now();
             this.stopStream();
-            this.announce("evaluation finished. opening the results.");
+            // Someone browsing the archive is not pulled away from it.
+            const watching = this.view === "running";
+            this.announce(
+                watching ? "evaluation finished. opening the results." : "evaluation finished.",
+            );
             void this.loadHistory();
-            if (this.run.id) void this.openRun(this.run.id);
+            if (!this.run.id) return;
+            if (watching) void this.openRun(this.run.id);
+            else this.run.attention = true;
         },
 
-        failRun(message: string): void {
+        failRun(message: string, resumable = false, reconnectable = false): void {
             // Rows that were in flight will never finish: stop their animation.
             this.run.steps.forEach((step) => {
                 if (step.state === "running") {
@@ -917,12 +1345,101 @@ document.addEventListener("alpine:init", () => {
             this.updateRun();
             this.run.status = "error";
             this.run.error = message; // announced by the role="alert" notice
+            this.run.resumable = resumable;
+            this.run.reconnectable = reconnectable;
             this.run.endedAt = Date.now();
             this.stopStream();
+            void this.loadHistory(); // a failed run is in the archive and can be resumed
+        },
+
+        // The server confirmed the stop: the last call has finished.
+        stoppedRun(): void {
+            this.run.status = "stopped";
+            this.run.endedAt = Date.now();
+            this.stopStream();
+            this.updateRun();
+            void this.loadHistory();
+            this.announce(`run stopped. ${this.run.done} of ${this.run.total} steps are done.`);
+        },
+
+        // The step in progress is not interrupted: the run stops after it.
+        async stopRun(): Promise<void> {
+            const id = this.run.id;
+            if (this.run.status !== "running" || !id) return;
+            this.controlError = "";
+            this.run.status = "stopping"; // at once: the server may take a moment
+            try {
+                const response = await fetch(`/api/evaluate/${encodeURIComponent(id)}/cancel`, {
+                    method: "POST",
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+            } catch (e) {
+                // Nothing was stopped: the run goes on.
+                if (this.run.status === "stopping") this.run.status = "running";
+                this.controlError = errorText(e);
+            }
+        },
+
+        // The stream broke but the run may still be going: open it again. The
+        // server replays the events from the start, so the rows are rebuilt.
+        reconnectRun(): void {
+            const { id, config, startedAt } = this.run;
+            if (!id || !config) return;
+            this.startRun(id, config);
+            if (startedAt) this.run.startedAt = startedAt; // the clock keeps running
+        },
+
+        // From the stopped screen or from the archive. The server replays the
+        // finished steps, so the rows are built the same way as for a live run.
+        async resumeRun(id: string): Promise<void> {
+            if (this.busy) return;
+            this.controlError = "";
+            try {
+                const config =
+                    this.run.id === id && this.run.config ? this.run.config : await this.configOf(id);
+                const response = await fetch(`/api/evaluate/${encodeURIComponent(id)}/resume`, {
+                    method: "POST",
+                });
+                // Still going on the server: connect to it instead of resuming.
+                if (response.status === 409 && this.run.id === id) return this.reconnectRun();
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `request failed (${response.status})`);
+                }
+                this.startRun(data.task_id, config);
+            } catch (e) {
+                this.controlError = errorText(e);
+            }
+        },
+
+        // The rows of a saved run, read from its results file.
+        async configOf(id: string): Promise<RunConfig> {
+            const response = await fetch(`/api/results/${encodeURIComponent(id)}`);
+            const data: Partial<ApiResults> & { error?: string } = await response
+                .json()
+                .catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
+            if (
+                !data.judge_model ||
+                !Array.isArray(data.candidates) ||
+                !Array.isArray(data.questions_results)
+            ) {
+                throw new Error("this run cannot be resumed: its file has an unexpected format.");
+            }
+            return {
+                judge: data.judge_model,
+                cloud: data.judge_provider !== "ollama",
+                candidates: data.candidates,
+                questions: data.questions_results.length,
+            };
         },
 
         // Back to the form: after an error the setup panel may still be closed.
         dismissRun(): void {
+            this.run = freshRun();
             this.view = "idle";
             this.setupOpen = true;
         },
@@ -931,13 +1448,13 @@ document.addEventListener("alpine:init", () => {
         // the topbar status and the first screen lead back to it.
         goHome(): void {
             this.view = "idle";
-            if (!this.busy) this.activeRunId = null;
+            this.activeRunId = null;
             if (magic(this).$refs?.main) magic(this).$refs.main.scrollTop = 0;
         },
 
         showRun(): void {
             this.view = "running";
-            this.activeRunId = this.run.id;
+            this.activeRunId = null;
         },
 
         // Comparison table -> a card or an eval block in 03 view. Both 03 views
@@ -949,6 +1466,15 @@ document.addEventListener("alpine:init", () => {
                 this.resultsView = view;
                 await magic(this).$nextTick();
             }
+            // A folded row or a hidden answer is not in the DOM: open it first.
+            this.folds = withRevealed(
+                this.folds,
+                this.report?.models ?? [],
+                this.report?.questionCards ?? [],
+                id,
+                this.resultsView as "model" | "question",
+            );
+            await magic(this).$nextTick();
             // The answer text exists only when opened: open it first, so the
             // scroll lands on the final layout.
             if (id.startsWith("answer-")) {
@@ -1033,6 +1559,55 @@ document.addEventListener("alpine:init", () => {
 
         toggleAnswer(id: string): void {
             this.openAnswers[id] = !this.openAnswers[id];
+        },
+
+        // --- folds of the answers tab ---------------------------------------
+
+        isFoldOpen(kind: "models" | "questions", anchor: string): boolean {
+            return Boolean(this.folds[kind][anchor]);
+        },
+
+        toggleFold(kind: "models" | "questions", anchor: string): void {
+            this.folds = {
+                ...this.folds,
+                [kind]: { ...this.folds[kind], [anchor]: !this.folds[kind][anchor] },
+            };
+        },
+
+        shownEntries(model: ReportModel): EvalEntry[] {
+            return visible(model.entries, ANSWERS_SHOWN, Boolean(this.folds.allAnswers[model.anchor]));
+        },
+
+        hiddenAnswers(model: ReportModel): number {
+            return hiddenCount(
+                model.entries.length,
+                ANSWERS_SHOWN,
+                Boolean(this.folds.allAnswers[model.anchor]),
+            );
+        },
+
+        showAllAnswers(anchor: string): void {
+            this.folds = { ...this.folds, allAnswers: { ...this.folds.allAnswers, [anchor]: true } };
+        },
+
+        get visibleCards(): QuestionCard[] {
+            const cards = this.report?.questionCards ?? [];
+            return visible(cards, QUESTIONS_SHOWN, this.folds.allQuestions);
+        },
+
+        get hiddenCards(): number {
+            const total = this.report?.questionCards.length ?? 0;
+            return hiddenCount(total, QUESTIONS_SHOWN, this.folds.allQuestions);
+        },
+
+        get visibleReferences(): ReportReference[] {
+            const list = this.report?.references ?? [];
+            return visible(list, REFERENCES_SHOWN, this.folds.allReferences);
+        },
+
+        get hiddenReferences(): number {
+            const total = this.report?.references.length ?? 0;
+            return hiddenCount(total, REFERENCES_SHOWN, this.folds.allReferences);
         },
 
         // [ and ] toggle the panels, Esc goes to the first screen.

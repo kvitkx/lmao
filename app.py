@@ -8,6 +8,8 @@ handles Server-Sent Events (SSE) for real-time UI updates, and manages task hist
 import json
 import os
 import re
+import shlex
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -23,11 +25,22 @@ from core.connection import (
     InvalidConnection,
     public_view,
 )
-from core.evaluator import DATA_DIR, SCHEMA_VERSION, EvaluationPipeline
+from core.evaluator import (
+    DATA_DIR,
+    RESUMABLE_RUNS,
+    RUN_COMPLETED,
+    RUN_RUNNING,
+    RUN_STOPPED,
+    SCHEMA_VERSION,
+    EvaluationPipeline,
+    judge_kwargs,
+    replay_events,
+)
 from core.export import to_csv, to_markdown
 from core.ollama_client import OllamaClient
 from core.openai_client import OpenAIClient
 from core.preflight import run_preflight
+from core.prompts import GRADE_SCHEMA, GRADER_SYSTEM, build_grading_prompt
 from core.provider import JUDGE_OLLAMA, JUDGE_OPENAI, JUDGE_PROVIDERS
 
 load_dotenv()
@@ -45,11 +58,16 @@ pipeline = EvaluationPipeline(ollama_client)
 connection_store = ConnectionStore(os.path.join(DATA_DIR, "connection.json"))
 
 _SAFE_TAG_RE = re.compile(r"[^a-zA-Z0-9_-]")
+_RUN_ID_RE = re.compile(r"run_[A-Za-z0-9_-]+")
+MAX_TITLE_LENGTH = 80
 _OPTIONAL_TEXT_FIELDS = ("tag", "specific_rationale", "reference")
 
 # An SSE stream that writes nothing never notices a closed connection, and
 # gunicorn has only a few threads. A comment line every few seconds fixes that.
 HEARTBEAT_SEC = 15
+
+# The last event of a stream: the run finished, failed or was stopped.
+FINAL_EVENTS = ("completed", "error", "cancelled")
 
 
 def _to_json(data: dict) -> str:
@@ -126,18 +144,29 @@ def update_task_status(task_id: str, payload: dict) -> None:
         payload["timestamp"] = datetime.now().isoformat()
         TASKS[task_id]["events"].append(payload)
 
-        if payload.get("type") in ["completed", "error"]:
+        if payload.get("type") in FINAL_EVENTS:
             TASKS[task_id]["status"] = payload.get("type")
 
 
-def _run_task(task_id: str, payload: dict, judge_provider=None) -> None:
+def _run_task(
+    task_id: str, payload: dict | None, judge_provider=None, saved: dict | None = None
+) -> None:
     """Runs the pipeline in a worker thread and reports a crash to the stream.
 
     Without this, an exception would end the thread silently and the SSE stream
-    would wait forever for a final event.
+    would wait forever for a final event. `saved` is a stopped run to resume,
+    and then `payload` is None.
     """
+    cancel = TASKS.get(task_id, {}).get("cancel")
     try:
-        pipeline.run_evaluation(task_id, payload, update_task_status, judge_provider)
+        pipeline.run_evaluation(
+            task_id,
+            payload,
+            update_task_status,
+            judge_provider,
+            saved=saved,
+            cancel=cancel,
+        )
     except Exception as e:
         update_task_status(
             task_id, {"type": "error", "message": f"Evaluation failed: {e}"}
@@ -156,10 +185,27 @@ def _read_json(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _run_dir(task_id: str) -> str | None:
+    """The folder of a run, or None if the id is not a run id.
+
+    The id must look like run_<tag>_<date>_<time>, and the resolved path must
+    stay inside the history directory.
+    """
+    if not isinstance(task_id, str) or not _RUN_ID_RE.fullmatch(task_id):
+        return None
+    base = os.path.realpath(pipeline.history_dir)
+    path = os.path.realpath(os.path.join(base, task_id))
+    if not path.startswith(base + os.sep):
+        return None
+    return path
+
+
 def _read_run(task_id: str) -> dict | None:
     """Reads the results of a run, or None if it is missing or not schema v2."""
-    path = os.path.join(pipeline.history_dir, task_id, "evaluation_results.json")
-    data = _read_json(path)
+    folder = _run_dir(task_id)
+    if folder is None:
+        return None
+    data = _read_json(os.path.join(folder, "evaluation_results.json"))
     if data is None or data.get("schema_version") != SCHEMA_VERSION:
         return None
     return data
@@ -198,11 +244,57 @@ def _load_run(task_id: str) -> tuple[dict | None, tuple | None]:
     if results is None:
         return None, (jsonify({"error": "Results not found or not ready"}), 404)
 
-    metrics_path = os.path.join(
-        pipeline.history_dir, safe_task_id, "technical_metrics.json"
-    )
+    metrics_path = os.path.join(_run_dir(safe_task_id) or "", "technical_metrics.json")
     metrics = (_read_json(metrics_path) or {}).get("metrics", {})
     return {**results, "metrics": metrics}, None
+
+
+def _active_task() -> str | None:
+    """The id of the run that is in progress, if any (one at a time)."""
+    for task_id, task in TASKS.items():
+        if task["status"] == "started":
+            return task_id
+    return None
+
+
+def _run_status(data: dict) -> str:
+    """The status of a saved run. A file that says "running" with no live task
+    belongs to a run whose server died: it counts as stopped."""
+    status = data.get("status", RUN_COMPLETED)
+    return RUN_STOPPED if status == RUN_RUNNING else status
+
+
+def _title_of(folder: str) -> str | None:
+    """The name a run was given, or None for the default one."""
+    title = (_read_json(os.path.join(folder, "meta.json")) or {}).get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
+
+def _resolve_providers(judge: str, candidates: list, kind: str):
+    """Finds the provider of the judge and checks the local models.
+
+    Returns:
+        tuple: (judge_provider, None) on success, where judge_provider is None
+            unless the judge lives at an OpenAI-compatible API, or
+            (None, (response, status)) ready to be returned from a view.
+    """
+    judge_provider = None
+    local_models = [judge, *candidates]
+    if kind == JUDGE_OPENAI:
+        connection = connection_store.load()
+        if connection is None:
+            error = "The OpenAI judge needs a saved connection."
+            return None, (jsonify({"error": error}), 400)
+        judge_provider = OpenAIClient(connection["base_url"], connection["api_key"])
+        # The judge lives at the API, so only the candidates must be installed.
+        local_models = candidates
+
+    installed = ollama_client.get_models()
+    missing = [model for model in dict.fromkeys(local_models) if model not in installed]
+    if missing:
+        error = f"Models are not installed: {', '.join(missing)}."
+        return None, (jsonify({"error": error}), 400)
+    return judge_provider, None
 
 
 @app.route("/", methods=["GET"])
@@ -248,22 +340,14 @@ def start_evaluation():
     if error:
         return jsonify({"error": error}), 400
 
-    judge_provider = None
-    local_models = [data["judge"], *data["candidates"]]
-    if data.get("judge_provider") == JUDGE_OPENAI:
-        connection = connection_store.load()
-        if connection is None:
-            return jsonify({"error": "The OpenAI judge needs a saved connection."}), 400
-        judge_provider = OpenAIClient(connection["base_url"], connection["api_key"])
-        # The judge lives at the API, so only the candidates must be installed.
-        local_models = data["candidates"]
+    if _active_task():
+        return jsonify({"error": "A run is already in progress."}), 409
 
-    installed = ollama_client.get_models()
-    missing = [model for model in dict.fromkeys(local_models) if model not in installed]
-    if missing:
-        return jsonify(
-            {"error": f"Models are not installed: {', '.join(missing)}."}
-        ), 400
+    judge_provider, error = _resolve_providers(
+        data["judge"], data["candidates"], data.get("judge_provider", JUDGE_OLLAMA)
+    )
+    if error:
+        return error
 
     first_tag = _sanitize_tag(data["test_cases"][0].get("tag", "run"))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -273,10 +357,76 @@ def start_evaluation():
     TASKS[task_id] = {
         "status": "started",
         "events": [{"type": "info", "message": "Task queued for execution."}],
+        "cancel": threading.Event(),
     }
 
     # Start the evaluation pipeline in a background thread.
     thread = threading.Thread(target=_run_task, args=(task_id, data, judge_provider))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"task_id": task_id, "status": "started"}), 202
+
+
+@app.route("/api/evaluate/<task_id>/cancel", methods=["POST"])
+def cancel_evaluation(task_id: str):
+    """Asks a run to stop. It stops between two steps, not in the middle of one.
+
+    Returns:
+        Response: 202 once the flag is set, 404 for an unknown task and 409 if
+            the run is not in progress. The stream ends with a `cancelled` event.
+    """
+    task = TASKS.get(task_id)
+    if task is None:
+        return jsonify({"error": "Task not found"}), 404
+    if task["status"] != "started":
+        return jsonify({"error": "The run is not in progress."}), 409
+
+    task["cancel"].set()
+    update_task_status(task_id, {"type": "cancelling"})
+    return jsonify({"task_id": task_id, "status": "stopping"}), 202
+
+
+@app.route("/api/evaluate/<task_id>/resume", methods=["POST"])
+def resume_evaluation(task_id: str):
+    """Continues a stopped or failed run from its saved steps.
+
+    Works from the archive too, so it also resumes a run that a server restart
+    cut off. The stream of the task starts over with the events of the steps
+    that are already done.
+
+    Returns:
+        Response: 202 with the task id; 400, 404 or 409 with the reason.
+    """
+    safe_task_id = secure_filename(task_id)
+    if not safe_task_id or safe_task_id != task_id:
+        return jsonify({"error": "Invalid task_id"}), 400
+    if _active_task():
+        return jsonify({"error": "A run is already in progress."}), 409
+
+    saved = _read_run(task_id)
+    if saved is None:
+        return jsonify({"error": "Results not found or not ready"}), 404
+    if saved.get("status", RUN_COMPLETED) not in RESUMABLE_RUNS:
+        return jsonify({"error": "The run is already complete."}), 409
+
+    judge_provider, error = _resolve_providers(
+        saved["judge_model"], saved["candidates"], saved["judge_provider"]
+    )
+    if error:
+        return error
+
+    TASKS[task_id] = {
+        "status": "started",
+        "events": [
+            {"type": "info", "message": "Run resumed."},
+            *replay_events(saved),
+        ],
+        "cancel": threading.Event(),
+    }
+    thread = threading.Thread(
+        target=_run_task, args=(task_id, None, judge_provider, saved)
+    )
     thread.daemon = True
     thread.start()
 
@@ -310,7 +460,7 @@ def stream_status(task_id: str):
                 last_sent = time.monotonic()
 
                 # Stop streaming if the task has finished or failed.
-                if event.get("type") in ["completed", "error"]:
+                if event.get("type") in FINAL_EVENTS:
                     break
                 idx += 1
             else:
@@ -339,19 +489,25 @@ def get_history():
 
     runs = []
     for task_id in os.listdir(pipeline.history_dir):
+        # The run in progress is shown on the running screen, not in the archive.
+        if TASKS.get(task_id, {}).get("status") == "started":
+            continue
         data = _read_run(task_id)
         if data is None:
             continue
 
         tag_name, timestamp = _parse_task_id(task_id)
+        title = _title_of(_run_dir(task_id))
         runs.append(
             {
                 "task_id": task_id,
-                "tag_name": tag_name,
+                "tag_name": title or tag_name,
                 "timestamp": timestamp,
                 "models_tested": len(data["summary"]["models"]),
                 "questions_count": len(data["questions_results"]),
                 "judge_model": data["judge_model"],
+                "status": _run_status(data),
+                "progress": data.get("progress"),
             }
         )
 
@@ -409,6 +565,61 @@ def export_results(task_id: str):
     response.headers["Content-Disposition"] = f'attachment; filename="{task_id}.{fmt}"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route("/api/results/<task_id>", methods=["DELETE"])
+def delete_run(task_id: str):
+    """Deletes a saved run. A run in progress cannot be deleted.
+
+    Returns:
+        Response: 200 with the task id; 400 for an invalid id, 404 for a
+            missing run and 409 while the run is in progress.
+    """
+    folder = _run_dir(task_id)
+    if folder is None:
+        return jsonify({"error": "Invalid task_id"}), 400
+    if TASKS.get(task_id, {}).get("status") == "started":
+        return jsonify({"error": "The run is in progress."}), 409
+    if not os.path.isdir(folder):
+        return jsonify({"error": "Results not found or not ready"}), 404
+
+    shutil.rmtree(folder)
+    TASKS.pop(task_id, None)
+    return jsonify({"task_id": task_id}), 200
+
+
+@app.route("/api/results/<task_id>/title", methods=["PUT"])
+def rename_run(task_id: str):
+    """Gives a saved run a name. An empty title restores the default one.
+
+    Returns:
+        Response: {"task_id", "title"} (title is null for the default one); 400
+            for an invalid id or title, 404 for a missing run.
+    """
+    folder = _run_dir(task_id)
+    if folder is None:
+        return jsonify({"error": "Invalid task_id"}), 400
+
+    data = request.get_json(silent=True)
+    title = data.get("title") if isinstance(data, dict) else None
+    if not isinstance(title, str):
+        return jsonify({"error": "Field 'title' must be a string."}), 400
+    title = " ".join(title.split())
+    if len(title) > MAX_TITLE_LENGTH:
+        error = f"Field 'title' is too long (max {MAX_TITLE_LENGTH})."
+        return jsonify({"error": error}), 400
+    if _read_run(task_id) is None:
+        return jsonify({"error": "Results not found or not ready"}), 404
+
+    path = os.path.join(folder, "meta.json")
+    if title:
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump({"title": title}, f, ensure_ascii=False)
+        os.replace(temporary, path)
+    elif os.path.exists(path):
+        os.remove(path)
+    return jsonify({"task_id": task_id, "title": title or None}), 200
 
 
 @app.route("/api/connection", methods=["GET"])
@@ -524,6 +735,69 @@ def get_budget():
 
     return jsonify(
         {**result, "leaves_machine": kind != JUDGE_OLLAMA, "cost": cost}
+    ), 200
+
+
+@app.route("/api/preview", methods=["POST"])
+def get_preview():
+    """Shows the real shape of one grading call, before the run starts.
+
+    Takes the payload of /api/evaluate. The request is built by the provider
+    that will send it, with placeholders for the question, the reference and
+    the answer. No model names of the candidates and no key: the key is shown
+    as `***` and the curl line reads it from $API_KEY.
+
+    Returns:
+        Response: method, url, headers, body, curl and leaves_machine; or a 400
+            response describing what is wrong with the payload.
+    """
+    data = request.json
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    error = _validate_payload(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    kind = data.get("judge_provider", JUDGE_OLLAMA)
+    headers = {"Content-Type": "application/json"}
+    curl_auth = ""
+    if kind == JUDGE_OPENAI:
+        connection = connection_store.load()
+        if connection is None:
+            error = "The OpenAI judge needs a saved connection."
+            return jsonify({"error": error}), 400
+        provider = OpenAIClient(connection["base_url"], connection["api_key"])
+        headers["Authorization"] = "Bearer ***"
+        curl_auth = ' \\\n  -H "Authorization: Bearer $API_KEY"'
+    else:
+        provider = ollama_client
+
+    prompt = build_grading_prompt(
+        "<question>",
+        "<reference answer>",
+        data.get("base_rationale", ""),
+        data["test_cases"][0].get("specific_rationale", ""),
+        "<candidate answer>",
+    )
+    url, body = provider.build_request(
+        data["judge"], prompt, **judge_kwargs(GRADER_SYSTEM, format=GRADE_SCHEMA)
+    )
+    curl = (
+        f"curl -X POST {shlex.quote(url)} \\\n"
+        "  -H 'Content-Type: application/json'"
+        f"{curl_auth} \\\n"
+        f"  -d {shlex.quote(json.dumps(body, ensure_ascii=False))}"
+    )
+    return jsonify(
+        {
+            "method": "POST",
+            "url": url,
+            "headers": headers,
+            "body": body,
+            "curl": curl,
+            "leaves_machine": kind != JUDGE_OLLAMA,
+        }
     ), 200
 
 

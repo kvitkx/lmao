@@ -317,3 +317,15 @@ def test_public_view_contains_the_prices_but_not_the_key():
         "price_out": 2.0,
         "key_last4": "1234",
     }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://openrouter.ai/api/v1/responses",
+        "https://openrouter.ai/api/v1/chat/completions/",
+        "https://openrouter.ai/api/v1/models",
+    ],
+)
+def test_normalize_url_drops_a_pasted_endpoint(value):
+    assert normalize_url(value) == "https://openrouter.ai/api/v1"

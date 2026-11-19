@@ -7,6 +7,7 @@ touches a real Ollama or the real ``history/`` folder.
 """
 
 import json
+import os
 import re
 import threading
 import time
@@ -17,6 +18,7 @@ import pytest
 
 import app as app_module
 from core.openai_client import OpenAIClient
+from core.prompts import GRADE_SCHEMA
 
 
 def _write_json(path, data):
@@ -142,7 +144,12 @@ def test_run_task_runs_the_pipeline():
         app_module._run_task("t", {"judge": "j"}, "provider")
 
     run_evaluation.assert_called_once_with(
-        "t", {"judge": "j"}, app_module.update_task_status, "provider"
+        "t",
+        {"judge": "j"},
+        app_module.update_task_status,
+        "provider",
+        saved=None,
+        cancel=None,
     )
 
 
@@ -700,6 +707,8 @@ def test_history_lists_run_metadata(client):
             "models_tested": 2,
             "questions_count": 2,
             "judge_model": "judge-model",
+            "status": "completed",
+            "progress": None,
         }
     ]
 
@@ -724,8 +733,7 @@ def test_history_copes_with_oddly_named_runs(client):
 
     runs = {run["task_id"]: run for run in client.get("/api/history").get_json()}
 
-    assert runs["weird"]["tag_name"] == "weird"
-    assert runs["weird"]["timestamp"] == "Unknown"
+    assert "weird" not in runs
     assert runs["run_x_notadate_nottime"]["tag_name"] == "X"
     assert runs["run_x_notadate_nottime"]["timestamp"] == "notadate nottime"
 
@@ -923,3 +931,356 @@ def test_export_returns_404_for_missing_and_legacy_runs(client):
     assert missing.status_code == 404
     assert legacy.status_code == 404
     assert legacy.get_json() == {"error": "Results not found or not ready"}
+
+
+# --- stop and resume --------------------------------------------------------
+
+RESUME_ID = "run_x_20260101_000000"
+
+
+def _live_task(task_id="live"):
+    app_module.TASKS[task_id] = {
+        "status": "started",
+        "events": [],
+        "cancel": threading.Event(),
+    }
+    return app_module.TASKS[task_id]
+
+
+def _partial_run(status="stopped"):
+    return {
+        "schema_version": 3,
+        "task_id": RESUME_ID,
+        "judge_model": "j",
+        "judge_provider": "ollama",
+        "mode": "local",
+        "judge_is_candidate": False,
+        "status": status,
+        "progress": {"done": 1, "total": 4},
+        "finished_steps": ["reference:j:q1"],
+        "candidates": ["m"],
+        "base_rationale": "",
+        "finished_at": None,
+        "questions_results": [
+            {
+                "id": "q1",
+                "tag": "t",
+                "question": "Q",
+                "specific_rationale": "",
+                "reference": {"text": "R", "source": "generated"},
+                "no_reference": False,
+                "results": [],
+            }
+        ],
+        "summary": {"models": [{"model": "m"}], "recommendation": {}, "text": ""},
+    }
+
+
+def _save_partial(status="stopped"):
+    data = _partial_run(status)
+    _write_json(Path("data/history") / RESUME_ID / "evaluation_results.json", data)
+    return data
+
+
+def test_cancel_sets_the_flag_and_announces_it(client):
+    task = _live_task("t")
+
+    response = client.post("/api/evaluate/t/cancel")
+
+    assert response.status_code == 202
+    assert response.get_json() == {"task_id": "t", "status": "stopping"}
+    assert task["cancel"].is_set()
+    assert [event["type"] for event in task["events"]] == ["cancelling"]
+    assert task["status"] == "started"
+
+
+def test_cancel_unknown_task_is_404(client):
+    assert client.post("/api/evaluate/nope/cancel").status_code == 404
+
+
+@pytest.mark.parametrize("status", ["completed", "error", "cancelled"])
+def test_cancel_a_finished_task_is_409(client, status):
+    app_module.TASKS["t"] = {
+        "status": status,
+        "events": [],
+        "cancel": threading.Event(),
+    }
+
+    response = client.post("/api/evaluate/t/cancel")
+
+    assert response.status_code == 409
+    assert response.get_json() == {"error": "The run is not in progress."}
+
+
+def test_the_cancelled_event_finishes_the_task():
+    app_module.TASKS["t"] = {"status": "started", "events": []}
+
+    app_module.update_task_status("t", {"type": "cancelled"})
+
+    assert app_module.TASKS["t"]["status"] == "cancelled"
+
+
+def test_stream_stops_on_the_cancelled_event(client):
+    app_module.TASKS["t"] = {
+        "status": "cancelled",
+        "events": [
+            {"type": "info", "message": "start"},
+            {"type": "cancelled", "message": "Run stopped."},
+            {"type": "info", "message": "never sent"},
+        ],
+    }
+
+    events = _parse_sse(client.get("/api/stream/t"))
+
+    assert [event["type"] for event in events] == ["info", "cancelled"]
+
+
+def test_evaluate_is_refused_while_another_run_is_in_progress(client, installed_models):
+    _live_task()
+
+    response = client.post("/api/evaluate", json=_payload())
+
+    assert response.status_code == 409
+    assert response.get_json() == {"error": "A run is already in progress."}
+    assert len(app_module.TASKS) == 1
+
+
+def test_resume_starts_a_thread_with_the_saved_run(client, installed_models):
+    saved = _save_partial()
+
+    with patch.object(app_module.threading, "Thread") as thread_cls:
+        response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 202
+    assert response.get_json() == {"task_id": RESUME_ID, "status": "started"}
+    task = app_module.TASKS[RESUME_ID]
+    assert task["status"] == "started"
+    assert [event["type"] for event in task["events"]] == ["info", "reference_done"]
+    assert not task["cancel"].is_set()
+    assert thread_cls.call_args.kwargs["args"] == (RESUME_ID, None, None, saved)
+    thread_cls.return_value.start.assert_called_once_with()
+
+
+@pytest.mark.parametrize("status", ["stopped", "error", "running"])
+def test_resume_accepts_every_unfinished_status(client, installed_models, status):
+    _save_partial(status)
+
+    with patch.object(app_module.threading, "Thread"):
+        response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 202
+
+
+def test_resume_a_complete_run_is_409(client, installed_models):
+    _save_partial("completed")
+
+    response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 409
+    assert response.get_json() == {"error": "The run is already complete."}
+
+
+def test_resume_is_refused_while_another_run_is_in_progress(client, installed_models):
+    _save_partial()
+    _live_task()
+
+    response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 409
+
+
+def test_resume_rejects_unknown_and_unsafe_ids(client):
+    assert client.post("/api/evaluate/nope/resume").status_code == 404
+    unsafe = client.post("/api/evaluate/.hidden/resume")
+    assert unsafe.status_code == 400
+    assert unsafe.get_json() == {"error": "Invalid task_id"}
+
+
+def test_resume_checks_that_the_models_are_still_installed(client):
+    _save_partial()
+
+    with patch.object(app_module.ollama_client, "get_models", return_value=["j"]):
+        response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Models are not installed: m."}
+    assert RESUME_ID not in app_module.TASKS
+
+
+def test_resume_of_an_openai_judge_needs_the_saved_connection(client):
+    data = _partial_run()
+    data["judge_provider"] = "openai"
+    _write_json(Path("data/history") / RESUME_ID / "evaluation_results.json", data)
+
+    response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "The OpenAI judge needs a saved connection."
+    }
+
+
+def test_history_marks_a_dead_run_as_stopped_and_hides_a_live_one(client):
+    dead = {**_run(), "status": "running", "progress": {"done": 2, "total": 9}}
+    live = {**_run(), "status": "running"}
+    _write_json(
+        Path("data/history/run_a_20260101_000000/evaluation_results.json"), dead
+    )
+    _write_json(
+        Path("data/history/run_b_20260102_000000/evaluation_results.json"), live
+    )
+    _live_task("run_b_20260102_000000")
+
+    runs = client.get("/api/history").get_json()
+
+    assert [(r["task_id"], r["status"], r["progress"]) for r in runs] == [
+        ("run_a_20260101_000000", "stopped", {"done": 2, "total": 9})
+    ]
+
+
+# --- /api/preview -----------------------------------------------------------
+
+
+def test_preview_shows_a_local_grading_call_with_placeholders(client):
+    response = client.post("/api/preview", json=_payload(base_rationale="Be strict."))
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["method"] == "POST"
+    assert body["url"].endswith("/api/generate")
+    assert body["body"]["model"] == "j"
+    assert body["body"]["format"] == GRADE_SCHEMA
+    assert "<question>" in body["body"]["prompt"]
+    assert "<candidate answer>" in body["body"]["prompt"]
+    assert "Be strict." in body["body"]["prompt"]
+    assert "Authorization" not in body["headers"]
+    assert body["leaves_machine"] is False
+    assert body["curl"].startswith("curl -X POST ")
+
+
+def test_preview_of_an_openai_judge_hides_the_key(client):
+    _save_connection()
+    payload = _payload(judge="gpt-4.1-mini", judge_provider="openai")
+
+    response = client.post("/api/preview", json=payload)
+
+    body = response.get_json()
+    assert body["url"] == "https://api.example.com/v1/chat/completions"
+    assert body["headers"]["Authorization"] == "Bearer ***"
+    assert body["body"]["model"] == "gpt-4.1-mini"
+    assert body["body"]["response_format"]["type"] == "json_schema"
+    assert '"Authorization: Bearer $API_KEY"' in body["curl"]
+    assert b"sk-secret" not in response.data
+    assert body["leaves_machine"] is True
+
+
+def test_preview_of_an_openai_judge_needs_the_saved_connection(client):
+    response = client.post("/api/preview", json=_payload(judge_provider="openai"))
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("body", [{}, _payload(judge=None), _payload(test_cases=[])])
+def test_preview_rejects_an_invalid_payload(client, body):
+    response = client.post("/api/preview", json=body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
+# --- run ids and paths ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "task_id", ["weird", "run_", "run_a/../../x", "run_a\n", "../run_a_1_2"]
+)
+def test_run_dir_rejects_ids_that_are_not_run_ids(task_id):
+    assert app_module._run_dir(task_id) is None
+
+
+def test_run_dir_stays_inside_the_history_directory():
+    folder = app_module._run_dir("run_a_20260101_000000")
+
+    assert folder.startswith(os.path.realpath(app_module.pipeline.history_dir) + os.sep)
+
+
+# --- delete and rename ------------------------------------------------------
+
+
+def test_delete_removes_the_run_folder(client):
+    task_id = _save_run()
+
+    response = client.delete(f"/api/results/{task_id}")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"task_id": task_id}
+    assert not Path("data/history", task_id).exists()
+    assert client.get("/api/history").get_json() == []
+
+
+def test_delete_refuses_a_run_in_progress(client):
+    task_id = _save_run()
+    app_module.TASKS[task_id] = {"status": "started", "events": []}
+
+    response = client.delete(f"/api/results/{task_id}")
+
+    assert response.status_code == 409
+    assert Path("data/history", task_id).exists()
+
+
+def test_delete_rejects_unknown_and_unsafe_ids(client):
+    assert client.delete("/api/results/run_x_20260101_000000").status_code == 404
+    unsafe = client.delete("/api/results/.hidden")
+    assert unsafe.status_code == 400
+    assert unsafe.get_json() == {"error": "Invalid task_id"}
+
+
+def test_delete_works_for_a_stopped_run(client):
+    _save_partial()
+
+    response = client.delete(f"/api/results/{RESUME_ID}")
+
+    assert response.status_code == 200
+    assert not Path("data/history", RESUME_ID).exists()
+
+
+def test_rename_sets_the_title_shown_in_the_archive(client):
+    task_id = _save_run()
+
+    response = client.put(f"/api/results/{task_id}/title", json={"title": "  my  run "})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"task_id": task_id, "title": "my run"}
+    [run] = client.get("/api/history").get_json()
+    assert run["tag_name"] == "my run"
+
+
+def test_an_empty_title_restores_the_default_name(client):
+    task_id = _save_run()
+    client.put(f"/api/results/{task_id}/title", json={"title": "mine"})
+
+    response = client.put(f"/api/results/{task_id}/title", json={"title": " "})
+
+    assert response.get_json()["title"] is None
+    assert not Path("data/history", task_id, "meta.json").exists()
+    assert client.get("/api/history").get_json()[0]["tag_name"] == "X"
+
+
+@pytest.mark.parametrize("body", [{}, {"title": 5}, {"title": "x" * 81}, [1]])
+def test_rename_rejects_a_bad_title(client, body):
+    task_id = _save_run()
+
+    response = client.put(f"/api/results/{task_id}/title", json=body)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
+def test_rename_unknown_and_unsafe_ids(client):
+    missing = client.put(
+        "/api/results/run_x_20260101_000000/title", json={"title": "a"}
+    )
+    unsafe = client.put("/api/results/.hidden/title", json={"title": "a"})
+
+    assert missing.status_code == 404
+    assert unsafe.status_code == 400

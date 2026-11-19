@@ -341,3 +341,12 @@ def test_markdown_without_a_recommendation():
 
     assert "No model was recommended (rule: none_graded, confidence: low)." in markdown
     assert "Recommended model" not in markdown
+
+
+def test_markdown_shows_a_run_that_did_not_finish():
+    data = _results()
+    data["status"] = "stopped"
+
+    markdown = to_markdown(data)
+
+    assert "mode: local · status: stopped · finished: 2026-01-01T12:00:30" in markdown

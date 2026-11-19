@@ -81,9 +81,14 @@ class OpenAIClient(Provider):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.json_schema = True
+        self.last_error = ""
 
     def __repr__(self) -> str:
         return f"OpenAIClient(base_url={self.base_url!r}, api_key='***')"
+
+    @property
+    def chat_url(self) -> str:
+        return f"{self.base_url}/chat/completions"
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}"}
@@ -98,6 +103,7 @@ class OpenAIClient(Provider):
         Returns:
             list: A list of model id strings. Empty on any error.
         """
+        self.last_error = ""
         try:
             response = requests.get(
                 f"{self.base_url}/models",
@@ -108,6 +114,8 @@ class OpenAIClient(Provider):
             return [model["id"] for model in response.json().get("data", [])]
         except Exception as e:
             # Only the type: the text of an exception is not ours to trust.
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            self.last_error = f"HTTP {status}" if status else type(e).__name__
             print(f"Error fetching models: {type(e).__name__}")
             return []
 
@@ -134,6 +142,31 @@ class OpenAIClient(Provider):
         Returns:
             dict: See `Provider.generate`.
         """
+        _, payload = self.build_request(
+            model, prompt, system_prompt, format, think, options, keep_alive
+        )
+
+        try:
+            started = time.monotonic()
+            data = self._post_chat(payload, timeout)
+            return _result(data, time.monotonic() - started)
+        except Exception as e:
+            return {"success": False, "error": self._redact(str(e))}
+
+    def build_request(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str = "",
+        format: str | dict | None = None,
+        think: bool | None = None,
+        options: dict | None = None,
+        keep_alive: int | str = 0,
+    ) -> tuple[str, dict]:
+        """Builds the request `generate` sends: the URL and the JSON body.
+
+        `think` and `keep_alive` have no counterpart here and are ignored.
+        """
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -148,13 +181,7 @@ class OpenAIClient(Provider):
         for option, param in _OPTION_PARAMS.items():
             if option in (options or {}):
                 payload[param] = options[option]
-
-        try:
-            started = time.monotonic()
-            data = self._post_chat(payload, timeout)
-            return _result(data, time.monotonic() - started)
-        except Exception as e:
-            return {"success": False, "error": self._redact(str(e))}
+        return self.chat_url, payload
 
     def _response_format(self, format: str | dict | None) -> dict | None:
         if format is None:
@@ -170,7 +197,7 @@ class OpenAIClient(Provider):
         """Posts the request, fixing parameters the server rejects."""
         for attempt in range(MAX_ADJUSTMENTS + 1):
             response = requests.post(
-                f"{self.base_url}/chat/completions",
+                self.chat_url,
                 headers=self._headers(),
                 json=payload,
                 timeout=timeout,

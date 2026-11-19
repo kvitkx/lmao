@@ -148,9 +148,9 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as
     npm install --package-lock-only --ignore-scripts --no-audit --no-fund
   ```
 
-- Styles live in `static/css/input.css`. `static/css/app.css`, `static/vendor/`
-  and `static/fonts/` are generated (`make css`) and never committed.
-- The CSS build finds class names by scanning `templates/` and `static/js/`.
+- Styles live in `static/css/input.css`. `static/css/app.css`, `static/vendor/`,
+  `static/fonts/` and `static/js/` are generated (`make css`) and never committed.
+- The CSS build finds class names by scanning `templates/` and `frontend/`.
   A class that a template composes from a variable (as `nav_toggle` does) is
   invisible to the scan: list it in the `@source inline(...)` line of
   `input.css` (a test checks `nav_toggle`).

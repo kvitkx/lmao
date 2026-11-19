@@ -101,3 +101,10 @@ test("barStates: after an error what was in flight is dark, without a run all is
         "done",
     ]);
 });
+
+test("barStates: stopping looks like running, stopped like an error", () => {
+    const state = phases("done", "running", "queued", "queued");
+
+    assert.deepEqual(favicon.barStates(state, "stopping"), ["done", "active", "off", "off"]);
+    assert.deepEqual(favicon.barStates(state, "stopped"), ["done", "off", "off", "off"]);
+});

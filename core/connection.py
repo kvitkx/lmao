@@ -15,6 +15,8 @@ MAX_URL_LENGTH = 200
 MAX_KEY_LENGTH = 500
 MAX_MODEL_LENGTH = 200
 MAX_PRICE = 10_000  # per million tokens
+# The client adds these itself: a pasted endpoint is not a base URL.
+_ENDPOINT_SUFFIXES = ("/chat/completions", "/responses", "/models")
 
 
 # Why a connection is refused. An API response carries one of these texts, never
@@ -62,6 +64,9 @@ def normalize_url(value) -> str:
         raise InvalidConnection("url_required")
 
     url = value.strip().rstrip("/")
+    for suffix in _ENDPOINT_SUFFIXES:
+        if url.lower().endswith(suffix):
+            url = url[: -len(suffix)].rstrip("/")
     if len(url) > MAX_URL_LENGTH:
         raise InvalidConnection("url_too_long")
 

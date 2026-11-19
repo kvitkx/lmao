@@ -30,6 +30,7 @@
 {# results #}
 <div x-show="view === 'results'" x-cloak class="flex flex-col gap-33">
     {{ ui.warn_notice("resultsError", "resultsError") }}
+    {{ ui.warn_notice("controlError", "controlError") }}
     <div x-show="!resultsError && !report" class="text-fg-muted">loading…</div>
 
     <template x-if="report && overview">
@@ -40,6 +41,8 @@
                     <div class="text-heading break-words" x-text="runTitle"></div>
                 </div>
                 <div class="shrink-0 flex items-center gap-15 text-fg-muted print:hidden">
+                    <button type="button" x-show="resumable" x-cloak @click="resumeRun(activeRunId)"
+                            class="text-fg hover:text-fg-muted">resume</button>
                     <span>export</span>
                     {%- for fmt in ("json", "csv", "md") %}
                     <a :href="'/api/results/' + encodeURIComponent(activeRunId) + '/export?format={{ fmt }}'"
@@ -500,67 +503,78 @@
                              :aria-labelledby="'tab-resultsView-' + resultsView"
                              class="flex flex-col gap-22">
 
-                            {# per model #}
+                            {# per model: folded rows, an opened one shows its first answers #}
                             <template x-if="resultsView === 'model'">
                                 <div class="flex flex-col gap-22">
                                     <template x-for="m in report.models" :key="m.model">
-                                        <article :id="m.anchor" tabindex="-1" class="border border-line p-22 scroll-mt-33">
-                                            {{ ui.card_head("m.short", "m.metricsLine", title_tip="m.model") }}
+                                        <article :id="m.anchor" tabindex="-1" class="border border-line scroll-mt-33">
+                                            {{ ui.fold_head("m.short", "m.summaryLine", "isFoldOpen('models', m.anchor)", "toggleFold('models', m.anchor)", title_tip="m.model") }}
+                                            <template x-if="isFoldOpen('models', m.anchor)">
+                                                <div class="px-22 pb-22 border-t border-line">
+                                                    <div class="py-15 border-b border-line text-fg-muted break-words" x-text="m.metricsLine"></div>
 
-                                            {# answers by category #}
-                                            <div x-show="m.distribution.n" class="py-15 border-b border-line flex flex-col gap-8">
-                                                <div class="text-fg-muted" x-text="'answers by category · n=' + m.distribution.n"></div>
-                                                <template x-for="d in m.distribution.rows" :key="d.label">
-                                                    <div class="grid grid-cols-[180px_1fr_80px] items-center gap-x-15">
-                                                        <span class="break-words"
-                                                              :class="d.warn ? 'text-warn' : (d.count ? 'text-fg' : 'text-fg-muted')"
-                                                              x-text="d.label"></span>
-                                                        <span class="block h-4 bg-line" aria-hidden="true">
-                                                            <span class="block h-4" :class="d.warn ? 'bg-warn' : 'bg-fg'"
-                                                                  :style="'width:' + d.pct + '%'"></span>
-                                                        </span>
-                                                        <span class="text-fg-muted" x-text="d.text"></span>
+                                                    {# answers by category #}
+                                                    <div x-show="m.distribution.n" class="py-15 border-b border-line flex flex-col gap-8">
+                                                        <div class="text-fg-muted" x-text="'answers by category · n=' + m.distribution.n"></div>
+                                                        <template x-for="d in m.distribution.rows" :key="d.label">
+                                                            <div class="grid grid-cols-[180px_1fr_80px] items-center gap-x-15">
+                                                                <span class="break-words"
+                                                                      :class="d.warn ? 'text-warn' : (d.count ? 'text-fg' : 'text-fg-muted')"
+                                                                      x-text="d.label"></span>
+                                                                <span class="block h-4 bg-line" aria-hidden="true">
+                                                                    <span class="block h-4" :class="d.warn ? 'bg-warn' : 'bg-fg'"
+                                                                          :style="'width:' + d.pct + '%'"></span>
+                                                                </span>
+                                                                <span class="text-fg-muted" x-text="d.text"></span>
+                                                            </div>
+                                                        </template>
                                                     </div>
-                                                </template>
-                                            </div>
 
-                                            <template x-for="e in m.entries" :key="e.qid">
-                                                {{ ui.eval_block("e.label", "e.question") }}
+                                                    <template x-for="e in shownEntries(m)" :key="e.qid">
+                                                        {{ ui.eval_block("e.label", "e.question") }}
+                                                    </template>
+                                                    {{ ui.more_row("hiddenAnswers(m)", "more answers", "showAllAnswers(m.anchor)") }}
+                                                </div>
                                             </template>
                                         </article>
                                     </template>
                                 </div>
                             </template>
 
-                            {# per question #}
+                            {# per question: the first cards are open, the rest are folded rows #}
                             <template x-if="resultsView === 'question'">
                                 <div class="flex flex-col gap-22">
-                                    <template x-for="q in report.questionCards" :key="q.id">
-                                        <article :id="q.anchor" tabindex="-1" class="border border-line p-22 scroll-mt-33">
-                                            {{ ui.card_head("q.label", "q.metricsLine") }}
-                                            <div class="py-15 border-b border-line text-fg-muted" x-text="q.question"></div>
-                                            {# score scale: one tick per score, a tall tick = several models #}
-                                            <div x-show="q.marks.length" class="py-15 border-b border-line flex flex-col gap-8">
-                                                <div class="relative h-15" aria-hidden="true">
-                                                    <span class="absolute inset-x-0 top-1/2 h-px bg-line"></span>
-                                                    <template x-for="mk in q.marks" :key="mk.score">
-                                                        <span class="absolute inset-y-0 w-9 -translate-x-1/2 flex items-center justify-center"
-                                                              :style="'left:' + mk.score + '%'" :title="mk.title">
-                                                            <span class="w-px bg-fg" :class="mk.many ? 'h-15' : 'h-9'"></span>
-                                                        </span>
+                                    <template x-for="q in visibleCards" :key="q.id">
+                                        <article :id="q.anchor" tabindex="-1" class="border border-line scroll-mt-33">
+                                            {{ ui.fold_head("q.label", "q.metricsLine", "isFoldOpen('questions', q.anchor)", "toggleFold('questions', q.anchor)") }}
+                                            <template x-if="isFoldOpen('questions', q.anchor)">
+                                                <div class="px-22 pb-22 border-t border-line">
+                                                    <div class="py-15 border-b border-line text-fg-muted" x-text="q.question"></div>
+                                                    {# score scale: one tick per score, a tall tick = several models #}
+                                                    <div x-show="q.marks.length" class="py-15 border-b border-line flex flex-col gap-8">
+                                                        <div class="relative h-15" aria-hidden="true">
+                                                            <span class="absolute inset-x-0 top-1/2 h-px bg-line"></span>
+                                                            <template x-for="mk in q.marks" :key="mk.score">
+                                                                <span class="absolute inset-y-0 w-9 -translate-x-1/2 flex items-center justify-center"
+                                                                      :style="'left:' + mk.score + '%'" :title="mk.title">
+                                                                    <span class="w-px bg-fg" :class="mk.many ? 'h-15' : 'h-9'"></span>
+                                                                </span>
+                                                            </template>
+                                                        </div>
+                                                        <div class="flex justify-between gap-15 text-fg-muted">
+                                                            <span>0</span>
+                                                            <span x-text="q.spread"></span>
+                                                            <span>100</span>
+                                                        </div>
+                                                    </div>
+                                                    <template x-for="e in q.entries" :key="e.model">
+                                                        {{ ui.eval_block("e.short", "e.rankText", head_title="e.model") }}
                                                     </template>
                                                 </div>
-                                                <div class="flex justify-between gap-15 text-fg-muted">
-                                                    <span>0</span>
-                                                    <span x-text="q.spread"></span>
-                                                    <span>100</span>
-                                                </div>
-                                            </div>
-                                            <template x-for="e in q.entries" :key="e.model">
-                                                {{ ui.eval_block("e.short", "e.rankText", head_title="e.model") }}
                                             </template>
                                         </article>
                                     </template>
+                                    {{ ui.more_row("hiddenCards", "more questions", "folds.allQuestions = true") }}
                                 </div>
                             </template>
                         </div>
@@ -569,7 +583,7 @@
                     {# 03 reference answers #}
                     <section id="sec-references" class="flex flex-col scroll-mt-33">
                         {{ ui.section_label("03 reference answers") }}
-                        <template x-for="r in report.references" :key="r.id">
+                        <template x-for="r in visibleReferences" :key="r.id">
                             <details class="group border-b border-line" x-data="{ shown: false }"
                                      @toggle="shown = $el.open">
                                 <summary class="py-12 flex gap-12 text-fg-muted hover:text-fg">
@@ -586,6 +600,7 @@
                                 </div>
                             </details>
                         </template>
+                        {{ ui.more_row("hiddenReferences", "more questions", "folds.allReferences = true") }}
                     </section>
                 </div>
             </div>

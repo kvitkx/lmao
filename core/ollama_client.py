@@ -118,21 +118,9 @@ class OllamaClient(Provider):
             dict: A dictionary containing success status, response text, stop
                 reason, prompt token count and performance metrics.
         """
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "system": system_prompt,
-            "stream": False,
-            "keep_alive": keep_alive,
-        }
-
-        if format is not None:
-            payload["format"] = format
-        if think is not None:
-            payload["think"] = think
-        if options:
-            payload["options"] = options
+        url, payload = self.build_request(
+            model, prompt, system_prompt, format, think, options, keep_alive
+        )
 
         try:
             response = requests.post(url, json=payload, timeout=timeout)
@@ -163,6 +151,32 @@ class OllamaClient(Provider):
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def build_request(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str = "",
+        format: str | dict | None = None,
+        think: bool | None = None,
+        options: dict | None = None,
+        keep_alive: int | str = 0,
+    ) -> tuple[str, dict]:
+        """Builds the request `generate` sends: the URL and the JSON body."""
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "system": system_prompt,
+            "stream": False,
+            "keep_alive": keep_alive,
+        }
+        if format is not None:
+            payload["format"] = format
+        if think is not None:
+            payload["think"] = think
+        if options:
+            payload["options"] = options
+        return f"{self.base_url}/api/generate", payload
 
     def unload(self, model: str) -> bool:
         """Unloads a model from VRAM right away.

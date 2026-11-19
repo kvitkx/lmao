@@ -33,7 +33,8 @@ Pick a judge model, the candidates and your own questions. lmao runs every candi
 - Scores and the recommendation are computed in code; the judge only writes the summary
 - Your own questions with optional reference answers, import and export as JSON
 - Run archive, export to JSON, CSV and Markdown
-- Local by default; an optional [cloud judge](SECURITY.md) grades in parallel
+- Local by default; the judge can also be an Ollama cloud model or any OpenAI-compatible API, and then it grades in parallel ([what leaves your machine](SECURITY.md))
+- Stop a run at any time and resume it later, also after a restart
 
 ## How scoring works
 

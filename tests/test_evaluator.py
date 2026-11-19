@@ -20,6 +20,8 @@ from core.evaluator import (
     JUDGE_NUM_PREDICT,
     JUDGE_SEED,
     EvaluationPipeline,
+    judge_kwargs,
+    replay_events,
 )
 from core.prompts import (
     CATEGORIES,
@@ -942,3 +944,218 @@ def test_results_describe_how_the_run_was_made():
         "num_ctx": JUDGE_NUM_CTX,
         "num_predict": JUDGE_NUM_PREDICT,
     }
+
+
+# --- stop and resume --------------------------------------------------------
+
+
+class StopAfter(FakeOllama):
+    """Asks the run to stop right after the first candidate answer."""
+
+    def __init__(self, cancel, **kwargs):
+        super().__init__(**kwargs)
+        self.cancel = cancel
+
+    def generate(
+        self,
+        model,
+        prompt,
+        system_prompt="",
+        format=None,
+        think=None,
+        options=None,
+        keep_alive=0,
+        timeout=None,
+    ):
+        result = super().generate(
+            model, prompt, system_prompt, format, think, options, keep_alive, timeout
+        )
+        if self.candidate_calls:
+            self.cancel.set()
+        return result
+
+
+def run_with(pipeline, payload, **kwargs):
+    events = []
+    pipeline.run_evaluation(
+        TASK_ID, payload, lambda task_id, event: events.append(event), **kwargs
+    )
+    return events
+
+
+def saved_run(pipeline):
+    return load(pipeline, "evaluation_results.json")
+
+
+def test_a_stopped_run_is_saved_and_unloads_its_models():
+    cancel = threading.Event()
+    ollama = StopAfter(cancel)
+    pipeline = EvaluationPipeline(ollama)
+
+    events = run_with(pipeline, two_questions(), cancel=cancel)
+
+    assert events[-1]["type"] == "cancelled"
+    assert events[-1]["progress"] == {"done": 3, "total": 11}
+    saved = saved_run(pipeline)
+    assert (saved["status"], saved["progress"]) == (
+        "stopped",
+        {"done": 3, "total": 11},
+    )
+    assert saved["finished_at"] is not None
+    assert sorted(saved["finished_steps"]) == [
+        "answer:cand-a:q1",
+        "reference:judge:q1",
+        "reference:judge:q2",
+    ]
+    assert saved["summary"]["text"] == ""
+    assert [m["model"] for m in saved["summary"]["models"]] == ["cand-a", "cand-b"]
+    assert ollama.loaded == set()
+    assert ollama.grading_calls == []
+
+
+def test_a_run_stopped_before_its_first_step_does_nothing():
+    cancel = threading.Event()
+    cancel.set()
+    ollama = FakeOllama()
+    pipeline = EvaluationPipeline(ollama)
+
+    events = run_with(pipeline, make_payload(), cancel=cancel)
+
+    assert [e["type"] for e in events] == ["cancelled"]
+    assert ollama.reference_calls == []
+    assert ollama.candidate_calls == []
+    assert saved_run(pipeline)["finished_steps"] == []
+
+
+def test_the_run_is_saved_after_every_step():
+    pipeline = EvaluationPipeline(FakeOllama())
+    seen = []
+
+    def on_event(task_id, event):
+        if event["type"] in ("reference_done", "answer_done"):
+            saved = saved_run(pipeline)
+            seen.append((event["type"], saved["status"], saved["progress"]["done"]))
+
+    pipeline.run_evaluation(TASK_ID, make_payload(), on_event)
+
+    assert seen == [
+        ("reference_done", "running", 1),
+        ("answer_done", "running", 2),
+        ("answer_done", "running", 3),
+    ]
+
+
+@pytest.mark.parametrize("provider", [None, "ollama_cloud"])
+def test_a_resumed_run_equals_an_uninterrupted_one(provider):
+    extra = {"judge_provider": provider} if provider else {}
+    whole = EvaluationPipeline(FakeOllama())
+    run_with(whole, two_questions(**extra))
+    expected = saved_run(whole)
+    expected_metrics = load(whole, "technical_metrics.json")["metrics"]
+
+    cancel = threading.Event()
+    first = EvaluationPipeline(StopAfter(cancel))
+    run_with(first, two_questions(**extra), cancel=cancel)
+    stopped = saved_run(first)
+    assert stopped["status"] == "stopped"
+
+    resumed_ollama = FakeOllama()
+    resumed = EvaluationPipeline(resumed_ollama)
+    events = run_with(resumed, None, saved=stopped)
+
+    result = saved_run(resumed)
+    assert events[-1]["type"] == "completed"
+    assert result["status"] == "completed"
+    assert result["progress"] == {"done": 11, "total": 11}
+    assert result["questions_results"] == expected["questions_results"]
+    assert result["summary"] == expected["summary"]
+    assert load(resumed, "technical_metrics.json")["metrics"] == expected_metrics
+    assert resumed_ollama.candidate_calls  # something was left to answer
+    assert len(resumed_ollama.candidate_calls) < 4
+
+
+def test_resume_does_not_reload_a_judge_with_nothing_left_to_do():
+    cancel = threading.Event()
+    first = EvaluationPipeline(StopAfter(cancel))
+    run_with(first, two_questions(), cancel=cancel)
+    resumed_ollama = FakeOllama()
+
+    run_with(EvaluationPipeline(resumed_ollama), None, saved=saved_run(first))
+
+    # References were done: the judge is loaded once, for grading and the summary.
+    assert resumed_ollama.reference_calls == []
+    assert resumed_ollama.loads == {"judge": 1, "cand-a": 1, "cand-b": 1}
+
+
+def test_a_run_that_failed_can_be_resumed():
+    pipeline = EvaluationPipeline(FakeOllama(answers={"cand-a": RuntimeError("boom")}))
+
+    with pytest.raises(RuntimeError):
+        run_with(pipeline, make_payload())
+
+    saved = saved_run(pipeline)
+    assert saved["status"] == "error"
+    assert saved["progress"] == {"done": 1, "total": 6}
+    resumed = EvaluationPipeline(FakeOllama())
+    events = run_with(resumed, None, saved=saved)
+    assert events[-1]["type"] == "completed"
+    assert saved_run(resumed)["status"] == "completed"
+
+
+def test_replay_events_rebuild_the_stream_of_a_stopped_run():
+    cancel = threading.Event()
+    pipeline = EvaluationPipeline(StopAfter(cancel))
+    run_with(pipeline, two_questions(), cancel=cancel)
+
+    events = replay_events(saved_run(pipeline))
+
+    assert [(e["type"], e["model"], e["question"]) for e in events] == [
+        ("reference_done", "judge", "q1"),
+        ("reference_done", "judge", "q2"),
+        ("answer_done", "cand-a", "q1"),
+    ]
+    assert [e["progress"] for e in events] == [
+        {"done": 1, "total": 11},
+        {"done": 2, "total": 11},
+        {"done": 3, "total": 11},
+    ]
+    assert (events[0]["success"], events[0]["source"]) == (True, "generated")
+
+
+def test_replay_counts_a_skipped_grading_without_an_event():
+    pipeline = EvaluationPipeline(FakeOllama(answers={"cand-b": fail("oom")}))
+    run_with(pipeline, make_payload())
+
+    events = replay_events(saved_run(pipeline))
+
+    assert [e["type"] for e in events] == [
+        "reference_done",
+        "answer_done",
+        "answer_done",
+        "grading_done",
+        "summary_done",
+    ]
+    assert (events[2]["success"], events[2]["error"]) == (False, "oom")
+    assert events[-1]["progress"] == {"done": 6, "total": 6}
+
+
+def test_judge_kwargs_are_what_every_judge_call_sends():
+    kwargs = judge_kwargs(GRADER_SYSTEM, 1, GRADE_SCHEMA)
+
+    assert kwargs["system_prompt"] == GRADER_SYSTEM
+    assert kwargs["format"] == GRADE_SCHEMA
+    assert kwargs["think"] is False
+    assert kwargs["options"]["seed"] == JUDGE_SEED + 1
+
+
+def test_a_resumed_run_keeps_how_it_was_made():
+    cancel = threading.Event()
+    first = EvaluationPipeline(StopAfter(cancel))
+    run_with(first, two_questions(), cancel=cancel)
+    stopped = saved_run(first)
+    assert stopped["run"]["started_at"]
+
+    resumed = EvaluationPipeline(FakeOllama())
+    run_with(resumed, None, saved=stopped)
+
+    assert saved_run(resumed)["run"] == stopped["run"]

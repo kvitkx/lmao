@@ -219,3 +219,18 @@ def test_a_long_error_is_cut():
     report = run_preflight(provider, "m")
 
     assert len(_check(report, "structured")["detail"]) == DETAIL_LIMIT
+
+
+def test_an_unreachable_api_says_why():
+    provider = FakeProvider(models=[])
+    provider.last_error = "HTTP 404"
+
+    report = run_preflight(provider, "m")
+
+    assert "HTTP 404" in _check(report, "models")["detail"]
+
+
+def test_a_model_listed_with_the_models_prefix_is_found():
+    report = run_preflight(FakeProvider(models=["models/m"]), "m")
+
+    assert report["ok"] is True
