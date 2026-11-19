@@ -117,8 +117,8 @@ Status (derived from existing state only):
 
 | State | Status |
 |---|---|
-| run in progress, any screen | activity dot and `running · 38:05 · 181 / 217` in `tabular-nums`, a `stop` button; `back to run` while another screen is shown |
-| stop requested | activity dot and `stopping · 38:05 · 181 / 217`; no `stop` button |
+| run in progress, any screen | activity dot and `running · 38:05 · 181 / 217` in `tabular-nums`; `back to run` while another screen is shown |
+| stop requested | activity dot and `stopping · 38:05 · 181 / 217` |
 | running screen, run stopped | `stopped · 38:05 · 181 / 217` (muted) |
 | running screen, run failed | `failed · 38:05 · 181 / 217` (warn) |
 | running screen, connection lost | `failed · 38:05 · 181 / 217` (warn); the notice offers `reconnect` (the run may still go on the server) |
@@ -242,8 +242,8 @@ File format, with the same field names as the `/api/evaluate` payload:
 
 **Connection (openai api).** The judge is the saved connection: a block under the tabs with four states.
 
-- *no connection*: a bordered block with `no connection`, the line `the judge needs an endpoint and an api key.` and a secondary `connect` button.
-- *saved*: a bordered spec sheet of label/value rows (`source`, `endpoint`, `model`, `auth` as `Bearer ••••a1b2`, `output` as `json_schema · seed 42`, `egress` as `remote · answers sent`), a hairline and a status line: an activity dot and `reachable · 142 ms · 12 models` after a test, `not tested yet` before one. Below it the text buttons `edit connection` and `test`. `output` is `–` until a test has shown what the server accepts.
+- *no connection*: a bordered block with `no connection`, the line `the judge needs an endpoint and an api key.` and a centred secondary `+ add connection` button.
+- *saved*: a bordered spec sheet on `bg-bg`, set in mono (label column 64px), of label/value rows (`source`, `endpoint`, `model`, `auth` as `Bearer ••••a1b2`, `output` as `json_schema · seed 42`, `egress` as `remote · answers sent`), a hairline and a status line: an activity dot and `reachable · 142 ms · 12 models` after a test, `not tested yet` before one. Below it the text buttons `edit connection` and `test`. `output` is `–` until a test has shown what the server accepts.
 - *editing*: `connection · openai` with `cancel`; the fields `base url`, `api key`, `model` and the optional `price in` / `price out` (per million tokens, they only feed the budget); the note `stored on the server, never shown again`; the text buttons `test`, `save` and, for a saved connection, `remove`. An empty key keeps the saved one, but only while the base url stays the same. `Enter` in a field saves instead of submitting the form.
 - *error*: the status line shows the first failed check instead of the result (`model list · no models (HTTP 404): …`) in warn, so a wrong base url or key says why. A pasted endpoint (`…/chat/completions`, `…/responses`, `…/models`) is cut back to the base url on save.
 
@@ -273,7 +273,7 @@ The setup panel closes. Elapsed time and the step count are in the topbar.
 
 **Load notice.** Shown only after a row has been `running` for about 8 seconds on the first call of a model load group, so it appears only where a model may still be loading. It says that loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
-**Stop and resume.** `stop` in the topbar asks the server to stop. The status becomes `stopping` and an info strip says that the call in flight is not interrupted (a large local model can take up to 10 minutes); the run stops between two steps, unloads its models and keeps everything finished. Then the screen shows `stopped`: an info strip with the steps done, the buttons `resume` and `back to setup`, and the steps still to come as `stopped` cells. The run is saved after every step, so `resume` also works from the archive, after an error and after a restart of the server; the stream of a resumed run starts with the events of the finished steps, so the rows fill in the same way as in a live run. Only one run is in progress at a time.
+**Stop and resume.** `stop` is a small button at the right end of the matrix label row, after the judge note and a hairline divider. It first asks `stop run?` with `stop` (warn border) and `keep going`; only then is the server asked to stop. The status becomes `stopping` and an info strip says that the call in flight is not interrupted (a large local model can take up to 10 minutes); the run stops between two steps, unloads its models and keeps everything finished. Then the screen shows `stopped`: an info strip with the steps done, `resume` (small, filled) and `back to setup` (text) in the matrix label row, and the steps still to come as `stopped` cells. The run is saved after every step, so `resume` also works from the archive, after an error and after a restart of the server; the stream of a resumed run starts with the events of the finished steps, so the rows fill in the same way as in a live run. Only one run is in progress at a time.
 
 **Errors.** A failed run shows a warn notice with `back to setup`, and `resume` when the server reported the failure. Rows in flight when the stream breaks become `error · interrupted`. A broken stream shows a warn notice with `reconnect`, which opens the stream again: the server replays the events from the start, so the rows are rebuilt and the clock keeps running. `resume` is offered when the server failed the run; if the run is still going, `resume` reconnects instead.
 

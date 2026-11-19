@@ -127,9 +127,9 @@
 </div>
 {%- endmacro %}
 
-{# info-strip: a boxed note that is not an error. `line1` and `line2` are Alpine expressions. #}
+{# info-strip: a note with a hairline under it, not an error. `line1` and `line2` are Alpine expressions. #}
 {% macro info_strip(show, line1, line2) -%}
-<div x-show="{{ show }}" x-cloak class="bg-surface border border-line px-15 py-12 flex flex-col gap-4">
+<div x-show="{{ show }}" x-cloak class="border-b border-line pb-12 flex flex-col gap-4">
     <span class="text-fg break-words" x-text="{{ line1 }}"></span>
     <span class="text-fg-muted break-words" x-text="{{ line2 }}"></span>
 </div>

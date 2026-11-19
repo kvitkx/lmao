@@ -48,15 +48,15 @@
                         <span>no connection</span>
                         <p class="text-fg-muted">the judge needs an endpoint and an api key.</p>
                         <button type="button" @click="editConnection()"
-                                class="w-full text-left border border-fg-muted text-fg px-22 py-13 hover:border-fg">connect</button>
+                                class="w-full text-center border border-fg-muted text-fg px-22 py-13 hover:border-fg">+ add connection</button>
                     </div>
 
                     {# saved: the spec sheet and the result of the last test #}
                     <div x-show="connection && !connectionEditing" x-cloak class="flex flex-col gap-8">
-                        <div class="border border-line p-12 flex flex-col gap-8">
+                        <div class="bg-bg border border-line p-12 flex flex-col gap-8 font-mono">
                             <template x-for="r in specRows" :key="r.label">
                                 <div class="flex gap-12">
-                                    <span class="w-72 shrink-0 text-fg-muted" x-text="r.label"></span>
+                                    <span class="w-64 shrink-0 text-fg-muted" x-text="r.label"></span>
                                     <span class="min-w-0 break-words" x-text="r.value"></span>
                                 </div>
                             </template>
@@ -92,7 +92,7 @@
                             <button type="button" @click="testConnection()" :disabled="connectionBusy || preflightBusy"
                                     class="enabled:hover:text-fg disabled:cursor-not-allowed">test</button>
                             <button type="button" @click="saveConnection()" :disabled="connectionBusy"
-                                    class="text-fg enabled:hover:text-fg-muted disabled:cursor-not-allowed">save</button>
+                                    class="enabled:hover:text-fg disabled:cursor-not-allowed">save</button>
                             <button type="button" x-show="connection" x-cloak @click="removeConnection()"
                                     class="hover:text-fg">remove</button>
                         </div>
@@ -308,18 +308,40 @@
                      "'the model call in progress is not interrupted: a large local model can take up to 10 minutes. finished steps are kept.'") }}
     {{ ui.info_strip("run.status === 'stopped'", "'run stopped · ' + run.done + ' of ' + run.total + ' steps done'",
                      "'finished answers and grades are saved in the archive. resume continues from the last finished step, also after a restart.'") }}
-    <div x-show="run.status === 'stopped'" x-cloak class="flex items-center gap-12">
-        <button type="button" @click="resumeRun(run.id)"
-                class="bg-fg text-bg px-22 py-13 hover:bg-fg-muted">resume</button>
-        <button type="button" @click="dismissRun()"
-                class="border border-fg-muted text-fg px-22 py-13 hover:border-fg">back to setup</button>
-    </div>
 
     {# models x questions: as many question columns as fit the width #}
     <section class="flex flex-col">
         <div class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
             <span>models × questions</span>
-            <span x-text="(run.cloud ? 'cloud judge' : 'local judge') + (run.status === 'stopped' ? ' · stopped · resume continues from here' : (run.cloud ? ' · grading runs in parallel' : ' · one model in VRAM at a time'))"></span>
+            <span class="flex items-center gap-12" x-data="{ confirming: false }"
+                  x-effect="if (run.status !== 'running') confirming = false">
+                <span x-text="(run.cloud ? 'cloud judge' : 'local judge') + (run.status === 'stopped' ? ' · stopped · resume continues from here' : (run.cloud ? ' · grading runs in parallel' : ' · one model in VRAM at a time'))"></span>
+                <span x-show="['running', 'stopping', 'stopped'].includes(run.status)" x-cloak
+                      class="h-20 w-px bg-line" aria-hidden="true"></span>
+
+                {# running: stop asks first #}
+                <button type="button" x-show="run.status === 'running' && !confirming" x-cloak
+                        @click="confirming = true"
+                        class="border border-fg-muted text-fg px-12 py-4 hover:border-fg">stop</button>
+                <span x-show="run.status === 'running' && confirming" x-cloak class="flex items-center gap-12">
+                    <span class="text-fg">stop run?</span>
+                    <button type="button" @click="confirming = false; stopRun()"
+                            class="border border-warn text-warn px-12 py-4 hover:bg-line">stop</button>
+                    <button type="button" @click="confirming = false"
+                            class="hover:text-fg">keep going</button>
+                </span>
+
+                {# stopping #}
+                <span x-show="run.status === 'stopping'" x-cloak>stopping…</span>
+
+                {# stopped #}
+                <span x-show="run.status === 'stopped'" x-cloak class="flex items-center gap-12">
+                    <button type="button" @click="resumeRun(run.id)"
+                            class="bg-fg text-bg px-12 py-4 hover:bg-fg-muted">resume</button>
+                    <button type="button" @click="dismissRun()"
+                            class="hover:text-fg">back to setup</button>
+                </span>
+            </span>
         </div>
 
         {# window controls: only while some questions do not fit #}
