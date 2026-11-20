@@ -76,20 +76,18 @@ docker compose up -d
 docker compose exec ollama ollama pull MODEL_NAME
 ```
 
-Open **http://localhost:5000**. Stop with `docker compose down` (volumes with models and history are kept).
+Open **http://localhost:5000**. Stop with `docker compose down` (the volumes with models and history are kept).
 
 ## Tags
 
 | Tag | Meaning |
 |---|---|
 | `latest` | The newest stable release |
-| `X.Y` | The newest patch release of a minor version, for example `2.2` |
-| `X` | The newest release of a major version (from `1.x` on) |
-| `X.Y.Z` | An exact release, for example `2.2.2` |
+| `X.Y` | The newest patch release of a minor version |
+| `X` | The newest release of a major version (from `2.x` on) |
+| `X.Y.Z` | An exact release |
 
-Pre-releases (`X.Y.ZrcN` and similar) get only the exact tag. See the [releases](https://github.com/kvitkx/lmao/releases).
-
-The same image (same digest) is also published to GHCR: `ghcr.io/kvitkx/lmao`.
+Pre-releases (`X.Y.ZrcN` and similar) get only the exact tag. See the [releases](https://github.com/kvitkx/lmao/releases). The same image (same digest) is also on GHCR: `ghcr.io/kvitkx/lmao`.
 
 ## Verify the image
 

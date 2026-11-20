@@ -10,6 +10,8 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
+ROOT = Path(__file__).parent.parent
+
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img",
     "input", "link", "meta", "source", "track", "wbr",
@@ -81,7 +83,7 @@ def test_index_html_builds_markdown_with_the_directive(client):
 
 
 def test_scripts_never_write_html():
-    scripts = Path(__file__).parent.parent / "frontend"
+    scripts = ROOT / "frontend"
 
     assert list(scripts.glob("*.ts"))
     for path in scripts.glob("*.ts"):
@@ -98,9 +100,6 @@ def test_offscreen_eval_blocks_are_deferred_but_printed():
     assert "content-visibility: auto" in css
     # print shows every block
     assert "content-visibility: visible" in css
-
-
-ROOT = Path(__file__).parent.parent
 
 
 def test_index_html_uses_the_built_stylesheet(client):

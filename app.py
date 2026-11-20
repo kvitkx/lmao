@@ -201,7 +201,7 @@ def _run_dir(task_id: str) -> str | None:
 
 
 def _read_run(task_id: str) -> dict | None:
-    """Reads the results of a run, or None if it is missing or not schema v2."""
+    """Reads the results of a run, or None if it is missing or not in the current schema."""
     folder = _run_dir(task_id)
     if folder is None:
         return None
@@ -479,7 +479,7 @@ def stream_status(task_id: str):
 def get_history():
     """Retrieves a list of all past evaluations stored on disk.
 
-    Runs that are not schema v2 (old format, corrupted files) are skipped.
+    Runs in another schema version (old format, corrupted files) are skipped.
 
     Returns:
         Response: A JSON list of historical run metadata, sorted by newest first.

@@ -1,8 +1,8 @@
 """Export of saved results as CSV and Markdown.
 
 Pure module: no I/O. It renders the content of evaluation_results.json
-(schema v2) as text. Aggregates come from `summary`, nothing is recomputed
-here. Everything that comes from a model or a user is untrusted: CSV cells are
+as text. Aggregates come from `summary`, nothing is recomputed here.
+Everything that comes from a model or a user is untrusted: CSV cells are
 defused against spreadsheet formulas, and Markdown blocks are fenced or quoted
 so they cannot break the structure of the document.
 """
