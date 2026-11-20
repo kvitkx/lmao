@@ -8,7 +8,7 @@ so the estimate follows them when they change.
 
 import math
 
-from .evaluator import JUDGE_NUM_PREDICT
+from .judge import JUDGE_NUM_PREDICT
 from .prompts import (
     GRADER_SYSTEM,
     MAX_ANSWER_WORDS,

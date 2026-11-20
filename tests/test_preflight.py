@@ -2,7 +2,7 @@
 Unit tests for the connection preflight. The provider is a scripted fake.
 """
 
-from core.evaluator import JUDGE_NUM_PREDICT
+from core.judge import JUDGE_NUM_PREDICT
 from core.preflight import CHECK_TIMEOUT_SEC, DETAIL_LIMIT, run_preflight
 from core.prompts import GRADE_SCHEMA
 from core.provider import Provider

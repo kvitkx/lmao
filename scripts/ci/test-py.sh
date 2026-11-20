@@ -26,7 +26,6 @@ rm -rf -- htmlcov
 container="$(
     docker create \
         --network none \
-        --env PYTHON_DOTENV_DISABLED=1 \
         --env FLASK_DEBUG=0 \
         --env OLLAMA_BASE_URL=http://127.0.0.1:11434 \
         --env COVERAGE_FILE=/tmp/ci-reports/.coverage \

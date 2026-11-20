@@ -8,7 +8,7 @@ exception. Details come from the provider, which already hides the key.
 
 import time
 
-from .evaluator import JUDGE_NUM_PREDICT
+from .judge import JUDGE_NUM_PREDICT
 from .prompts import (
     GRADE_SCHEMA,
     GRADER_SYSTEM,

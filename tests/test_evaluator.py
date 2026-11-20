@@ -15,13 +15,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.evaluator import (
+from core.evaluator import EvaluationPipeline, replay_events
+from core.judge import (
     JUDGE_NUM_CTX,
     JUDGE_NUM_PREDICT,
     JUDGE_SEED,
-    EvaluationPipeline,
     judge_kwargs,
-    replay_events,
 )
 from core.prompts import (
     CATEGORIES,

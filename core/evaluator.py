@@ -15,7 +15,6 @@ stopped between two steps and resumed later, also after an error or after the
 server died: a resumed run skips the steps that are already done.
 """
 
-import json
 import os
 import re
 import threading
@@ -24,6 +23,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 
+from .jsonfile import read_json, write_json
+from .judge import JUDGE_NUM_CTX, judge_kwargs, judge_options
 from .prompts import (
     GRADE_SCHEMA,
     GRADER_SYSTEM,
@@ -35,7 +36,7 @@ from .prompts import (
     build_summary_prompt,
     parse_grade,
 )
-from .provider import JUDGE_OLLAMA, JUDGE_OPENAI, Provider
+from .provider import JUDGE_OLLAMA, JUDGE_OPENAI, KEEP_ALIVE, Provider
 from .scoring import (
     STATUS_GENERATION_ERROR,
     STATUS_JUDGE_ERROR,
@@ -70,13 +71,8 @@ SOURCE_GENERATED = "generated"
 SOURCE_PROVIDED = "provided"
 SOURCE_NONE = "none"
 
-# Models stay loaded between the calls of one phase and are unloaded explicitly.
-KEEP_ALIVE = "10m"
 # Small models can loop forever; the cap keeps one bad answer from stalling a run.
 CANDIDATE_OPTIONS = {"num_predict": 1000}
-JUDGE_NUM_CTX = 8192
-JUDGE_NUM_PREDICT = 1000
-JUDGE_SEED = 42
 MAX_REFERENCE_ATTEMPTS = 2
 MAX_GRADE_ATTEMPTS = 3
 # Parallel judge calls in cloud mode; lower it if the cloud rate-limits requests.
@@ -97,31 +93,6 @@ class RunCancelled(Exception):
 def step_key(phase: str, model: str | None = None, question: str | None = None) -> str:
     """The id of a step. Same shape as the key of the rows in the UI."""
     return f"{phase}:{model or ''}:{question or ''}"
-
-
-def _judge_options(attempt: int = 0) -> dict:
-    """Deterministic judge options. The seed changes per attempt, because an
-    identical retry at temperature 0 would return the identical reply."""
-    return {
-        "temperature": 0,
-        "seed": JUDGE_SEED + attempt,
-        "num_ctx": JUDGE_NUM_CTX,
-        "num_predict": JUDGE_NUM_PREDICT,
-    }
-
-
-def judge_kwargs(system_prompt: str, attempt: int = 0, format=None) -> dict:
-    """What every judge call sends besides the prompt.
-
-    One place for the run and for the request preview, so they cannot drift.
-    """
-    return {
-        "system_prompt": system_prompt,
-        "format": format,
-        "think": False,
-        "options": _judge_options(attempt),
-        "keep_alive": KEEP_ALIVE,
-    }
 
 
 def _empty_metrics() -> dict:
@@ -161,23 +132,6 @@ def _new_question(index: int, test_case: dict) -> dict:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def _write_json(path: str, data: dict) -> None:
-    """Writes through a temporary file: a crash never leaves half a file."""
-    temporary = f"{path}.tmp"
-    with open(temporary, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(temporary, path)
-
-
-def _read_json(path: str) -> dict:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError, ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _entry_for(question: dict, model: str) -> dict | None:
@@ -403,7 +357,7 @@ class _Checkpoint:
                 "text": "",
             }
 
-        _write_json(
+        write_json(
             os.path.join(self.folder, "technical_metrics.json"),
             {
                 "task_id": self.header["task_id"],
@@ -413,7 +367,7 @@ class _Checkpoint:
                 "footprints": self.footprints,
             },
         )
-        _write_json(
+        write_json(
             os.path.join(self.folder, "evaluation_results.json"),
             {
                 "schema_version": SCHEMA_VERSION,
@@ -496,7 +450,7 @@ class EvaluationPipeline:
             "lmao_version": lmao_version(),
             "ollama_version": self.provider.get_version(),
             "candidate_params": {"think": False, **CANDIDATE_OPTIONS},
-            "judge_params": _judge_options(),
+            "judge_params": judge_options(),
         }
 
     def run_evaluation(
@@ -554,7 +508,9 @@ class EvaluationPipeline:
                     if step_key(PHASE_ANSWER, entry["model_name"], question["id"])
                     in finished
                 ]
-            technical = _read_json(os.path.join(run_folder, "technical_metrics.json"))
+            technical = (
+                read_json(os.path.join(run_folder, "technical_metrics.json")) or {}
+            )
             run_info = saved.get("run") or self._run_info()
 
         cloud = judge_kind != JUDGE_OLLAMA

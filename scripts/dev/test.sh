@@ -10,9 +10,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 status=0
 
 log "pytest"
-dev_run \
-    --env PYTHON_DOTENV_DISABLED=1 \
-    app pytest -p no:cacheprovider "$@" || status=1
+dev_run app pytest -p no:cacheprovider "$@" || status=1
 
 scripts/ci/test-js.sh || status=1
 
