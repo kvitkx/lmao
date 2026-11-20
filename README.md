@@ -32,23 +32,17 @@ Pick a judge model, the candidates and your own questions. lmao runs every candi
 - One model loaded at a time, so it fits on a regular GPU (or CPU)
 - Scores and the recommendation are computed in code; the judge only writes the summary
 - Your own questions with optional reference answers, import and export as JSON
-- Run archive, export to JSON, CSV and Markdown
-- Local by default; the judge can also be an Ollama cloud model or any OpenAI-compatible API, and then it grades in parallel ([what leaves your machine](SECURITY.md))
 - Stop a run at any time and resume it later, also after a restart
+- Run archive, export to JSON, CSV and Markdown
+- Local judge by default; an Ollama cloud or OpenAI-compatible judge is optional
 
-## How scoring works
-
-The judge writes a reference answer for each question (or you provide one), then grades every answer from 0 to 100 in five bands; 70+ is a pass. The recommendation is the fastest model with a pass rate of at least 70%, otherwise the one with the best median.
+The judge grades every answer from 0 to 100 in five bands; 70+ is a pass. The recommendation is the fastest model that passes at least 70% of its answers, otherwise the one with the best median.
 
 ## Quick start
 
-You need at least two models in Ollama: one judge and one candidate (they can be the same, but then the score may be biased). Pull them with `ollama pull MODEL_NAME`.
+You need [Ollama](https://ollama.com) models: at least one judge and one candidate (they can be the same model, but then the score may be biased). With the setup below, Ollama runs next to lmao and you pull models into it.
 
-Pick one way to run lmao.
-
-### With make (recommended)
-
-Requires Docker with Compose v2, GNU Make and Bash. NVIDIA Container Toolkit is needed only for GPU mode.
+Requires Docker with Compose v2, GNU Make and Bash. The NVIDIA Container Toolkit is needed only for GPU mode.
 
 ```bash
 git clone https://github.com/kvitkx/lmao.git
@@ -56,69 +50,34 @@ cd lmao
 
 make prod            # CPU
 make prod GPU=1      # NVIDIA GPU
-```
 
-Open **http://localhost:5001**. Compose starts the app and Ollama together. Pull the models into that Ollama:
-
-```bash
 make pull MODEL=MODEL_NAME
 ```
-Stop with `make down ENV=prod`. Run `make help` to list all commands.
 
-### With Docker
+Open **http://localhost:5001**. Stop with `make down ENV=prod`; `make help` lists every command.
 
-The official lmao image is available on [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) as `kvitkx/lmao` and on GHCR as `ghcr.io/kvitkx/lmao`. Both registries carry the same image (same digest). The Docker Hub page also has a Docker Compose example and the list of tags.
+Other ways to run:
 
-If Ollama runs on your machine:
+- **Docker image** (no clone, your own Ollama): [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) has the `docker run` command, a Compose file, the tags and how to verify the image. The same image is on `ghcr.io/kvitkx/lmao`.
+- **On the host with uv**: see [CONTRIBUTING](CONTRIBUTING.md).
 
-```bash
-docker run -d --name lmao \
-  -p 127.0.0.1:5000:5000 \
-  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  --add-host=host.docker.internal:host-gateway \
-  -v lmao_data:/app/data \
-  kvitkx/lmao:latest
-```
+Everything the server stores (run history, saved connection) lives in one folder, `data/`: `./data` in dev and with uv, a Docker volume otherwise.
 
-Open **http://localhost:5000**. Stop with `docker stop lmao`.
+## Remote judge
 
-- `--add-host` is needed on Linux; Docker Desktop on macOS and Windows resolves `host.docker.internal` on its own.
-- On Linux, Ollama must accept connections from the Docker bridge: start it with `OLLAMA_HOST=0.0.0.0`. Keep that port closed to your network.
-- To pull from GHCR, use `ghcr.io/kvitkx/lmao:latest` instead of `kvitkx/lmao:latest`.
-- Tags: `latest`, `X.Y` (for example `2.2`) and exact `X.Y.Z`. See the [releases](https://github.com/kvitkx/lmao/releases).
-- Verify the image: `gh attestation verify oci://ghcr.io/kvitkx/lmao:latest --repo kvitkx/lmao` (for Docker Hub: `oci://docker.io/kvitkx/lmao:latest`)
+The judge is local by default. The `judge` tab in the setup panel also offers:
 
-### With uv
+- **ollama cloud**: an Ollama cloud model (its name ends in `-cloud`).
+- **openai api**: any OpenAI-compatible endpoint (OpenAI, OpenRouter, vLLM, LM Studio). Add a connection: base URL, API key, judge model and, optionally, prices per million tokens for the cost estimate. `test` checks the model list, structured output and seed support.
 
-Requires [uv](https://docs.astral.sh/uv/) and a running Ollama. uv installs the right Python (3.15) for you. The stylesheet, Alpine and the fonts are built in Docker, so you also need Docker and GNU Make: the first `make run` builds them, later runs rebuild them only after a template, a script or `static/css/input.css` changes. Without Docker the page has no styles.
+A remote judge grades in parallel. Before a run the start screen shows where the data goes, an estimate of calls, tokens and cost, and the exact request of one grading call. Questions, criteria, reference answers and candidate answers leave your machine, never the candidate model names. The key stays on the server and is never sent back to the browser. Details: [SECURITY](SECURITY.md).
 
-```bash
-git clone https://github.com/kvitkx/lmao.git
-cd lmao
+## More
 
-make run
-```
-
-Open **http://localhost:5000**. If Ollama is not on `http://localhost:11434`, set `OLLAMA_BASE_URL` (see `.env.example`).
-
-### Where data is stored
-
-The server keeps everything it stores (the run history and the saved connection) in one folder, `data/`: `./data` (make dev, uv), the `app_data` Docker volume (make prod) or the volume you mounted at `/app/data` (Docker).
-
-## Development
-
-```bash
-make dev                              # hot reload and css rebuild on http://localhost:5000
-make run                              # run on the host with uv (builds the css when needed)
-make test                             # Python and JS tests, quick (no coverage)
-make ci                               # everything GitHub CI runs
-```
-
-See [CONTRIBUTING](CONTRIBUTING.md) for commits, branches, PRs and releases, and [DESIGN](DESIGN.md) for the UI.
-
-## Security
-
-lmao is a local tool for one trusted user and has no authentication. Do not expose its port to a network. Details and how to report a vulnerability: [SECURITY](SECURITY.md).
+- [CONTRIBUTING](CONTRIBUTING.md): development, checks, commits and releases
+- [DESIGN](DESIGN.md): the interface
+- [SECURITY](SECURITY.md): security model and reporting a vulnerability. lmao is a local tool for one trusted user with no authentication: do not expose its port to a network.
+- [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) · [Releases](https://github.com/kvitkx/lmao/releases)
 
 ## License
 
