@@ -68,18 +68,6 @@ waiting_rows="$temporary_dir/waiting.tsv"
 awk -F'\t' -v to_fix="$to_fix_rows" -v waiting="$waiting_rows" \
     '{ print > ($4 == "" ? waiting : to_fix) }' "$findings"
 
-count_rows() {
-    local lines
-    lines="$(wc -l < "$1")"
-    echo "$((lines))"
-}
-
-markdown_table() {
-    echo "| Package | Severity | Vulnerable range | Fix |"
-    echo "|---|---|---|---|"
-    awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, ($4 == "" ? "–" : $4) }' "$1"
-}
-
 to_fix="$(count_rows "$to_fix_rows")"
 waiting="$(count_rows "$waiting_rows")"
 
@@ -92,12 +80,12 @@ waiting="$(count_rows "$waiting_rows")"
     fi
     if ((to_fix > 0)); then
         printf '**%s HIGH/CRITICAL vulnerabilities with a fix.** Bump the package in package.json (Dependabot opens a pull request for security fixes).\n\n' "$to_fix"
-        markdown_table "$to_fix_rows"
+        markdown_table "$to_fix_rows" Package Severity "Vulnerable range" Fix
         echo
     fi
     if ((waiting > 0)); then
         printf '**%s HIGH/CRITICAL vulnerabilities without a fix yet.** They do not fail the check.\n\n' "$waiting"
-        markdown_table "$waiting_rows"
+        markdown_table "$waiting_rows" Package Severity "Vulnerable range" Fix
         echo
     fi
 } | report_details

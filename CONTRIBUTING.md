@@ -55,6 +55,7 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as `v1.2.3-rc.1
 
 - Coverage must stay at or above `fail_under` in `pyproject.toml` (measured by `make ci`).
 - Python version: the `Dockerfile` `FROM python:` line and `requires-python` change together (`make check-python`).
+- Node image: the `css-deps` stage of the `Dockerfile` and the `node` entry of `docker/tools.Dockerfile` use the same image and digest, so tests run on the Node that builds the app. Bump both together (`make check-node`).
 - Workflows call make only as a single-line `run: make report-TARGET` (`make check-parity`).
 - Makefile recipes start with exactly one tab. New scripts are executable (`chmod +x`, `git add --chmod=+x`) and source `scripts/lib.sh` (`log`, `die`, `require_env`, `on_exit` instead of their own traps).
 - Do not edit `uv.lock` or `package-lock.json` by hand. Front-end packages are pinned to exact versions in `package.json`; after changing it, regenerate the lockfile in Docker:

@@ -122,6 +122,38 @@ docker_tool() {
 }
 
 
+# ---------- Tables ----------
+
+# count_rows FILE: the number of lines in FILE. The arithmetic strips the
+# padding that BSD wc (macOS) adds.
+count_rows() {
+    local lines
+    lines="$(wc -l < "$1")"
+    echo "$((lines))"
+}
+
+# markdown_table FILE HEADER...: a Markdown table of a tab-separated FILE.
+# One header per column; an empty cell is shown as a dash.
+markdown_table() {
+    local file="$1" header
+    shift
+    printf '|'
+    for header in "$@"; do
+        printf ' %s |' "$header"
+    done
+    printf '\n|'
+    for header in "$@"; do
+        printf '%s' '---|'
+    done
+    printf '\n'
+    awk -F'\t' '{
+        line = "|"
+        for (i = 1; i <= NF; i++) line = line " " ($i == "" ? "–" : $i) " |"
+        print line
+    }' "$file"
+}
+
+
 # ---------- Check report ----------
 # `scripts/ci/report.sh begin` opens a report by creating $REPORT_DIR/checks.tsv.
 # While it is open, every script that sources lib.sh records one row on exit

@@ -122,18 +122,6 @@ findings() {
     LC_ALL=C sort -u <<<"$rows" > "$2"
 }
 
-count_rows() {
-    local lines
-    lines="$(wc -l < "$1")"
-    echo "$((lines))"
-}
-
-markdown_table() {
-    echo "| ID | Package | Installed | Fixed | Severity | Target |"
-    echo "|---|---|---|---|---|---|"
-    awk -F'\t' '{ printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6 }' "$1"
-}
-
 # Docker's image date (2026-11-04T05:12:33.123456789Z) as epoch seconds.
 # GNU date first, BSD date (macOS) as the fallback.
 epoch_of() {
@@ -215,7 +203,7 @@ fi
     if ((to_fix > 0)); then
         printf '**%s fixable HIGH/CRITICAL vulnerabilities that the newest %s does not have.** Rebuild the image or bump the base image or a dependency.\n\n' \
             "$to_fix" "$base_ref"
-        markdown_table "$to_fix_rows"
+        markdown_table "$to_fix_rows" ID Package Installed Fixed Severity Target
         echo
     fi
     if ((waiting > 0)); then
@@ -225,7 +213,7 @@ fi
             printf ' **The limit is exceeded, so they fail the scan.**'
         fi
         printf '\n\n'
-        markdown_table "$waiting_rows"
+        markdown_table "$waiting_rows" ID Package Installed Fixed Severity Target
         echo
     fi
 } | report_details
