@@ -36,7 +36,7 @@ Workflows contain no check logic: they only call `make report-TARGET`, and the t
 - The Security workflow does not run on pull requests. After changing it or its scripts, run `make security`, then `gh workflow run security.yml --ref <branch>`. GitHub disables it after 60 days without repository activity (Dependabot merges do not count): re-enable it in the Actions tab.
 - A failing `audit-npm` means a vulnerable npm package has a fix: merge the Dependabot security PR, or bump the package in `package.json` and regenerate the lockfile (see below).
 - A failing `scan-published` means the published image needs a new release, usually for a base image fix already on `main`: run `make bump`.
-- `scan-image` sorts findings into *to fix* (the newest base image does not have them: rebuild or bump) and *waiting* (the newest base image has them too). *Waiting* only warns until the base image is older than `BASE_MAX_AGE_DAYS` (14, set in `ci.mk`).
+- `scan-image` sorts findings into *to fix* (the newest base image does not have them: rebuild or bump) and *waiting* (the newest base image has them too). *Waiting* only warns until the base image is older than `BASE_MAX_AGE_DAYS` (30, set in `ci.mk`).
 
 ## Branches, commits, pull requests
 
