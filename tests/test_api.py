@@ -36,7 +36,7 @@ def _parse_sse(response):
 
 
 def _run(judge="judge-model", models=("m1", "m2"), questions=2):
-    """The parts of a schema v2 evaluation_results.json the API reads."""
+    """The parts of a schema v3 evaluation_results.json the API reads."""
     return {
         "schema_version": 3,
         "judge_model": judge,

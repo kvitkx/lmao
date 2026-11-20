@@ -20,7 +20,7 @@
 {%- endmacro %}
 
 {# Markdown blocks from parseMarkdown(), built as DOM by the `x-md` directive
-   (lmao.js, tree from markdownTree() in lib.js). Only createElement and text
+   (lmao.ts, tree from markdownTree() in lib.ts). Only createElement and text
    nodes: HTML in a model answer is shown as text, never executed. Bold is fg
    colour (only 100/300 are loaded). #}
 {% macro md(blocks) -%}
