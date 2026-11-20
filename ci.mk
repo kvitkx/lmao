@@ -54,7 +54,7 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js \
+        check-python check-node lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
@@ -77,10 +77,13 @@ security: # Exactly what the daily Security workflow runs (uses your gh login).
 check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python version, lint, audit, type-check the front end, run Python and JS tests.
+check-code: check-python check-node lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python and Node versions, lint, audit, type-check the front end, run Python and JS tests.
 
 check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
+
+check-node: # Dockerfile and docker/tools.Dockerfile use the same Node image.
+	scripts/ci/check-node.sh
 
 check-image: lint-docker build-prod test-image # Lint Docker config, build and test prod image.
 
