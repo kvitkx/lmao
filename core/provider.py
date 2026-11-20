@@ -9,6 +9,8 @@ safe default, so a remote provider implements just the two abstract methods.
 from abc import ABC, abstractmethod
 
 GENERATE_TIMEOUT_SEC = 600
+# Models stay loaded between the calls of one phase and are unloaded explicitly.
+KEEP_ALIVE = "10m"
 
 # Where the judge of a run is served. `ollama` is the local Ollama (one model in
 # memory at a time); the other two grade in parallel.

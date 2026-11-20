@@ -5,7 +5,7 @@
 Requires Docker with Compose v2, GNU Make and Bash. Everything runs through Docker; Node is not needed on the host. `make help` lists the commands and the variables they accept (`ENV`, `GPU`, `MODEL`, `ARGS`, `PART`); keep that list in `Makefile` up to date when you add one.
 
 - `make dev`: the app with hot reload on http://localhost:5000. It rebuilds `static/css/app.css` and `static/js/` whenever a template, a script or `static/css/input.css` changes.
-- `make run`: the app on the host with [uv](https://docs.astral.sh/uv/) (it installs Python 3.15). It builds the front-end files in Docker when they are missing or outdated; `make css` does only that, `make -B css` forces it. Without Docker the page has no styles. If Ollama is not on `http://localhost:11434`, set `OLLAMA_BASE_URL` (see `.env.example`).
+- `make run`: the app on the host with [uv](https://docs.astral.sh/uv/) (it installs Python 3.15). It builds the front-end files in Docker when they are missing or outdated; `make css` does only that, `make -B css` forces it. Without Docker the page has no styles. If Ollama is not on `http://localhost:11434`, set the `OLLAMA_BASE_URL` environment variable, for example `OLLAMA_BASE_URL=http://ollama-host:11434 make run`.
 
 ## Workflow
 
@@ -36,7 +36,7 @@ Workflows contain no check logic: they only call `make report-TARGET`, and the t
 - The Security workflow does not run on pull requests. After changing it or its scripts, run `make security`, then `gh workflow run security.yml --ref <branch>`. GitHub disables it after 60 days without repository activity (Dependabot merges do not count): re-enable it in the Actions tab.
 - A failing `audit-npm` means a vulnerable npm package has a fix: merge the Dependabot security PR, or bump the package in `package.json` and regenerate the lockfile (see below).
 - A failing `scan-published` means the published image needs a new release, usually for a base image fix already on `main`: run `make bump`.
-- `scan-image` sorts findings into *to fix* (the newest base image does not have them: rebuild or bump) and *waiting* (the newest base image has them too). *Waiting* only warns until the base image is older than `BASE_MAX_AGE_DAYS` (14, set in `ci.mk`).
+- `scan-image` sorts findings into *to fix* (the newest base image does not have them: rebuild or bump) and *waiting* (the newest base image has them too). *Waiting* only warns until the base image is older than `BASE_MAX_AGE_DAYS` (30, set in `ci.mk`).
 
 ## Branches, commits, pull requests
 

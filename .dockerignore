@@ -29,7 +29,6 @@ static/fonts/
 # Secrets
 .env
 .env.*
-!.env.example
 
 # Application State & Logs
 data/

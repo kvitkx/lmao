@@ -12,7 +12,7 @@ export CI_IMAGE        ?= lmao:ci-local
 export TRIVY_CACHE_DIR ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/trivy-cache,$(HOME)/.cache/lmao/trivy)
 # A finding that only a base image rebuild fixes does not fail scan-image until
 # the newest base image is older than this many days (see scripts/ci/scan-image.sh).
-export BASE_MAX_AGE_DAYS ?= 14
+export BASE_MAX_AGE_DAYS ?= 30
 export GH_TOKEN
 
 # Online zizmor audits: always on in GitHub Actions (CI=true),

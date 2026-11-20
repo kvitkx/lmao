@@ -14,7 +14,6 @@ import threading
 import time
 from datetime import datetime
 
-from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
@@ -33,17 +32,16 @@ from core.evaluator import (
     RUN_STOPPED,
     SCHEMA_VERSION,
     EvaluationPipeline,
-    judge_kwargs,
     replay_events,
 )
 from core.export import to_csv, to_markdown
+from core.jsonfile import read_json
+from core.judge import judge_kwargs
 from core.ollama_client import OllamaClient
 from core.openai_client import OpenAIClient
 from core.preflight import run_preflight
 from core.prompts import GRADE_SCHEMA, GRADER_SYSTEM, build_grading_prompt
 from core.provider import JUDGE_OLLAMA, JUDGE_OPENAI, JUDGE_PROVIDERS
-
-load_dotenv()
 
 app = Flask(__name__)
 
@@ -173,18 +171,6 @@ def _run_task(
         )
 
 
-def _read_json(path: str) -> dict | None:
-    """Reads a JSON object from disk, or None if it is missing or unreadable."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError:
-        return None
-    except ValueError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _run_dir(task_id: str) -> str | None:
     """The folder of a run, or None if the id is not a run id.
 
@@ -205,7 +191,7 @@ def _read_run(task_id: str) -> dict | None:
     folder = _run_dir(task_id)
     if folder is None:
         return None
-    data = _read_json(os.path.join(folder, "evaluation_results.json"))
+    data = read_json(os.path.join(folder, "evaluation_results.json"))
     if data is None or data.get("schema_version") != SCHEMA_VERSION:
         return None
     return data
@@ -245,7 +231,7 @@ def _load_run(task_id: str) -> tuple[dict | None, tuple | None]:
         return None, (jsonify({"error": "Results not found or not ready"}), 404)
 
     metrics_path = os.path.join(_run_dir(safe_task_id) or "", "technical_metrics.json")
-    metrics = (_read_json(metrics_path) or {}).get("metrics", {})
+    metrics = (read_json(metrics_path) or {}).get("metrics", {})
     return {**results, "metrics": metrics}, None
 
 
@@ -266,7 +252,7 @@ def _run_status(data: dict) -> str:
 
 def _title_of(folder: str) -> str | None:
     """The name a run was given, or None for the default one."""
-    title = (_read_json(os.path.join(folder, "meta.json")) or {}).get("title")
+    title = (read_json(os.path.join(folder, "meta.json")) or {}).get("title")
     return title.strip() if isinstance(title, str) and title.strip() else None
 
 
