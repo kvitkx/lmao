@@ -1197,6 +1197,18 @@ export function median(values: number[]): number | null {
     return n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
 }
 
+// Linear interpolation between the two closest ranks (the default of numpy).
+// p is a fraction, 0..1.
+export function quantile(values: number[], p: number): number | null {
+    const sorted = [...values].sort((a, b) => a - b);
+    const n = sorted.length;
+    if (!n) return null;
+    const at = (n - 1) * Math.min(1, Math.max(0, p));
+    const lower = Math.floor(at);
+    const upper = Math.ceil(at);
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (at - lower);
+}
+
 export function round1(value: number): number {
     return Math.round(value * 10) / 10;
 }

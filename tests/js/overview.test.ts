@@ -182,3 +182,19 @@ test("buildTable has a t/s column next to c/s", () => {
     assert.equal(a.cells.tps.best, true);
     assert.equal(b.cells.tps.bar, 25);
 });
+
+test("buildTable has a size column in GB on disk, lower is better", () => {
+    const models = [
+        stats("a", { mean: 80, size_bytes: 5e9 }),
+        stats("b", { mean: 40, size_bytes: 2e9 }),
+        stats("c", { mean: 20, size_bytes: null }),
+    ];
+
+    const [a, b, c] = overview.buildTable(models, same, overview.rankModels(models, null));
+
+    assert.deepEqual([a.cells.size.text, b.cells.size.text, c.cells.size.text], ["5.0", "2.0", "–"]);
+    assert.deepEqual([a.cells.size.best, b.cells.size.best, c.cells.size.best], [false, true, false]);
+    assert.deepEqual([a.cells.size.bar, b.cells.size.bar, c.cells.size.bar], [100, 40, null]);
+    assert.equal(overview.defaultDirection("size"), "asc");
+    assert.deepEqual(overview.COLUMNS.map((col) => col.key).slice(-3), ["tokPass", "size", "memory"]);
+});

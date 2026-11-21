@@ -10,6 +10,7 @@ import {
     median,
     niceStep,
     numeric,
+    quantile,
     questionLabel,
     round1,
     totalSteps,
@@ -307,13 +308,94 @@ function buildCategories(items: Item[], questions: Question[]): Categories {
     };
 }
 
+// --- score distribution -------------------------------------------------------
+
+// One column per model, in rank order. The line is the 25th to the 75th
+// percentile, not min to max: on a discrete scale almost every model has a 0
+// and a 100 somewhere, so min-max lines would all look the same. The extremes
+// stay in the tooltip.
+export interface SpreadPoint extends Who {
+    left: number; // % of the width: the centre of the model's column
+    low: number; // 25th percentile, a score 0..100
+    high: number; // 75th percentile
+    median: number;
+    mean: number;
+    min: number;
+    max: number;
+    title: string;
+}
+
+export interface Spread {
+    points: SpreadPoint[];
+    yTicks: Tick[]; // fixed 0..100, so runs stay comparable
+    missing: string[]; // models without a counted answer
+    label: string;
+}
+
+const SPREAD_TICKS = [0, 25, 50, 75, 100];
+
+// The scores of one model, counted the way core/scoring.py counts them.
+function scoresOfModel(model: string, questions: Question[]): number[] {
+    const scores: number[] = [];
+    for (const question of questions) {
+        for (const entry of question.results || []) {
+            if (entry.model_name !== model) continue;
+            const score = scoreOf(question, entry);
+            if (score !== null) scores.push(score);
+        }
+    }
+    return scores;
+}
+
+function buildSpread(items: Item[], questions: Question[]): Spread {
+    const points: SpreadPoint[] = [];
+    const missing: string[] = [];
+
+    items.forEach((item, i) => {
+        const scores = scoresOfModel(item.model, questions);
+        if (!scores.length) {
+            missing.push(item.short);
+            return;
+        }
+        const at = (p: number) => quantile(scores, p) as number;
+        const low = at(0.25);
+        const high = at(0.75);
+        const mid = at(0.5);
+        const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+        const min = Math.min(...scores);
+        const max = Math.max(...scores);
+        points.push({
+            ...who(item),
+            left: (100 * (i + 0.5)) / items.length,
+            low,
+            high,
+            median: mid,
+            mean,
+            min,
+            max,
+            title:
+                `${item.short}: p25–p75 ${round1(low)}–${round1(high)} · median ${round1(mid)}` +
+                ` · mean ${round1(mean)} · min ${min} · max ${max} · ${scores.length} answers`,
+        });
+    });
+
+    return {
+        points,
+        yTicks: SPREAD_TICKS.map((v) => ({ text: String(v), pos: v })),
+        missing,
+        label: `score distribution of ${points.length} models: a line from the 25th to the 75th percentile, a tick for the median and a square for the mean.`,
+    };
+}
+
 // --- all the panels -----------------------------------------------------------
 
 export interface Details {
     scoreGb: BarChart;
     tokPass: BarChart;
+    size: BarChart;
     memory: MemoryBar[];
     scatter: Scatter;
+    spread: Spread;
     categories: Categories;
 }
 
@@ -337,8 +419,18 @@ export function buildDetails(
             format: (v) => String(Math.round(v)),
             axisCut: true,
         }),
+        size: buildBars(items, {
+            pick: (s) => {
+                const bytes = numeric(s.size_bytes);
+                return bytes === null ? null : bytes / GB;
+            },
+            lowerIsBetter: true,
+            format: (v) => v.toFixed(1),
+            axisCut: false,
+        }),
         memory: buildMemory(items),
         scatter: buildScatter(items),
+        spread: buildSpread(items, questions),
         categories: buildCategories(items, questions),
     };
 }

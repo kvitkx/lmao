@@ -84,6 +84,7 @@ export type SortKey =
     | "length"
     | "scoreGb"
     | "tokPass"
+    | "size"
     | "memory";
 export type SortDirection = "asc" | "desc";
 
@@ -103,6 +104,7 @@ export const COLUMNS: Column[] = [
     { key: "length", label: "length", best: null },
     { key: "scoreGb", label: "score/GB", best: "high" },
     { key: "tokPass", label: "tok/pass", best: "low" },
+    { key: "size", label: "size GB", best: "low" },
     { key: "memory", label: "memory GB", best: null },
 ];
 
@@ -140,6 +142,7 @@ function valuesOf(m: ModelStats): Record<SortKey, number | null> {
         length: numeric(m.avg_chars),
         scoreGb: numeric(m.score_per_gb),
         tokPass: numeric(m.tokens_per_pass),
+        size: numeric(m.size_bytes),
         memory: numeric(m.memory_bytes),
     };
 }
@@ -154,6 +157,7 @@ function memoryText(m: ModelStats, total: number): string {
 function textOf(key: SortKey, m: ModelStats, value: number | null): string {
     if (value === null) return "–";
     if (key === "pass") return `${Math.round(value * 100)}%`;
+    if (key === "size") return (value / GB).toFixed(1);
     if (key === "memory") return memoryText(m, value);
     return String(value);
 }
