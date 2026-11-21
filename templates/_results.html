@@ -128,7 +128,7 @@
                         </div>
                         <div class="overflow-x-auto">
                             <div class="min-w-max">
-                                <div class="grid grid-cols-[minmax(180px,1fr)_repeat(10,76px)] items-center gap-x-15 py-12 border-b border-line text-fg-muted">
+                                <div class="grid grid-cols-[minmax(180px,1fr)_repeat(11,76px)] items-center gap-x-15 py-12 border-b border-line text-fg-muted">
                                     <div class="sticky left-0 bg-bg">model</div>
                                     <template x-for="col in modelColumns" :key="col.key">
                                         <button type="button" @click="sortModels(col.key)"
@@ -138,7 +138,7 @@
                                     </template>
                                 </div>
                                 <template x-for="r in modelRows" :key="r.model">
-                                    <div class="grid grid-cols-[minmax(180px,1fr)_repeat(10,76px)] items-center gap-x-15 py-12 border-b border-line tabular-nums">
+                                    <div class="grid grid-cols-[minmax(180px,1fr)_repeat(11,76px)] items-center gap-x-15 py-12 border-b border-line tabular-nums">
                                         <div class="sticky left-0 self-stretch flex items-center gap-12 min-w-0 bg-bg pr-15 normal-nums">
                                             {{ ui.rank_badge("r.rank.text", "r.rank.kind") }}
                                             <button type="button" @click="showIn('answers', r.anchor, 'model')"
@@ -169,7 +169,7 @@
                                 </template>
                             </div>
                         </div>
-                        <div class="pt-15 text-fg-muted">c/s = characters per second · t/s = tokens per second · time = median seconds per answer (lower is better) · length = average characters per answer (longer = more talkative) · tok/pass = tokens per correct answer (lower is better) · score/GB = mean score per GB on disk · memory = GB in VRAM + GB in RAM (offload) while loaded · * a dash means the value was not measured</div>
+                        <div class="pt-15 text-fg-muted">c/s = characters per second · t/s = tokens per second · time = median seconds per answer (lower is better) · length = average characters per answer (longer = more talkative) · tok/pass = tokens per correct answer (lower is better) · score/GB = mean score per GB on disk · size = model size on disk in GB (lower is better) · memory = GB in VRAM + GB in RAM (offload) while loaded · * a dash means the value was not measured</div>
                     </section>
 
                     {# 03 speed vs quality: mean score (y) against median chars/s (x) #}
@@ -266,6 +266,9 @@
                             {{ bar_panel("tokens / correct",
                                          "'generated tokens per pass · lower = better · dashed = median ' + overview.details.tokPass.medianText",
                                          "overview.details.tokPass") }}
+                            {{ bar_panel("disk size",
+                                         "'model size on disk, GB · lower = better · dashed = median ' + overview.details.size.medianText",
+                                         "overview.details.size") }}
 
                             {# memory: the part in VRAM is filled, the part in RAM is an outline #}
                             <div class="min-w-0 flex flex-col">
@@ -350,6 +353,47 @@
                                 <div x-show="!overview.details.scatter.points.length" class="pt-15 text-fg-muted">no model has both t/s and c/s.</div>
                                 <div x-show="overview.details.scatter.missing.length" class="text-fg-muted"
                                      x-text="'not plotted: ' + overview.details.scatter.missing.join(', ')"></div>
+                            </div>
+
+                            {# score distribution: p25-p75 line, median tick, mean square #}
+                            <div class="min-w-0 flex flex-col">
+                                <div class="flex justify-between items-baseline gap-15 pb-8 border-b border-line text-fg-muted">
+                                    <span class="shrink-0">score distribution</span>
+                                    <span class="min-w-0 text-right">line = p25–p75 · tick = median · square = mean</span>
+                                </div>
+                                <template x-if="overview.details.spread.points.length">
+                                    <div class="pt-44 pr-22 pb-55 pl-66">
+                                        <div class="relative h-240 border-l border-b border-line" role="img"
+                                             :aria-label="overview.details.spread.label">
+                                            <span class="absolute bottom-full right-full whitespace-nowrap pr-8 pb-8 text-fg-muted">score</span>
+                                            <template x-for="t in overview.details.spread.yTicks" :key="t.text">
+                                                <span class="absolute inset-x-0 border-t border-line" aria-hidden="true"
+                                                      :style="'bottom:' + t.pos + '%'"></span>
+                                            </template>
+                                            <template x-for="t in overview.details.spread.yTicks" :key="'label-' + t.text">
+                                                <span class="absolute right-full pr-8 translate-y-1/2 text-fg-muted"
+                                                      :style="'bottom:' + t.pos + '%'" x-text="t.text"></span>
+                                            </template>
+
+                                            <template x-for="p in overview.details.spread.points" :key="p.model">
+                                                <div class="absolute inset-y-0" :style="'left:' + p.left + '%'" :title="p.title">
+                                                    <span class="absolute w-px bg-fg-muted -translate-x-1/2"
+                                                          :style="'bottom:' + p.low + '%;height:' + (p.high - p.low) + '%'"></span>
+                                                    <span class="absolute size-8 border border-fg bg-bg -translate-x-1/2 translate-y-1/2"
+                                                          :style="'bottom:' + p.mean + '%'"></span>
+                                                    <span class="absolute w-15 h-2 bg-fg -translate-x-1/2 translate-y-1/2"
+                                                          :style="'bottom:' + p.median + '%'"></span>
+                                                    <span class="absolute top-full pt-8 -translate-x-1/2">
+                                                        {{ ui.rank_badge("p.rank.text", "p.rank.kind") }}
+                                                    </span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <div x-show="!overview.details.spread.points.length" class="pt-15 text-fg-muted">no model has a graded answer.</div>
+                                <div x-show="overview.details.spread.missing.length" class="text-fg-muted"
+                                     x-text="'not plotted: ' + overview.details.spread.missing.join(', ')"></div>
                             </div>
                         </div>
 

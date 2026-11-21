@@ -334,3 +334,72 @@ test("buildRunLines: judge places, singular nouns and short durations", () => {
     assert.ok(line.includes("judge j (openai api)"));
     assert.ok(line.endsWith("1 candidate · 1 question · 4 steps"));
 });
+
+test("disk size: GB on disk, lower is better, a cloud model is a dash", () => {
+    const { size } = build(
+        three({ a: { size_bytes: 2e9 }, b: { size_bytes: 5e9 }, c: { size_bytes: null } }),
+    );
+
+    assert.deepEqual(
+        size.bars.map((b) => [b.model, b.text, Math.round(b.width)]),
+        [
+            ["a", "2.0 · best", 40],
+            ["b", "5.0", 100],
+            ["c", "–", 0],
+        ],
+    );
+    assert.equal(size.medianText, "3.5");
+});
+
+test("score distribution: p25–p75, so a 0 and a 100 do not make every model look the same", () => {
+    const a = [0, 40, 60, 80, 100];
+    const b = [100, 100, 100, 100, 0];
+    const questions = a.map((score, i) =>
+        question(`q${i + 1}`, [answer("a", score), answer("b", b[i])]),
+    );
+
+    const { spread } = build(three(), questions);
+
+    assert.deepEqual(
+        spread.points.map((p) => [p.model, Math.round(p.left), p.low, p.high, p.median, p.mean, p.min, p.max]),
+        [
+            ["a", 17, 40, 80, 60, 56, 0, 100],
+            ["b", 50, 100, 100, 100, 80, 0, 100],
+        ],
+    );
+    assert.deepEqual(spread.missing, ["c"]);
+    assert.deepEqual(
+        spread.yTicks.map((t) => [t.text, t.pos]),
+        [["0", 0], ["25", 25], ["50", 50], ["75", 75], ["100", 100]],
+    );
+    assert.ok(spread.points[0].title.includes("p25–p75 40–80"));
+});
+
+test("score distribution counts answers like the scores: errors are 0, a truncated answer cannot pass", () => {
+    const questions = [
+        question("q1", [answer("a", 90)]),
+        question("q2", [answer("a", null, { status: "generation_error", category: null })]),
+        question("q3", [answer("a", 95, { status: "truncated" })]),
+        // no reference and a judge error are left out
+        question("q4", [answer("a", 10)], { no_reference: true }),
+        question("q5", [answer("a", null, { status: "judge_error", category: null })]),
+    ];
+
+    const { spread } = build([stats("a", { mean: 53 })], questions);
+    const [p] = spread.points;
+
+    assert.deepEqual(
+        [p.low, p.median, p.high, p.mean, p.min, p.max],
+        [34.5, 69, 79.5, 53, 0, 90],
+    );
+    assert.ok(p.title.endsWith("3 answers"));
+});
+
+test("score distribution: a model without a counted answer is listed, not plotted", () => {
+    const { spread } = build([stats("a", { mean: null })], [
+        question("q1", [answer("a", null, { status: "judge_error", category: null })]),
+    ]);
+
+    assert.deepEqual(spread.points, []);
+    assert.deepEqual(spread.missing, ["a"]);
+});

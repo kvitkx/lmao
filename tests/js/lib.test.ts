@@ -1458,3 +1458,12 @@ test("connectionStatus: testing, not tested, reachable and failed", () => {
         { dot: false, tone: "text-warn", text: "models · no models (HTTP 404)" },
     );
 });
+
+test("quantile interpolates between ranks and ignores the input order", () => {
+    assert.equal(lib.quantile([1, 2, 3, 4, 5], 0.25), 2);
+    assert.equal(lib.quantile([5, 1, 4, 2, 3], 0.5), 3);
+    assert.equal(lib.quantile([1, 2, 3, 4], 0.25), 1.75);
+    assert.equal(lib.quantile([7], 0.75), 7);
+    assert.equal(lib.quantile([1, 2, 3], 2), 3);
+    assert.equal(lib.quantile([], 0.5), null);
+});
