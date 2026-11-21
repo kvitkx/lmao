@@ -977,7 +977,6 @@ export function matrixCell(
 export interface EvalEntry {
     qid: string;
     anchor: string;
-    index: number;
     label: string;
     question: string;
     error: boolean;
@@ -992,7 +991,7 @@ export interface EvalEntry {
     notes: string[];
 }
 
-function evalEntry(question: Question, result: Entry, index: number): EvalEntry {
+function evalEntry(question: Question, result: Entry): EvalEntry {
     const generationFailed = result.status === "generation_error";
     const failed = isFailed(result);
     const notes: string[] = [];
@@ -1002,7 +1001,6 @@ function evalEntry(question: Question, result: Entry, index: number): EvalEntry 
     return {
         qid: question.id,
         anchor: domId("answer", result.model_name, question.id),
-        index,
         label: questionLabel(question),
         question: question.question || "",
         error: failed,
@@ -1066,7 +1064,7 @@ function buildQuestionCard(
     );
 
     const entries: QuestionEntry[] = rows.map(({ stats, result, order }, i) => ({
-        ...evalEntry(question, result, order),
+        ...evalEntry(question, result),
         model: stats.model,
         short: display(stats.model),
         rank: ranks[i],
@@ -1219,7 +1217,6 @@ export interface ChartPoint {
     best: boolean;
     left: number;
     top: number;
-    flip: boolean;
     leading: boolean;
     title: string;
 }
@@ -1288,7 +1285,6 @@ export function buildChart(
             ...p,
             left,
             top: 100 - p.score,
-            flip: left > 70, // label on the left near the right edge
             leading: p.cps >= midCps && p.score >= midScore,
             title: `${p.short}: mean score ${p.score} · ${round1(p.cps)} c/s`,
         };
@@ -1517,7 +1513,7 @@ export function buildReport(raw: unknown): Readonly<Report> {
         const cells: ReportCell[] = [];
         const entries: EvalEntry[] = [];
         const results: Entry[] = [];
-        questions.forEach((question, index) => {
+        questions.forEach((question) => {
             const result = (question.results || []).find((r) => r.model_name === stats.model);
             if (!result) {
                 cells.push({ text: "–", warn: false, muted: true, title: "", bar: null, anchor: null });
@@ -1528,7 +1524,7 @@ export function buildReport(raw: unknown): Readonly<Report> {
                 ...matrixCell(question, result),
                 anchor: domId("answer", stats.model, question.id),
             });
-            entries.push(evalEntry(question, result, index));
+            entries.push(evalEntry(question, result));
         });
 
         const total = metrics[stats.model] || {};

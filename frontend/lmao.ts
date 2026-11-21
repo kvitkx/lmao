@@ -175,7 +175,6 @@ interface TopStatus {
     tone: string;
     dot: boolean;
     go: boolean;
-    stop: boolean;
     open: boolean;
     text: string;
 }
@@ -434,19 +433,18 @@ document.addEventListener("alpine:init", () => {
         },
 
         // Centre of the topbar. Built from the existing state only.
-        // `go`: a run is in progress but another screen is shown. `stop`: the run
-        // can be stopped. `open`: a run finished while another screen was open.
+        // `go`: a run is in progress but another screen is shown. `open`: a run
+        // finished while another screen was open.
         get topStatus(): TopStatus {
             const run = this.run;
             const figures = `${fmtClock(this.elapsed)} · ${run.done} / ${run.total}`;
-            const base = { dot: false, go: false, stop: false, open: false };
+            const base = { dot: false, go: false, open: false };
             if (this.busy) {
                 const stopping = run.status === "stopping";
                 return {
                     tone: "text-fg",
                     dot: true,
                     go: this.view !== "running",
-                    stop: !stopping,
                     open: false,
                     text: `${stopping ? "stopping" : "running"} · ${figures}`,
                 };
@@ -733,10 +731,6 @@ document.addEventListener("alpine:init", () => {
         },
 
         // --- openai connection ----------------------------------------------
-
-        get connectionHost(): string {
-            return hostOf(this.connection?.base_url) || (this.connection?.base_url ?? "");
-        },
 
         get maskedKey(): string {
             return maskKey(this.connection?.key_last4 ?? "");
