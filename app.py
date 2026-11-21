@@ -67,6 +67,15 @@ HEARTBEAT_SEC = 15
 # The last event of a stream: the run finished, failed or was stopped.
 FINAL_EVENTS = ("completed", "error", "cancelled")
 
+# Every change of TASKS happens under this condition, and every new event wakes
+# the SSE streams that wait on it (no polling).
+TASKS_CV = threading.Condition()
+
+# Finished tasks kept in memory, so a stream that broke right at the end can
+# still replay its events. Older ones are dropped: the run is saved on disk and
+# is opened from there.
+MAX_FINISHED_TASKS = 3
+
 
 def _to_json(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -131,6 +140,17 @@ def _validate_payload(data: dict) -> str | None:
     return None
 
 
+def _evict_finished() -> None:
+    """Drops the oldest finished tasks beyond MAX_FINISHED_TASKS.
+
+    A task that is in progress is never dropped. Call it with TASKS_CV held.
+    """
+    finished = [tid for tid, task in TASKS.items() if task["status"] != "started"]
+    finished.sort(key=lambda tid: TASKS[tid].get("finished_at", 0.0))
+    for tid in finished[: max(0, len(finished) - MAX_FINISHED_TASKS)]:
+        del TASKS[tid]
+
+
 def update_task_status(task_id: str, payload: dict) -> None:
     """Appends a new structured event payload to the task's event stream.
 
@@ -138,12 +158,20 @@ def update_task_status(task_id: str, payload: dict) -> None:
         task_id (str): The unique identifier of the task.
         payload (dict): The event data to append (e.g., {"type": "info", "message": "..."}).
     """
-    if task_id in TASKS:
+    with TASKS_CV:
+        task = TASKS.get(task_id)
+        if task is None:
+            return
+
         payload["timestamp"] = datetime.now().isoformat()
-        TASKS[task_id]["events"].append(payload)
+        task["events"].append(payload)
 
         if payload.get("type") in FINAL_EVENTS:
-            TASKS[task_id]["status"] = payload.get("type")
+            task["status"] = payload["type"]
+            task["finished_at"] = time.monotonic()
+            _evict_finished()
+
+        TASKS_CV.notify_all()
 
 
 def _run_task(
@@ -237,9 +265,10 @@ def _load_run(task_id: str) -> tuple[dict | None, tuple | None]:
 
 def _active_task() -> str | None:
     """The id of the run that is in progress, if any (one at a time)."""
-    for task_id, task in TASKS.items():
-        if task["status"] == "started":
-            return task_id
+    with TASKS_CV:
+        for task_id, task in TASKS.items():
+            if task["status"] == "started":
+                return task_id
     return None
 
 
@@ -340,11 +369,12 @@ def start_evaluation():
     task_id = f"run_{first_tag}_{timestamp}"
 
     # Initialize the task with an empty event list.
-    TASKS[task_id] = {
-        "status": "started",
-        "events": [{"type": "info", "message": "Task queued for execution."}],
-        "cancel": threading.Event(),
-    }
+    with TASKS_CV:
+        TASKS[task_id] = {
+            "status": "started",
+            "events": [{"type": "info", "message": "Task queued for execution."}],
+            "cancel": threading.Event(),
+        }
 
     # Start the evaluation pipeline in a background thread.
     thread = threading.Thread(target=_run_task, args=(task_id, data, judge_provider))
@@ -402,14 +432,13 @@ def resume_evaluation(task_id: str):
     if error:
         return error
 
-    TASKS[task_id] = {
-        "status": "started",
-        "events": [
-            {"type": "info", "message": "Run resumed."},
-            *replay_events(saved),
-        ],
-        "cancel": threading.Event(),
-    }
+    events = [{"type": "info", "message": "Run resumed."}, *replay_events(saved)]
+    with TASKS_CV:
+        TASKS[task_id] = {
+            "status": "started",
+            "events": events,
+            "cancel": threading.Event(),
+        }
     thread = threading.Thread(
         target=_run_task, args=(task_id, None, judge_provider, saved)
     )
@@ -437,26 +466,26 @@ def stream_status(task_id: str):
             return
 
         idx = 0
-        last_sent = time.monotonic()
         while True:
-            # Yield new events as they become available in the memory buffer.
-            if idx < len(task["events"]):
-                event = task["events"][idx]
-                yield f"data: {json.dumps(event)}\n\n"
-                last_sent = time.monotonic()
+            # Sleeps until update_task_status adds an event. No event within
+            # HEARTBEAT_SEC: a comment line, which EventSource ignores, but
+            # whose write fails when the client is gone and ends this generator.
+            with TASKS_CV:
+                ready = TASKS_CV.wait_for(
+                    lambda: idx < len(task["events"]), timeout=HEARTBEAT_SEC
+                )
+                event = task["events"][idx] if ready else None
 
-                # Stop streaming if the task has finished or failed.
-                if event.get("type") in FINAL_EVENTS:
-                    break
-                idx += 1
-            else:
-                # A comment line: EventSource ignores it, but the write fails
-                # when the client is gone, which ends this generator.
-                if time.monotonic() - last_sent >= HEARTBEAT_SEC:
-                    yield ": ping\n\n"
-                    last_sent = time.monotonic()
-                # Sleep briefly to avoid CPU spinning while waiting for events.
-                time.sleep(0.5)
+            if event is None:
+                yield ": ping\n\n"
+                continue
+
+            yield f"data: {json.dumps(event)}\n\n"
+
+            # Stop streaming if the task has finished or failed.
+            if event.get("type") in FINAL_EVENTS:
+                break
+            idx += 1
 
     return Response(generate(), mimetype="text/event-stream")
 
@@ -570,7 +599,8 @@ def delete_run(task_id: str):
         return jsonify({"error": "Results not found or not ready"}), 404
 
     shutil.rmtree(folder)
-    TASKS.pop(task_id, None)
+    with TASKS_CV:
+        TASKS.pop(task_id, None)
     return jsonify({"task_id": task_id}), 200
 
 
