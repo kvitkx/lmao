@@ -1284,3 +1284,56 @@ def test_rename_unknown_and_unsafe_ids(client):
 
     assert missing.status_code == 404
     assert unsafe.status_code == 400
+
+
+# --- task memory and stream wake-ups ----------------------------------------
+
+
+def _finished_task(finished_at, status="completed"):
+    return {"status": status, "events": [{"type": status}], "finished_at": finished_at}
+
+
+def test_only_the_newest_finished_tasks_are_kept(monkeypatch):
+    monkeypatch.setattr(app_module, "MAX_FINISHED_TASKS", 2)
+    for number in range(3):
+        app_module.TASKS[f"old{number}"] = _finished_task(number)
+    app_module.TASKS["t"] = {"status": "started", "events": []}
+
+    app_module.update_task_status("t", {"type": "completed", "message": "done"})
+
+    assert sorted(app_module.TASKS) == ["old2", "t"]
+
+
+def test_a_task_in_progress_is_never_evicted(client, monkeypatch):
+    monkeypatch.setattr(app_module, "MAX_FINISHED_TASKS", 0)
+    app_module.TASKS["live"] = {"status": "started", "events": []}
+    app_module.TASKS["t"] = {"status": "started", "events": []}
+
+    app_module.update_task_status("t", {"type": "error", "message": "boom"})
+
+    assert list(app_module.TASKS) == ["live"]
+    assert _parse_sse(client.get("/api/stream/t")) == [
+        {"type": "error", "message": "Task not found"}
+    ]
+
+
+def test_stream_waits_on_the_condition_and_does_not_poll(client, monkeypatch):
+    monkeypatch.setattr(app_module, "HEARTBEAT_SEC", 30)
+    app_module.TASKS["t"] = {"status": "started", "events": []}
+
+    def no_polling(_seconds):
+        raise AssertionError("the stream must not sleep")
+
+    monkeypatch.setattr(app_module.time, "sleep", no_polling)
+
+    def finish():
+        threading.Event().wait(0.2)
+        app_module.update_task_status("t", {"type": "completed", "message": "done"})
+
+    worker = threading.Thread(target=finish)
+    worker.start()
+    body = client.get("/api/stream/t").get_data(as_text=True)
+    worker.join()
+
+    assert '"type": "completed"' in body
+    assert ": ping" not in body
