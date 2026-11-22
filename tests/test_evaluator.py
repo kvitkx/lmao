@@ -31,6 +31,7 @@ from core.prompts import (
     build_answer_prompt,
 )
 from core.provider import Provider
+from core.scoring import thresholds
 from core.version import lmao_version
 
 TASK_ID = "run_test_20260101_000000"
@@ -288,7 +289,8 @@ def test_full_run_emits_events_and_saves_results():
     assert events[-2]["progress"] == {"done": 6, "total": 6}
 
     results = load(pipeline, "evaluation_results.json")
-    assert results["schema_version"] == 3
+    assert results["schema_version"] == 4
+    assert results["thresholds"] == thresholds()
     assert results["task_id"] == TASK_ID
     assert results["judge_model"] == "judge"
     assert results["mode"] == "local"

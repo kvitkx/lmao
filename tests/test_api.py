@@ -38,7 +38,7 @@ def _parse_sse(response):
 def _run(judge="judge-model", models=("m1", "m2"), questions=2):
     """The parts of a schema v3 evaluation_results.json the API reads."""
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "judge_model": judge,
         "questions_results": [
             {"id": f"q{number}", "results": []} for number in range(1, questions + 1)
@@ -949,7 +949,7 @@ def _live_task(task_id="live"):
 
 def _partial_run(status="stopped"):
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "task_id": RESUME_ID,
         "judge_model": "j",
         "judge_provider": "ollama",

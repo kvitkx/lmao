@@ -32,6 +32,25 @@ CONFIDENCE_LOW = "low"
 BYTES_PER_GB = 1e9
 
 
+def thresholds() -> dict:
+    """The limits the aggregates are computed with.
+
+    Saved in every run, so a reader of the results never has to copy them.
+
+    Returns:
+        dict: pass_min_score (a score at or above it passes), critical_below
+            (a score below it is a critical fail), pass_rate (the share of
+            passes a model needs to be recommended on speed, a fraction) and
+            min_questions (fewer graded questions mean low confidence).
+    """
+    return {
+        "pass_min_score": PASS_MIN_SCORE,
+        "critical_below": CRITICAL_BELOW,
+        "pass_rate": PASS_RATE_THRESHOLD,
+        "min_questions": MIN_QUESTIONS,
+    }
+
+
 def _median(values: list, digits: int):
     return round(statistics.median(values), digits) if values else None
 

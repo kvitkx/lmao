@@ -177,7 +177,7 @@ export function runResults(taskId: string, candidates: string[]): ApiResults {
         results: candidates.map((model, i) => answerEntry(model, 95 - 20 * i)),
     };
     return {
-        schema_version: 3,
+        schema_version: 4,
         task_id: taskId,
         judge_model: JUDGE,
         judge_provider: "ollama",
@@ -188,6 +188,7 @@ export function runResults(taskId: string, candidates: string[]): ApiResults {
         finished_steps: [],
         candidates,
         base_rationale: "",
+        thresholds: { pass_min_score: 70, critical_below: 40, pass_rate: 0.7, min_questions: 5 },
         finished_at: "2026-01-01T12:00:30",
         run: {
             started_at: "2026-01-01T12:00:00",

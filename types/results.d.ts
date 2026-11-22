@@ -1,4 +1,4 @@
-// Shape of evaluation_results.json (schema_version 3) and of /api/results/<id>.
+// Shape of evaluation_results.json (schema_version 4) and of /api/results/<id>.
 // Written by core/evaluator.py and core/scoring.py, read by frontend/lib.ts.
 // Keep it in step with SCHEMA_VERSION in core/evaluator.py.
 
@@ -101,6 +101,18 @@ export interface Summary {
     text: string;
 }
 
+/** The limits the aggregates were computed with (core/scoring.py). */
+export interface Thresholds {
+    /** A score at or above it passes. */
+    pass_min_score: number;
+    /** A score below it is a critical fail. */
+    critical_below: number;
+    /** Share of passes needed to be recommended on speed, a fraction 0..1. */
+    pass_rate: number;
+    /** Fewer graded questions than this give a low-confidence recommendation. */
+    min_questions: number;
+}
+
 /** How a run was made. Runs saved before this block existed have none. */
 export interface RunInfo {
     started_at: string;
@@ -114,7 +126,7 @@ export interface RunInfo {
 
 /** Content of evaluation_results.json. */
 export interface Results {
-    schema_version: 3;
+    schema_version: 4;
     task_id: string;
     judge_model: string;
     /** Where the judge ran. `mode` is "cloud" for every value but "ollama". */
@@ -128,6 +140,8 @@ export interface Results {
     finished_steps: string[];
     candidates: string[];
     base_rationale: string;
+    /** How the summary was counted. */
+    thresholds: Thresholds;
     /** null while the run is in progress. */
     finished_at: string | null;
     run?: RunInfo;

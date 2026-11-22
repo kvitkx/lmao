@@ -2,7 +2,13 @@
 // by category, the hardest questions and how the run was made. Pure: no DOM,
 // no Alpine.
 
-import type { ApiResults, Entry, ModelStats, Question } from "../types/results.js";
+import type {
+    ApiResults,
+    Entry,
+    ModelStats,
+    Question,
+    Thresholds,
+} from "../types/results.js";
 import {
     CATEGORY_LABELS,
     CATEGORY_ORDER,
@@ -18,10 +24,6 @@ import {
 import type { Rank } from "./overview.ts";
 
 const GB = 1e9;
-
-// Mirrors of the constants in core/scoring.py.
-const PASS_MIN_SCORE = 70;
-const PASS_THRESHOLD_PCT = 70;
 
 export interface Who {
     model: string;
@@ -270,7 +272,11 @@ function bucketOf(question: Question, entry: Entry): string | null {
 }
 
 // The bar and the pass number come from the same answers, so they agree.
-function buildCategories(items: Item[], questions: Question[]): Categories {
+function buildCategories(
+    items: Item[],
+    questions: Question[],
+    thresholds: Thresholds,
+): Categories {
     const used = new Set<string>();
     const bars = items.map((item): CategoryBar => {
         const counts = new Map<string, number>();
@@ -304,7 +310,7 @@ function buildCategories(items: Item[], questions: Question[]): Categories {
         legend: ALL_LABELS.filter((label) => BASE_LABELS.includes(label) || used.has(label)).map(
             (label) => ({ label, cls: segmentClass(label) }),
         ),
-        threshold: PASS_THRESHOLD_PCT,
+        threshold: Math.round(100 * thresholds.pass_rate),
     };
 }
 
@@ -335,24 +341,24 @@ export interface Spread {
 const SPREAD_TICKS = [0, 25, 50, 75, 100];
 
 // The scores of one model, counted the way core/scoring.py counts them.
-function scoresOfModel(model: string, questions: Question[]): number[] {
+function scoresOfModel(model: string, questions: Question[], passMin: number): number[] {
     const scores: number[] = [];
     for (const question of questions) {
         for (const entry of question.results || []) {
             if (entry.model_name !== model) continue;
-            const score = scoreOf(question, entry);
+            const score = scoreOf(question, entry, passMin);
             if (score !== null) scores.push(score);
         }
     }
     return scores;
 }
 
-function buildSpread(items: Item[], questions: Question[]): Spread {
+function buildSpread(items: Item[], questions: Question[], passMin: number): Spread {
     const points: SpreadPoint[] = [];
     const missing: string[] = [];
 
     items.forEach((item, i) => {
-        const scores = scoresOfModel(item.model, questions);
+        const scores = scoresOfModel(item.model, questions, passMin);
         if (!scores.length) {
             missing.push(item.short);
             return;
@@ -404,6 +410,7 @@ export function buildDetails(
     display: (model: string) => string,
     ranks: Map<string, Rank>,
     questions: Question[],
+    thresholds: Thresholds,
 ): Details {
     const items = itemsOf(models, display, ranks);
     return {
@@ -430,8 +437,8 @@ export function buildDetails(
         }),
         memory: buildMemory(items),
         scatter: buildScatter(items),
-        spread: buildSpread(items, questions),
-        categories: buildCategories(items, questions),
+        spread: buildSpread(items, questions, thresholds.pass_min_score),
+        categories: buildCategories(items, questions, thresholds),
     };
 }
 
@@ -451,11 +458,11 @@ export interface HardRow {
 // The score of an answer as core/scoring.py counts it: a generation error is 0,
 // a judge error and a question without a reference are left out, a truncated
 // answer cannot pass.
-function scoreOf(question: Question, entry: Entry): number | null {
+function scoreOf(question: Question, entry: Entry, passMin: number): number | null {
     if (entry.status === "generation_error") return 0;
     if (entry.status === "judge_error" || question.no_reference) return null;
     if (typeof entry.score !== "number") return null;
-    return entry.status === "truncated" ? Math.min(entry.score, PASS_MIN_SCORE - 1) : entry.score;
+    return entry.status === "truncated" ? Math.min(entry.score, passMin - 1) : entry.score;
 }
 
 // The questions with the lowest mean score across models (rounded).
@@ -463,6 +470,7 @@ export function buildHardest(
     questions: Question[],
     display: (model: string) => string,
     ranks: Map<string, Rank>,
+    thresholds: Thresholds,
     limit = 5,
 ): HardRow[] {
     const rankOf = (model: string) => ranks.get(model)?.rank ?? Infinity;
@@ -470,7 +478,7 @@ export function buildHardest(
 
     questions.forEach((question, order) => {
         const scored = (question.results || [])
-            .map((entry) => ({ entry, score: scoreOf(question, entry) }))
+            .map((entry) => ({ entry, score: scoreOf(question, entry, thresholds.pass_min_score) }))
             .filter((s): s is { entry: Entry; score: number } => s.score !== null);
         if (!scored.length) return;
 
@@ -491,7 +499,7 @@ export function buildHardest(
                 mean: Math.round(mean),
                 min: Math.min(...scores),
                 max: Math.max(...scores),
-                passed: `${scores.filter((s) => s >= PASS_MIN_SCORE).length}/${scores.length}`,
+                passed: `${scores.filter((s) => s >= thresholds.pass_min_score).length}/${scores.length}`,
                 best: topRank
                     ? { model: top.entry.model_name, short: display(top.entry.model_name), rank: topRank }
                     : null,
