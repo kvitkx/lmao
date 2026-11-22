@@ -29,6 +29,8 @@ const stats = (model: string, fields: Record<string, unknown> = {}): any => ({
 
 const same = (name: string) => name;
 
+const THRESHOLDS = { pass_min_score: 70, critical_below: 40, pass_rate: 0.7, min_questions: 5 };
+
 // Three models; the means fix the ranks a, b, c.
 function three(fields: Record<string, Record<string, unknown>> = {}): any[] {
     return [
@@ -39,7 +41,13 @@ function three(fields: Record<string, Record<string, unknown>> = {}): any[] {
 }
 
 function build(models: any[], questions: any[] = []) {
-    return details.buildDetails(models, same, overview.rankModels(models, null), questions);
+    return details.buildDetails(
+        models,
+        same,
+        overview.rankModels(models, null),
+        questions,
+        THRESHOLDS,
+    );
 }
 
 // An answer to a question, as saved in the results.
@@ -250,7 +258,7 @@ test("hardest questions: lowest mean first, errors count as 0, the best model na
         question("q5", [answer("a", null, { status: "judge_error" })]),
     ];
 
-    const rows = details.buildHardest(questions, same, ranks);
+    const rows = details.buildHardest(questions, same, ranks, THRESHOLDS);
 
     assert.deepEqual(
         rows.map((r) => [r.id, r.mean, r.min, r.max, r.passed, r.best?.model]),
@@ -274,11 +282,12 @@ test("hardest questions: a truncated answer cannot pass, and the list is cut", (
             [question("q1", [answer("a", 95, { status: "truncated" })])],
             same,
             ranks,
+            THRESHOLDS,
         )[0].passed,
         "0/1",
     );
-    assert.equal(details.buildHardest(many, same, ranks).length, 5);
-    assert.equal(details.buildHardest(many, same, ranks, 2).length, 2);
+    assert.equal(details.buildHardest(many, same, ranks, THRESHOLDS).length, 5);
+    assert.equal(details.buildHardest(many, same, ranks, THRESHOLDS, 2).length, 2);
 });
 
 function runData(extra: Record<string, unknown> = {}): any {
@@ -402,4 +411,34 @@ test("score distribution: a model without a counted answer is listed, not plotte
 
     assert.deepEqual(spread.points, []);
     assert.deepEqual(spread.missing, ["a"]);
+});
+
+test("the pass bound and the pass-rate line come from the results, not from the code", () => {
+    const strict = { ...THRESHOLDS, pass_min_score: 90, pass_rate: 0.8 };
+    const models = [stats("a", { mean: 90 })];
+    const ranks = overview.rankModels(models, null);
+    const questions = [question("q1", [answer("a", 80)]), question("q2", [answer("a", 95)])];
+
+    const hardest = details.buildHardest(questions, same, ranks, strict);
+    const { categories } = details.buildDetails(models, same, ranks, questions, strict);
+
+    assert.deepEqual(
+        hardest.map((r) => [r.id, r.passed]),
+        [
+            ["q1", "0/1"],
+            ["q2", "1/1"],
+        ],
+    );
+    assert.equal(categories.threshold, 80);
+});
+
+test("a truncated answer is capped just below the pass bound of the results", () => {
+    const strict = { ...THRESHOLDS, pass_min_score: 90 };
+    const models = [stats("a", { mean: 90 })];
+    const ranks = overview.rankModels(models, null);
+    const questions = [question("q1", [answer("a", 95, { status: "truncated" })])];
+
+    const { spread } = details.buildDetails(models, same, ranks, questions, strict);
+
+    assert.equal(spread.points[0].max, 89);
 });

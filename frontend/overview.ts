@@ -259,8 +259,8 @@ export function buildOverview(data: ApiResults): Readonly<Overview> {
     return Object.freeze({
         models: buildTable(models, display, ranks),
         chart: buildOverviewChart(models, display, recommended, ranks),
-        details: buildDetails(models, display, ranks, questions),
-        hardest: buildHardest(questions, display, ranks),
+        details: buildDetails(models, display, ranks, questions, data.thresholds),
+        hardest: buildHardest(questions, display, ranks, data.thresholds),
         runLines: buildRunLines(data),
     });
 }

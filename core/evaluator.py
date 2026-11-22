@@ -44,10 +44,11 @@ from .scoring import (
     STATUS_TRUNCATED,
     recommend,
     summarize_model,
+    thresholds,
 )
 from .version import lmao_version
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Everything the server stores lives under one directory: one Docker volume.
 DATA_DIR = "data"
 HISTORY_DIR = os.path.join(DATA_DIR, "history")
@@ -551,6 +552,7 @@ class EvaluationPipeline:
                 "candidates": candidates,
                 "base_rationale": base_rationale,
                 "run": run_info,
+                "thresholds": thresholds(),
             },
             questions,
             candidates,

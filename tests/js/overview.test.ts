@@ -139,6 +139,7 @@ test("defaultDirection puts the best values on top", () => {
 
 test("buildOverview builds the table and the chart of one run", () => {
     const data: any = {
+        thresholds: { pass_min_score: 70, critical_below: 40, pass_rate: 0.7, min_questions: 5 },
         summary: {
             models: [
                 stats("a", { mean: 90, median_cps: 10 }),
