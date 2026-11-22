@@ -79,3 +79,11 @@ def test_typescript_packages_are_pinned_to_exact_versions():
 
     for name in ("typescript", "@types/node", "@types/alpinejs"):
         assert re.fullmatch(r"\d+\.\d+\.\d+", dev[name])
+
+
+def test_playwright_is_pinned_to_an_exact_version():
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+
+    assert re.fullmatch(
+        r"\d+\.\d+\.\d+", package["devDependencies"]["@playwright/test"]
+    )
