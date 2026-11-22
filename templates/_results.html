@@ -322,12 +322,12 @@
                                             <svg aria-hidden="true" class="absolute inset-0 size-full overflow-visible pointer-events-none text-fg-muted"
                                                  viewBox="0 0 100 100" preserveAspectRatio="none">
                                                 <line x-show="overview.details.scatter.rays[0]" x1="0" y1="100"
-                                                      :x2="overview.details.scatter.rays[0]?.x2"
+                                                      :x2="overview.details.scatter.rays[0]?.x2 ?? 0"
                                                       :y2="100 - (overview.details.scatter.rays[0]?.y2 ?? 100)"
                                                       stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"
                                                       vector-effect="non-scaling-stroke"></line>
                                                 <line x-show="overview.details.scatter.rays[1]" x1="0" y1="100"
-                                                      :x2="overview.details.scatter.rays[1]?.x2"
+                                                      :x2="overview.details.scatter.rays[1]?.x2 ?? 0"
                                                       :y2="100 - (overview.details.scatter.rays[1]?.y2 ?? 100)"
                                                       stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"
                                                       vector-effect="non-scaling-stroke"></line>
