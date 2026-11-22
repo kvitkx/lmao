@@ -133,7 +133,7 @@ jobs:
       - name: Set up Trivy cache
         uses: ./.github/actions/setup-trivy-cache # zizmor: ignore[self-repository]
 
-      # Same target as in CI and locally. It never builds.
+      # Same target as in CI and locally. It never builds the image under test.
       - name: make report-test-image
         run: make report-test-image
 

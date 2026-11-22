@@ -5,5 +5,5 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["frontend", "types", "tests/js"]
+  "include": ["frontend", "types", "tests/js", "tests/dom", "playwright.config.ts"]
 }

@@ -54,7 +54,7 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python check-node lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js \
+        check-python check-node check-playwright lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js test-dom \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
@@ -77,7 +77,7 @@ security: # Exactly what the daily Security workflow runs (uses your gh login).
 check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python check-node lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python and Node versions, lint, audit, type-check the front end, run Python and JS tests.
+check-code: check-python check-node check-playwright lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python, Node and Playwright versions, lint, audit, type-check the front end, run Python and JS tests.
 
 check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
@@ -85,9 +85,12 @@ check-python: # Dockerfile and requires-python agree on Python version.
 check-node: # Dockerfile and docker/tools.Dockerfile use the same Node image.
 	scripts/ci/check-node.sh
 
+check-playwright: # package.json and the Dockerfile use the same Playwright version.
+	scripts/ci/check-playwright.sh
+
 check-image: lint-docker build-prod test-image # Lint Docker config, build and test prod image.
 
-test-image: smoke-test scan-image # Smoke-test and scan existing CI_IMAGE (no build).
+test-image: smoke-test test-dom scan-image # Smoke-test, browser-test and scan existing CI_IMAGE (it builds only the browser test image).
 
 
 # Building blocks
@@ -129,6 +132,9 @@ build-prod: # Build production image.
 
 smoke-test: # Smoke-test CI_IMAGE.
 	scripts/ci/smoke-test.sh
+
+test-dom: # Browser smoke test of CI_IMAGE (Playwright, API mocked).
+	scripts/ci/test-dom.sh
 
 scan-image: # Scan CI_IMAGE for vulnerabilities.
 	scripts/ci/scan-image.sh

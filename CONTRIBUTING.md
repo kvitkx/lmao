@@ -38,6 +38,8 @@ Workflows contain no check logic: they only call `make report-TARGET`, and the t
 - A failing `scan-published` means the published image needs a new release, usually for a base image fix already on `main`: run `make bump`.
 - `scan-image` sorts findings into *to fix* (the newest base image does not have them: rebuild or bump) and *waiting* (the newest base image has them too). *Waiting* only warns until the base image is older than `BASE_MAX_AGE_DAYS` (30, set in `ci.mk`).
 
+- `make test-image` also runs a browser smoke test (`tests/dom/`): Chromium from the Playwright image (the `dom-test` stage of the `Dockerfile`) drives the production image, and every `/api` call is mocked, so Ollama is not needed. Locally: `make build-prod test-dom`. A test fails when the page logs an error. Keep it small: it checks that the page and its Alpine glue work (boot, a fold, stop and resume, the estimate); the logic belongs in `tests/js` and `tests/*.py`.
+
 ## Branches, commits, pull requests
 
 - Branch: `<type>/<short-kebab-description>`, for example `feat/cloud-judge`. A version bump uses `chore/bump-X.Y.Z`.
@@ -56,6 +58,7 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as `v1.2.3-rc.1
 - Coverage must stay at or above `fail_under` in `pyproject.toml` (measured by `make ci`).
 - Python version: the `Dockerfile` `FROM python:` line and `requires-python` change together (`make check-python`).
 - Node image: the `css-deps` stage of the `Dockerfile` and the `node` entry of `docker/tools.Dockerfile` use the same image and digest, so tests run on the Node that builds the app. Bump both together (`make check-node`).
+- Playwright version: `@playwright/test` in `package.json` and the tag of the `dom-test` stage of the `Dockerfile` change together (`make check-playwright`).
 - Workflows call make only as a single-line `run: make report-TARGET` (`make check-parity`).
 - Makefile recipes start with exactly one tab. New scripts are executable (`chmod +x`, `git add --chmod=+x`) and source `scripts/lib.sh` (`log`, `die`, `require_env`, `on_exit` instead of their own traps).
 - Do not edit `uv.lock` or `package-lock.json` by hand. Front-end packages are pinned to exact versions in `package.json`; after changing it, regenerate the lockfile in Docker:

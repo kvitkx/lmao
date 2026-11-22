@@ -64,12 +64,31 @@ RUN sh scripts/build-assets.sh node_modules /build/out && \
 
 FROM css-deps AS typecheck
 
-COPY tsconfig.json tsconfig.check.json ./
+COPY tsconfig.json tsconfig.check.json playwright.config.ts ./
 COPY frontend/ frontend/
 COPY types/ types/
 COPY tests/js/ tests/js/
+COPY tests/dom/ tests/dom/
 
 RUN ./node_modules/.bin/tsc --project tsconfig.check.json
+
+
+# Browser smoke test (scripts/ci/test-dom.sh). The Playwright image brings the
+# browsers, and its version must equal @playwright/test in package.json
+# (make check-playwright). Never part of the production image.
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f AS dom-test
+
+WORKDIR /build
+
+COPY package.json package-lock.json ./
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts --no-audit --no-fund
+
+COPY tsconfig.json playwright.config.ts ./
+COPY tests/dom/ tests/dom/
+
+CMD ["npx", "playwright", "test"]
 
 
 # What the page loads from /static: `make css` exports it, the production
