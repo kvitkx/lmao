@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 
 FROM python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS base
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --python /usr/local/bin/python --no-python-downloads
 
 
-FROM node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS css-deps
+FROM node:26.13.1-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS css-deps
 
 WORKDIR /build
 
@@ -76,7 +76,7 @@ RUN ./node_modules/.bin/tsc --project tsconfig.check.json
 # Browser smoke test (scripts/ci/test-dom.sh). The Playwright image brings the
 # browsers, and its version must equal @playwright/test in package.json
 # (make check-playwright). Never part of the production image.
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f AS dom-test
+FROM mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579 AS dom-test
 
 WORKDIR /build
 
