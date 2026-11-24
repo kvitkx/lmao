@@ -28,7 +28,11 @@ export ACTIONLINT_IMAGE  := $(call tool_image,actionlint)
 export ZIZMOR_IMAGE      := $(call tool_image,zizmor)
 export HADOLINT_IMAGE    := $(call tool_image,hadolint)
 export SHELLCHECK_IMAGE  := $(call tool_image,shellcheck)
-export NODE_IMAGE        := $(call tool_image,node)
+# The Node image is pinned only in the css-deps stage of ./Dockerfile: the
+# single source of truth, updated by the weekly Dependabot "runtime" group.
+# CI tools (audit-npm, test-js) run on the same Node that builds the app.
+node_image = $(or $(shell sed -nE 's/^FROM[[:space:]]+(node:[^[:space:]]+)[[:space:]]+AS[[:space:]]+css-deps[[:space:]]*$$/\1/p' Dockerfile),$(error No node image (FROM node:... AS css-deps) in Dockerfile))
+export NODE_IMAGE        := $(call node_image)
 export TRIVY_IMAGE       := $(call tool_image,trivy)
 export REGISTRY_IMAGE    := $(call tool_image,registry)
 
@@ -54,7 +58,7 @@ run_report = scripts/ci/report.sh begin '$(1)'; \
 
 .PHONY: check ci security \
         check-workflows check-parity check-code check-image test-image \
-        check-python check-node check-playwright lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js test-dom \
+        check-python check-playwright lint-python lint-shell lint-docker audit audit-npm test-py test-js typecheck-js test-dom \
         build-dev build-prod smoke-test scan-image \
         scan-published zizmor-sarif
 
@@ -77,13 +81,10 @@ security: # Exactly what the daily Security workflow runs (uses your gh login).
 check-workflows: check-parity # Lint GitHub workflows (parity, actionlint, zizmor).
 	scripts/ci/lint-workflows.sh
 
-check-code: check-python check-node check-playwright lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python, Node and Playwright versions, lint, audit, type-check the front end, run Python and JS tests.
+check-code: check-python check-playwright lint-shell lint-python audit audit-npm typecheck-js test-py test-js # Check Python and Playwright versions, lint, audit, type-check the front end, run Python and JS tests.
 
 check-python: # Dockerfile and requires-python agree on Python version.
 	scripts/ci/check-python.sh
-
-check-node: # Dockerfile and docker/tools.Dockerfile use the same Node image.
-	scripts/ci/check-node.sh
 
 check-playwright: # package.json and the Dockerfile use the same Playwright version.
 	scripts/ci/check-playwright.sh
