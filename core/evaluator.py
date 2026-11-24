@@ -257,9 +257,7 @@ class _TokenBatch:
     what is left.
     """
 
-    def __init__(
-        self, send: Callable[[str], None], interval: float = TOKEN_BATCH_SEC
-    ):
+    def __init__(self, send: Callable[[str], None], interval: float = TOKEN_BATCH_SEC):
         self.send = send
         self.interval = interval
         self.parts: list[str] = []

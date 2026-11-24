@@ -161,10 +161,9 @@ def _drop_tokens(events: list, done: dict) -> None:
         event = events[i]
         if event is None:
             continue
-        same = (
-            event.get("model") == done.get("model")
-            and event.get("question") == done.get("question")
-        )
+        same = event.get("model") == done.get("model") and event.get(
+            "question"
+        ) == done.get("question")
         if event.get("type") == "answer_token" and same:
             events[i] = None
         elif event.get("type") == "answer_start" and same:

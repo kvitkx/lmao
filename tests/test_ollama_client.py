@@ -329,9 +329,7 @@ def test_generate_stream_stops_when_cancelled_and_closes_the_connection(mock_pos
         seen.append(text)
         cancel.set()
 
-    result = OllamaClient().generate_stream(
-        "m", "hi", on_token=on_token, cancel=cancel
-    )
+    result = OllamaClient().generate_stream("m", "hi", on_token=on_token, cancel=cancel)
 
     assert result == {"success": False, "cancelled": True, "error": "Cancelled."}
     assert seen == ["a"]
