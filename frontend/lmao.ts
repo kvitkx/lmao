@@ -243,8 +243,6 @@ document.addEventListener("alpine:init", () => {
 
     const SLOW_LOAD_MS = 8000;
 
-    // The last characters of an answer in progress, shown under its row.
-    const PREVIEW_CHARS = 280;
     // The browser reconnects by itself and sends Last-Event-ID, so the server
     // continues after the last event it got. After this long without a
     // connection the run is shown as failed, with `reconnect`.
@@ -1256,7 +1254,7 @@ document.addEventListener("alpine:init", () => {
             if (event.type === "answer_token") {
                 const row = this.step(event);
                 if (row && row.state === "running") {
-                    row.preview = (row.preview + (event.text ?? "")).slice(-PREVIEW_CHARS);
+                    row.preview += event.text ?? "";
                 }
                 return;
             }

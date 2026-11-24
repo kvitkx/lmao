@@ -180,7 +180,7 @@ The setup panel closes. Elapsed time and step count are in the topbar.
 
 **Columns fit the width.** The matrix shows as many question columns as fit (`ResizeObserver`), so wide windows or closed panels show more. When not all fit, the window follows the question in progress and each row gets edge counters (`‹ 6`, `8 ›`, warn if a hidden cell has an error). A line above the grid reads `24 questions · showing q07–q16`, with `follow current · on/off`, `‹ prev` and `next ›`; manual paging turns `follow current` off.
 
-**Now.** The calls in flight as status rows (verb, label, timer). In cloud mode several can run at once. An answer in progress shows its last 280 characters under its row, in muted mono, as they are written.
+**Now.** The calls in flight as status rows (verb, label, timer). In cloud mode several can run at once. An answer in progress shows the text written so far, in full, under its row (muted mono, wrapped, no height limit), growing as it is written.
 
 **Load notice.** Shown only after the first call of a model load group has been `running` for about 8 seconds. It says loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
