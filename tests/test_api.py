@@ -1337,3 +1337,78 @@ def test_stream_waits_on_the_condition_and_does_not_poll(client, monkeypatch):
 
     assert '"type": "completed"' in body
     assert ": ping" not in body
+
+
+# --- stream ids, Last-Event-ID and dropped tokens ---------------------------
+
+
+def _answer_event(kind, text=None, model="m", question="q1"):
+    event = {"type": kind, "phase": "answer", "model": model, "question": question}
+    if text is not None:
+        event["text"] = text
+    return event
+
+
+def _ids(body):
+    return [line for line in body.splitlines() if line.startswith("id: ")]
+
+
+def _finished_events():
+    return [
+        {"type": "info", "message": "a"},
+        {"type": "info", "message": "b"},
+        {"type": "completed", "message": "c"},
+    ]
+
+
+def test_stream_events_have_ids_and_a_reconnect_continues_after_the_last_one(client):
+    app_module.TASKS["t"] = {"status": "completed", "events": _finished_events()}
+
+    body = client.get("/api/stream/t").get_data(as_text=True)
+    resumed = client.get("/api/stream/t", headers={"Last-Event-ID": "0"})
+
+    assert _ids(body) == ["id: 0", "id: 1", "id: 2"]
+    assert [event["message"] for event in _parse_sse(resumed)] == ["b", "c"]
+
+
+@pytest.mark.parametrize("last", ["", "x", "-1", "99"])
+def test_stream_replays_everything_for_an_unusable_last_event_id(client, last):
+    app_module.TASKS["t"] = {"status": "completed", "events": _finished_events()}
+
+    response = client.get("/api/stream/t", headers={"Last-Event-ID": last})
+
+    assert [event["message"] for event in _parse_sse(response)] == ["a", "b", "c"]
+
+
+def test_stream_skips_dropped_events_and_keeps_the_ids(client):
+    events = _finished_events()
+    events[1] = None
+    app_module.TASKS["t"] = {"status": "completed", "events": events}
+
+    body = client.get("/api/stream/t").get_data(as_text=True)
+
+    assert _ids(body) == ["id: 0", "id: 2"]
+
+
+def test_the_tokens_of_a_finished_answer_are_dropped_but_the_slots_stay():
+    app_module.TASKS["t"] = {"status": "started", "events": []}
+
+    for event in (
+        _answer_event("answer_start"),
+        _answer_event("answer_token", "a"),
+        _answer_event("answer_token", "b"),
+        _answer_event("answer_start", model="n"),
+        _answer_event("answer_token", "c", model="n"),
+        _answer_event("answer_done"),
+    ):
+        app_module.update_task_status("t", event)
+
+    events = app_module.TASKS["t"]["events"]
+    assert [e and e["type"] for e in events] == [
+        "answer_start",
+        None,
+        None,
+        "answer_start",
+        "answer_token",
+        "answer_done",
+    ]

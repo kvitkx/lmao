@@ -80,6 +80,7 @@ export interface Step {
     endTs: number | null; // server timestamp, for the phase duration
     loading: boolean; // first call of a model load group: the load notice may apply
     announced: boolean; // the load notice was already announced to screen readers
+    preview: string; // the answer written so far, in full
 }
 
 // Same key on both sides: built from the SSE event fields (phase, model, question).
@@ -126,6 +127,7 @@ export function buildSteps(
         endTs: null,
         loading: false,
         announced: false,
+        preview: "",
     });
 
     const steps: Step[] = [];

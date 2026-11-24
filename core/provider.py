@@ -6,7 +6,9 @@ What exists only for local runtimes (unloading, size on disk, memory) has a
 safe default, so a remote provider implements just the two abstract methods.
 """
 
+import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 GENERATE_TIMEOUT_SEC = 600
 # Models stay loaded between the calls of one phase and are unloaded explicitly.
@@ -18,6 +20,11 @@ JUDGE_OLLAMA = "ollama"
 JUDGE_OLLAMA_CLOUD = "ollama_cloud"
 JUDGE_OPENAI = "openai"
 JUDGE_PROVIDERS = (JUDGE_OLLAMA, JUDGE_OLLAMA_CLOUD, JUDGE_OPENAI)
+
+
+def cancelled_result() -> dict:
+    """The result of a call that was cut off because the run was stopped."""
+    return {"success": False, "cancelled": True, "error": "Cancelled."}
 
 
 class Provider(ABC):
@@ -71,6 +78,48 @@ class Provider(ABC):
                 (total_time_sec, load_time_sec, eval_time_sec, tokens_generated,
                 tokens_per_second). On failure: success (False) and error (str).
         """
+
+    def generate_stream(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str = "",
+        format: str | dict | None = None,
+        think: bool | None = None,
+        options: dict | None = None,
+        keep_alive: int | str = 0,
+        timeout: int = GENERATE_TIMEOUT_SEC,
+        on_token: Callable[[str], None] | None = None,
+        cancel: threading.Event | None = None,
+    ) -> dict:
+        """Like `generate`, but reports the text while it is written.
+
+        The default makes one ordinary call and hands the whole text to
+        `on_token` at the end; a provider that can stream overrides it.
+
+        Args:
+            on_token (Callable, optional): Called with each piece of text.
+            cancel (threading.Event, optional): When set, the call stops.
+
+        Returns:
+            dict: The result of `generate`; a call that was cut off by `cancel`
+                is `cancelled_result()`.
+        """
+        if cancel is not None and cancel.is_set():
+            return cancelled_result()
+        result = self.generate(
+            model,
+            prompt,
+            system_prompt=system_prompt,
+            format=format,
+            think=think,
+            options=options,
+            keep_alive=keep_alive,
+            timeout=timeout,
+        )
+        if on_token is not None and result["success"] and result["response_text"]:
+            on_token(result["response_text"])
+        return result
 
     def unload(self, model: str) -> bool:
         """Frees the memory of a model. The default has nothing to free.

@@ -305,7 +305,7 @@
     </div>
     {{ ui.warn_notice("controlError", "controlError") }}
     {{ ui.info_strip("run.status === 'stopping'", "'stopping after the current call'",
-                     "'the model call in progress is not interrupted: a large local model can take up to 10 minutes. finished steps are kept.'") }}
+                     "'an answer in progress is cut off and answered again on resume. a judge call in progress finishes first: a large local model can take up to 10 minutes. finished steps are kept.'") }}
     {{ ui.info_strip("run.status === 'stopped'", "'run stopped · ' + run.done + ' of ' + run.total + ' steps done'",
                      "'finished answers and grades are saved in the archive. resume continues from the last finished step, also after a restart.'") }}
 
@@ -425,6 +425,10 @@
             <div>
                 {{ ui.status_row("n.step.state", "n.step.label", "rowMeta(n.step)",
                                  title_expr="n.step.model", state_text="n.verb") }}
+                {# the end of the answer in progress, as it is written #}
+                <div x-show="n.step.preview" x-cloak class="pl-87 py-10 border-b border-line">
+                    <pre class="font-mono text-caption font-light text-fg-muted whitespace-pre-wrap break-words" x-text="n.step.preview"></pre>
+                </div>
                 {# load notice: announced once through the page live region #}
                 <div x-show="showLoadNotice(n.step)" x-cloak class="pl-87 py-10 border-b border-line">
                     <div class="bg-surface border border-line p-15 flex flex-col gap-8">

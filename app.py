@@ -151,6 +151,25 @@ def _evict_finished() -> None:
         del TASKS[tid]
 
 
+def _drop_tokens(events: list, done: dict) -> None:
+    """Replaces the token events of a finished answer with None.
+
+    The ids of a stream are positions in the list, so the slots stay; a
+    reconnecting client skips them and a long run does not keep every token.
+    """
+    for i in range(len(events) - 1, -1, -1):
+        event = events[i]
+        if event is None:
+            continue
+        same = event.get("model") == done.get("model") and event.get(
+            "question"
+        ) == done.get("question")
+        if event.get("type") == "answer_token" and same:
+            events[i] = None
+        elif event.get("type") == "answer_start" and same:
+            break
+
+
 def update_task_status(task_id: str, payload: dict) -> None:
     """Appends a new structured event payload to the task's event stream.
 
@@ -164,6 +183,8 @@ def update_task_status(task_id: str, payload: dict) -> None:
             return
 
         payload["timestamp"] = datetime.now().isoformat()
+        if payload.get("type") == "answer_done":
+            _drop_tokens(task["events"], payload)
         task["events"].append(payload)
 
         if payload.get("type") in FINAL_EVENTS:
@@ -386,7 +407,8 @@ def start_evaluation():
 
 @app.route("/api/evaluate/<task_id>/cancel", methods=["POST"])
 def cancel_evaluation(task_id: str):
-    """Asks a run to stop. It stops between two steps, not in the middle of one.
+    """Asks a run to stop. A candidate answer in progress is cut off at once
+    (it is redone on resume); a judge call in progress finishes first.
 
     Returns:
         Response: 202 once the flag is set, 404 for an unknown task and 409 if
@@ -459,13 +481,19 @@ def stream_status(task_id: str):
         Response: A continuous text/event-stream response.
     """
 
+    # A reconnecting EventSource sends the id of the last event it got:
+    # continue right after it.
+    last = request.headers.get("Last-Event-ID", "")
+    start = int(last) + 1 if last.isdecimal() else 0
+
     def generate():
         task = TASKS.get(task_id)
         if not task:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Task not found'})}\n\n"
             return
 
-        idx = 0
+        # An id the task never had belongs to another run of the same id.
+        idx = start if start <= len(task["events"]) else 0
         while True:
             # Sleeps until update_task_status adds an event. No event within
             # HEARTBEAT_SEC: a comment line, which EventSource ignores, but
@@ -476,11 +504,15 @@ def stream_status(task_id: str):
                 )
                 event = task["events"][idx] if ready else None
 
-            if event is None:
+            if not ready:
                 yield ": ping\n\n"
                 continue
+            if event is None:
+                # The tokens of a finished answer were dropped.
+                idx += 1
+                continue
 
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"id: {idx}\ndata: {json.dumps(event)}\n\n"
 
             # Stop streaming if the task has finished or failed.
             if event.get("type") in FINAL_EVENTS:

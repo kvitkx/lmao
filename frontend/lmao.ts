@@ -119,6 +119,7 @@ interface SseEvent {
     error?: string | null;
     source?: string;
     message?: string;
+    text?: string;
 }
 
 // What a run is made of: enough to build its rows again when it is resumed.
@@ -144,6 +145,7 @@ interface RunState {
     error: string;
     resumable: boolean; // the server failed the run: it can be resumed
     reconnectable: boolean; // the stream broke: the run may still go on, the stream can be reopened
+    reconnecting: boolean; // the stream broke and the browser is reconnecting by itself
     attention: boolean; // finished while another screen was open
     config: RunConfig | null;
     phases: Record<string, PhaseFigures>; // phase -> figures, see updateRun()
@@ -241,6 +243,14 @@ document.addEventListener("alpine:init", () => {
 
     const SLOW_LOAD_MS = 8000;
 
+    // The browser reconnects by itself and sends Last-Event-ID, so the server
+    // continues after the last event it got. After this long without a
+    // connection the run is shown as failed, with `reconnect`.
+    const RECONNECT_GIVE_UP_MS = 30_000;
+    const LOST_TEXT =
+        "connection to the server was lost. the run may still be going: reconnect to see it.";
+    let reconnectSince = 0; // 0: connected
+
     const SCORES_NAME = 254;
     const SCORES_CELL = 48;
 
@@ -278,6 +288,7 @@ document.addEventListener("alpine:init", () => {
         error: "",
         resumable: false,
         reconnectable: false,
+        reconnecting: false,
         attention: false,
         config: null,
         phases: phaseStats([], PHASE_GROUPS),
@@ -446,7 +457,7 @@ document.addEventListener("alpine:init", () => {
                     dot: true,
                     go: this.view !== "running",
                     open: false,
-                    text: `${stopping ? "stopping" : "running"} · ${figures}`,
+                    text: `${stopping ? "stopping" : "running"} · ${figures}${run.reconnecting ? " · reconnecting…" : ""}`,
                 };
             }
             if (this.view === "running" && run.status === "stopped") {
@@ -1174,23 +1185,33 @@ document.addEventListener("alpine:init", () => {
 
             timer = setInterval(() => this.tick(), 1000);
 
+            reconnectSince = 0;
             source = new EventSource(`/api/stream/${encodeURIComponent(taskId)}`);
+            source.onopen = () => {
+                reconnectSince = 0;
+                this.run.reconnecting = false;
+            };
             source.onmessage = (event) => this.onMessage(event);
-            // EventSource would reconnect and the backend replays the stream
-            // from the start, which would duplicate the rows: stop at the first error.
+            // The browser reconnects by itself with the id of the last event, so
+            // no row is duplicated. A closed source will not try again.
             source.onerror = () => {
-                if (this.run.status !== "running") return;
-                this.failRun(
-                    "connection to the server was lost. the run may still be going: reconnect to see it.",
-                    false,
-                    true,
-                );
+                if (!this.busy) return;
+                if (source && source.readyState === EventSource.CLOSED) {
+                    this.failRun(LOST_TEXT, false, true);
+                    return;
+                }
+                if (!reconnectSince) reconnectSince = Date.now();
+                this.run.reconnecting = true;
             };
         },
 
         // One clock for the elapsed time, the row timers and the load notice.
         tick(): void {
             this.run.now = Date.now();
+            if (reconnectSince && this.busy && this.run.now - reconnectSince > RECONNECT_GIVE_UP_MS) {
+                this.failRun(LOST_TEXT, false, true);
+                return;
+            }
             if (!loadWatch.length) return;
             loadWatch = loadWatch.filter((step) => {
                 if (step.state !== "running") return false;
@@ -1204,6 +1225,8 @@ document.addEventListener("alpine:init", () => {
         stopStream(): void {
             if (source) source.close();
             source = null;
+            reconnectSince = 0;
+            this.run.reconnecting = false;
             if (timer) clearInterval(timer);
             timer = null;
         },
@@ -1226,6 +1249,14 @@ document.addEventListener("alpine:init", () => {
             if (event.progress) {
                 this.run.total = event.progress.total;
                 this.run.done = Math.max(this.run.done, event.progress.done);
+            }
+
+            if (event.type === "answer_token") {
+                const row = this.step(event);
+                if (row && row.state === "running") {
+                    row.preview += event.text ?? "";
+                }
+                return;
             }
 
             if (event.type === "completed") return this.finishRun();
@@ -1275,6 +1306,7 @@ document.addEventListener("alpine:init", () => {
         stepDone(step: Step, event: SseEvent): void {
             // Finished rows stay as they are (duplicates, events after `skipped`).
             if (step.state !== "running" && step.state !== "queued") return;
+            step.preview = "";
 
             // Both timestamps come from the server, so its time zone cancels out.
             // No start event (or a broken timestamp): no duration instead of nonsense.
@@ -1356,7 +1388,8 @@ document.addEventListener("alpine:init", () => {
             this.announce(`run stopped. ${this.run.done} of ${this.run.total} steps are done.`);
         },
 
-        // The step in progress is not interrupted: the run stops after it.
+        // A candidate answer in progress is cut off at once (redone on resume);
+        // a judge call in progress finishes first, then the run stops.
         async stopRun(): Promise<void> {
             const id = this.run.id;
             if (this.run.status !== "running" || !id) return;
@@ -1670,6 +1703,7 @@ document.addEventListener("alpine:init", () => {
         showLoadNotice(step: Step): boolean {
             return (
                 step.state === "running" &&
+                step.preview === "" &&
                 step.loading &&
                 step.startedAt !== null &&
                 this.run.now - step.startedAt > SLOW_LOAD_MS

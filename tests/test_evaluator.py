@@ -8,6 +8,7 @@ logic without any model. Every test runs in a temporary working directory (see
 """
 
 import json
+import re
 import threading
 from collections import Counter
 from pathlib import Path
@@ -113,6 +114,7 @@ class FakeOllama:
         self.memory = memory or {}
         self.footprint_calls = []
         self.graded = threading.Event()
+        self.stream_tokens = False
         self._lock = threading.Lock()
 
     def generate(
@@ -158,6 +160,34 @@ class FakeOllama:
         if isinstance(scripted, Exception):
             raise scripted
         return scripted
+
+    def generate_stream(
+        self,
+        model,
+        prompt,
+        system_prompt="",
+        format=None,
+        think=None,
+        options=None,
+        keep_alive=0,
+        timeout=None,
+        on_token=None,
+        cancel=None,
+    ):
+        result = self.generate(
+            model,
+            prompt,
+            system_prompt=system_prompt,
+            format=format,
+            think=think,
+            options=options,
+            keep_alive=keep_alive,
+            timeout=timeout,
+        )
+        if self.stream_tokens and on_token and result["success"]:
+            for piece in re.findall(r"\S+\s*", result["response_text"]):
+                on_token(piece)
+        return result
 
     def unload(self, model):
         with self._lock:
@@ -1160,3 +1190,88 @@ def test_a_resumed_run_keeps_how_it_was_made():
     run_with(resumed, None, saved=stopped)
 
     assert saved_run(resumed)["run"] == stopped["run"]
+
+
+# --- streaming and cutting an answer off ------------------------------------
+
+
+class CancelMidAnswer(FakeOllama):
+    """Cuts the first candidate answer off, as a real stream does on stop."""
+
+    def generate_stream(self, model, prompt, *args, cancel=None, **kwargs):
+        cancel.set()
+        return {"success": False, "cancelled": True, "error": "Cancelled."}
+
+
+def test_candidate_tokens_are_streamed_between_answer_start_and_answer_done():
+    ollama = FakeOllama(answers={"cand-a": ok("one two three")})
+    ollama.stream_tokens = True
+
+    events = run(EvaluationPipeline(ollama), make_payload(candidates=["cand-a"]))
+
+    types = [e["type"] for e in events]
+    tokens = [e for e in events if e["type"] == "answer_token"]
+    assert "".join(e["text"] for e in tokens) == "one two three"
+    assert all(
+        (e["phase"], e["model"], e["question"]) == ("answer", "cand-a", "q1")
+        for e in tokens
+    )
+    assert (
+        types.index("answer_start")
+        < types.index("answer_token")
+        < types.index("answer_done")
+    )
+
+
+def test_a_run_cut_off_in_the_middle_of_an_answer_saves_no_partial_answer():
+    cancel = threading.Event()
+    ollama = CancelMidAnswer()
+    pipeline = EvaluationPipeline(ollama)
+
+    events = run_with(pipeline, two_questions(), cancel=cancel)
+
+    assert events[-1]["type"] == "cancelled"
+    assert events[-1]["progress"] == {"done": 2, "total": 11}
+    assert "answer_done" not in [e["type"] for e in events]
+    saved = saved_run(pipeline)
+    assert saved["status"] == "stopped"
+    assert sorted(saved["finished_steps"]) == [
+        "reference:judge:q1",
+        "reference:judge:q2",
+    ]
+    assert [q["results"] for q in saved["questions_results"]] == [[], []]
+    assert "cand-a" in ollama.unloaded
+
+    resumed = EvaluationPipeline(FakeOllama())
+    events = run_with(resumed, None, saved=saved)
+
+    assert events[-1]["type"] == "completed"
+    done = saved_run(resumed)
+    assert all(len(q["results"]) == 2 for q in done["questions_results"])
+
+
+def test_token_batch_merges_tokens_until_the_interval_has_passed():
+    from core.evaluator import _TokenBatch
+
+    sent = []
+    batch = _TokenBatch(sent.append, interval=60)
+
+    batch.push("a")
+    batch.push("b")
+    assert sent == []
+    batch.flush()
+    batch.flush()
+
+    assert sent == ["ab"]
+
+
+def test_token_batch_sends_every_token_with_a_zero_interval():
+    from core.evaluator import _TokenBatch
+
+    sent = []
+    batch = _TokenBatch(sent.append, interval=0)
+
+    batch.push("a")
+    batch.push("b")
+
+    assert sent == ["a", "b"]
