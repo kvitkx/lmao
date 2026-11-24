@@ -1467,3 +1467,7 @@ test("quantile interpolates between ranks and ignores the input order", () => {
     assert.equal(lib.quantile([1, 2, 3], 2), 3);
     assert.equal(lib.quantile([], 0.5), null);
 });
+
+test("buildSteps rows start without a preview of the answer", () => {
+    assert.ok(lib.buildSteps("j", ["a"], 2).every((s) => s.preview === ""));
+});

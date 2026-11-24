@@ -18,6 +18,7 @@ server died: a resumed run skips the steps that are already done.
 import os
 import re
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -78,6 +79,8 @@ MAX_REFERENCE_ATTEMPTS = 2
 MAX_GRADE_ATTEMPTS = 3
 # Parallel judge calls in cloud mode; lower it if the cloud rate-limits requests.
 CLOUD_WORKERS = 4
+# Tokens of an answer in progress reach the stream in batches this far apart.
+TOKEN_BATCH_SEC = 0.1
 
 _SUMMED_METRICS = (
     "total_time_sec",
@@ -244,6 +247,36 @@ def replay_events(saved: dict) -> list[dict]:
         add("summary_done", PHASE_SUMMARY, judge, None, success=True)
 
     return events
+
+
+class _TokenBatch:
+    """Gathers the tokens of one answer into a few events.
+
+    One event per token would flood the stream: the text is sent once
+    `interval` seconds have passed since the last send, and `flush` sends
+    what is left.
+    """
+
+    def __init__(
+        self, send: Callable[[str], None], interval: float = TOKEN_BATCH_SEC
+    ):
+        self.send = send
+        self.interval = interval
+        self.parts: list[str] = []
+        self.last = time.monotonic()
+
+    def push(self, text: str) -> None:
+        self.parts.append(text)
+        if time.monotonic() - self.last >= self.interval:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self.parts:
+            return
+        text = "".join(self.parts)
+        self.parts = []
+        self.last = time.monotonic()
+        self.send(text)
 
 
 class _Run:
@@ -769,13 +802,24 @@ class EvaluationPipeline:
     def _answer(self, run: _Run, model: str, question: dict, metrics: dict) -> dict:
         run.emit("answer_start", PHASE_ANSWER, model, question["id"])
 
-        result = self.provider.generate(
+        batch = _TokenBatch(
+            lambda text: run.emit(
+                "answer_token", PHASE_ANSWER, model, question["id"], text=text
+            )
+        )
+        result = self.provider.generate_stream(
             model,
             build_answer_prompt(question["question"]),
             think=False,
             options=CANDIDATE_OPTIONS,
             keep_alive=KEEP_ALIVE,
+            on_token=batch.push,
+            cancel=run.cancel,
         )
+        if result.get("cancelled"):
+            # Nothing is saved for a cut-off answer: a resumed run redoes it.
+            raise RunCancelled()
+        batch.flush()
         entry = self._answer_entry(model, result)
         question["results"].append(entry)
         if result["success"]:

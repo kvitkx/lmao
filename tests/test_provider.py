@@ -2,6 +2,8 @@
 Unit tests for the provider interface.
 """
 
+import threading
+
 import pytest
 
 from core.ollama_client import OllamaClient
@@ -49,3 +51,21 @@ def test_ollama_client_is_a_provider():
 def test_only_a_local_ollama_truncates_prompts():
     assert _Minimal().truncates_prompts is False
     assert OllamaClient().truncates_prompts is True
+
+
+def test_default_streaming_makes_one_call_and_sends_the_whole_text_as_a_token():
+    tokens = []
+
+    result = _Minimal().generate_stream("m", "hi", on_token=tokens.append)
+
+    assert result == {"success": True, "response_text": "x"}
+    assert tokens == ["x"]
+
+
+def test_default_streaming_does_not_call_the_model_once_cancelled():
+    cancel = threading.Event()
+    cancel.set()
+
+    result = _Minimal().generate_stream("m", "hi", cancel=cancel)
+
+    assert result == {"success": False, "cancelled": True, "error": "Cancelled."}

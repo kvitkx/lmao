@@ -4,14 +4,42 @@ Provides a wrapper class to interact with a local Ollama service,
 handling model discovery, generation requests and explicit VRAM unloading.
 """
 
+import json
 import os
+import threading
+import time
+from collections.abc import Callable
 
 import requests
 
-from .provider import GENERATE_TIMEOUT_SEC, Provider
+from .provider import GENERATE_TIMEOUT_SEC, Provider, cancelled_result
 
 NS_PER_SEC = 1e9
 UNLOAD_TIMEOUT_SEC = 30
+
+
+def _result(data: dict, text: str) -> dict:
+    """Turns the last reply of /api/generate into the result of generate()."""
+    total_duration_sec = data.get("total_duration", 0) / NS_PER_SEC
+    load_duration_sec = data.get("load_duration", 0) / NS_PER_SEC
+    eval_duration_sec = data.get("eval_duration", 0) / NS_PER_SEC
+    eval_count = data.get("eval_count", 0)
+
+    tokens_per_second = (eval_count / eval_duration_sec) if eval_duration_sec > 0 else 0
+
+    return {
+        "success": True,
+        "response_text": text,
+        "done_reason": data.get("done_reason", ""),
+        "prompt_eval_count": data.get("prompt_eval_count", 0),
+        "metrics": {
+            "total_time_sec": round(total_duration_sec, 2),
+            "load_time_sec": round(load_duration_sec, 2),
+            "eval_time_sec": round(eval_duration_sec, 2),
+            "tokens_generated": eval_count,
+            "tokens_per_second": round(tokens_per_second, 2),
+        },
+    }
 
 
 class OllamaClient(Provider):
@@ -127,30 +155,84 @@ class OllamaClient(Provider):
             response.raise_for_status()
             data = response.json()
 
-            total_duration_sec = data.get("total_duration", 0) / NS_PER_SEC
-            load_duration_sec = data.get("load_duration", 0) / NS_PER_SEC
-            eval_duration_sec = data.get("eval_duration", 0) / NS_PER_SEC
-            eval_count = data.get("eval_count", 0)
-
-            tokens_per_second = (
-                (eval_count / eval_duration_sec) if eval_duration_sec > 0 else 0
-            )
-
-            return {
-                "success": True,
-                "response_text": data.get("response", ""),
-                "done_reason": data.get("done_reason", ""),
-                "prompt_eval_count": data.get("prompt_eval_count", 0),
-                "metrics": {
-                    "total_time_sec": round(total_duration_sec, 2),
-                    "load_time_sec": round(load_duration_sec, 2),
-                    "eval_time_sec": round(eval_duration_sec, 2),
-                    "tokens_generated": eval_count,
-                    "tokens_per_second": round(tokens_per_second, 2),
-                },
-            }
+            return _result(data, data.get("response", ""))
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def generate_stream(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str = "",
+        format: str | dict | None = None,
+        think: bool | None = None,
+        options: dict | None = None,
+        keep_alive: int | str = 0,
+        timeout: int = GENERATE_TIMEOUT_SEC,
+        on_token: Callable[[str], None] | None = None,
+        cancel: threading.Event | None = None,
+    ) -> dict:
+        """Generates a text response and reports it piece by piece.
+
+        Ollama sends one JSON line per piece. `cancel` is checked before every
+        line: when it is set the connection is closed, which stops the model.
+        While the model is still loading nothing arrives, so a stop takes
+        effect with the first piece.
+
+        Args:
+            on_token (Callable, optional): Called with each piece of text.
+            cancel (threading.Event, optional): Stops the call when set.
+            timeout (int, optional): Seconds for the whole answer.
+
+        Returns:
+            dict: The result of `generate`, or `cancelled_result()`.
+        """
+        url, payload = self.build_request(
+            model,
+            prompt,
+            system_prompt,
+            format,
+            think,
+            options,
+            keep_alive,
+            stream=True,
+        )
+        parts: list[str] = []
+        final = None
+        deadline = time.monotonic() + timeout
+
+        try:
+            with requests.post(
+                url, json=payload, timeout=timeout, stream=True
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if cancel is not None and cancel.is_set():
+                        return cancelled_result()
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"No complete answer within {timeout} s.")
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    if chunk.get("error"):
+                        raise RuntimeError(chunk["error"])
+                    text = chunk.get("response", "")
+                    if text:
+                        parts.append(text)
+                        if on_token is not None:
+                            on_token(text)
+                    if chunk.get("done"):
+                        final = chunk
+                        break
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+        if final is None:
+            return {
+                "success": False,
+                "error": "The stream ended before the model finished.",
+            }
+        return _result(final, "".join(parts))
 
     def build_request(
         self,
@@ -161,13 +243,14 @@ class OllamaClient(Provider):
         think: bool | None = None,
         options: dict | None = None,
         keep_alive: int | str = 0,
+        stream: bool = False,
     ) -> tuple[str, dict]:
         """Builds the request `generate` sends: the URL and the JSON body."""
         payload = {
             "model": model,
             "prompt": prompt,
             "system": system_prompt,
-            "stream": False,
+            "stream": stream,
             "keep_alive": keep_alive,
         }
         if format is not None:

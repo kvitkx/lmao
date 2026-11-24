@@ -2,6 +2,8 @@
 Unit tests for the Ollama client. Every HTTP call is mocked.
 """
 
+import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -261,3 +263,110 @@ def test_build_request_is_what_generate_sends():
         "think": False,
         "options": {"seed": 1},
     }
+
+
+# --- streaming --------------------------------------------------------------
+
+
+class _Stream:
+    """A streaming reply: the lines of an NDJSON body."""
+
+    def __init__(self, *chunks):
+        self.lines = [json.dumps(chunk).encode() for chunk in chunks]
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+
+    def raise_for_status(self):
+        pass
+
+    def iter_lines(self):
+        yield from self.lines
+
+
+DONE = {
+    "response": "",
+    "done": True,
+    "done_reason": "stop",
+    "prompt_eval_count": 3,
+    "total_duration": 2_000_000_000,
+    "load_duration": 0,
+    "eval_duration": 1_000_000_000,
+    "eval_count": 2,
+}
+
+
+@patch("core.ollama_client.requests.post")
+def test_generate_stream_reports_tokens_and_returns_the_usual_result(mock_post):
+    mock_post.return_value = _Stream({"response": "Hel"}, {"response": "lo"}, DONE)
+    tokens = []
+
+    result = OllamaClient().generate_stream("m", "hi", on_token=tokens.append)
+
+    assert tokens == ["Hel", "lo"]
+    assert result["success"] is True
+    assert result["response_text"] == "Hello"
+    assert result["done_reason"] == "stop"
+    assert result["prompt_eval_count"] == 3
+    assert result["metrics"]["total_time_sec"] == 2.0
+    assert result["metrics"]["tokens_per_second"] == 2.0
+    assert mock_post.call_args.kwargs["stream"] is True
+    assert mock_post.call_args.kwargs["json"]["stream"] is True
+
+
+@patch("core.ollama_client.requests.post")
+def test_generate_stream_stops_when_cancelled_and_closes_the_connection(mock_post):
+    cancel = threading.Event()
+    stream = _Stream({"response": "a"}, {"response": "b"}, DONE)
+    mock_post.return_value = stream
+    seen = []
+
+    def on_token(text):
+        seen.append(text)
+        cancel.set()
+
+    result = OllamaClient().generate_stream(
+        "m", "hi", on_token=on_token, cancel=cancel
+    )
+
+    assert result == {"success": False, "cancelled": True, "error": "Cancelled."}
+    assert seen == ["a"]
+    assert stream.closed is True
+
+
+@patch("core.ollama_client.requests.post")
+def test_generate_stream_reports_an_error_line(mock_post):
+    mock_post.return_value = _Stream({"error": "model not found"})
+
+    result = OllamaClient().generate_stream("m", "hi")
+
+    assert result == {"success": False, "error": "model not found"}
+
+
+@patch("core.ollama_client.requests.post")
+def test_generate_stream_fails_when_the_stream_ends_early(mock_post):
+    mock_post.return_value = _Stream({"response": "a"})
+
+    result = OllamaClient().generate_stream("m", "hi")
+
+    assert result["success"] is False
+    assert "before the model finished" in result["error"]
+
+
+@patch("core.ollama_client.requests.post")
+def test_generate_stream_returns_error_on_connection_failure(mock_post):
+    mock_post.side_effect = requests.ConnectionError("connection refused")
+
+    result = OllamaClient().generate_stream("m", "hi")
+
+    assert result == {"success": False, "error": "connection refused"}
+
+
+def test_build_request_can_ask_for_a_stream():
+    _, payload = OllamaClient().build_request("m", "hi", stream=True)
+
+    assert payload["stream"] is True

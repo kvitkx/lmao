@@ -180,11 +180,11 @@ The setup panel closes. Elapsed time and step count are in the topbar.
 
 **Columns fit the width.** The matrix shows as many question columns as fit (`ResizeObserver`), so wide windows or closed panels show more. When not all fit, the window follows the question in progress and each row gets edge counters (`‹ 6`, `8 ›`, warn if a hidden cell has an error). A line above the grid reads `24 questions · showing q07–q16`, with `follow current · on/off`, `‹ prev` and `next ›`; manual paging turns `follow current` off.
 
-**Now.** The calls in flight as status rows (verb, label, timer). In cloud mode several can run at once.
+**Now.** The calls in flight as status rows (verb, label, timer). In cloud mode several can run at once. An answer in progress shows its last 280 characters under its row, in muted mono, as they are written.
 
 **Load notice.** Shown only after the first call of a model load group has been `running` for about 8 seconds. It says loading is normal, makes no claim about VRAM, and is announced once through the live region.
 
-**Stop and resume.** `stop` at the right end of the matrix label row asks `stop run?` (`stop` in warn, `keep going`) before the server is asked. The status becomes `stopping` with an info strip (the call in flight is not interrupted; a large local model can take up to 10 minutes). The run stops between two steps, unloads its models and keeps everything finished. The screen then shows `stopped`: an info strip with the steps done, `resume` and `back to setup`, and the unfinished steps as `stopped` cells. The run is saved after every step, so `resume` also works from the archive, after an error and after a server restart. The stream of a resumed run starts with the events of the finished steps, so rows fill the same way as in a live run. Only one run is in progress at a time.
+**Stop and resume.** `stop` at the right end of the matrix label row asks `stop run?` (`stop` in warn, `keep going`) before the server is asked. The status becomes `stopping` with an info strip (a candidate answer in progress is cut off at once and redone on resume, though not while its model is still loading; a judge call in progress finishes first, and a large local model can take up to 10 minutes). The run stops between two steps, unloads its models and keeps everything finished. The screen then shows `stopped`: an info strip with the steps done, `resume` and `back to setup`, and the unfinished steps as `stopped` cells. The run is saved after every step, so `resume` also works from the archive, after an error and after a server restart. The stream of a resumed run starts with the events of the finished steps, so rows fill the same way as in a live run. Only one run is in progress at a time.
 
 **Errors.** A failed run shows a warn notice with `back to setup`, and `resume` when the server reported the failure. Rows in flight when the stream breaks become `error · interrupted`. A broken stream offers `reconnect`, which reopens the stream (the server replays the events from the start); if the run is still going, `resume` reconnects instead.
 
@@ -243,6 +243,7 @@ Stop, stopped and failed runs are described in 5.2. Disabled controls use `bg-li
 | `reference_start`, `reference_done` | reference row `running`, then `done` (meta = source) or `error` (graded without a reference) |
 | `candidate_start` | group marker only |
 | `answer_start`, `answer_done` | cell `answering`, then `answer ready` or `generation error`; a failure marks the grading step `skipped` at once |
+| `answer_token` | a batch of text (about every 100 ms) of the answer in progress, shown under its row; no state change |
 | `grading_start`, `grading_done` | cell `grading`, then `graded` or `judge error` |
 | `summary_start`, `summary_done` | the summary row |
 | `cancelling`, `cancelled` | status `stopping`, then `stopped` (the archive is refreshed) |
@@ -250,7 +251,7 @@ Stop, stopped and failed runs are described in 5.2. Disabled controls use `bg-li
 | `error` | warn notice, `resume` is offered |
 | `info` | not shown |
 
-Durations come from event timestamps, so parallel calls are not added up. A duplicate `*_start` does not reset a running row and a finished row ignores later events. The stream is closed on the first `onerror`. The server sends a `: ping` comment every 15 seconds, so a closed connection fails a write and frees its thread.
+Durations come from event timestamps, so parallel calls are not added up. A duplicate `*_start` does not reset a running row and a finished row ignores later events. Every event has an id (its position in the task's event list) and the browser reconnects by itself with `Last-Event-ID`, so the server continues after the last event it got; the topbar adds `reconnecting…`, and after 30 s without a connection the run is shown as failed with `reconnect`. The token events of a finished answer are dropped from the list (the ids stay), so a reconnect does not replay them. The server sends a `: ping` comment every 15 seconds, so a closed connection fails a write and frees its thread.
 
 ## 9. Export and print
 
