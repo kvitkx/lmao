@@ -415,12 +415,12 @@ document.addEventListener("alpine:init", () => {
         get pageTitle(): string {
             if (this.busy) {
                 const lead = this.run.status === "stopping" ? "stopping" : fmtClock(this.elapsed);
-                return `lmao | ${lead} ${this.run.done} / ${this.run.total}`;
+                return `${lead} ${this.run.done} / ${this.run.total}`;
             }
             if (this.run.status === "stopped" && this.view === "running") {
-                return `lmao | stopped ${this.run.done} / ${this.run.total}`;
+                return `stopped ${this.run.done} / ${this.run.total}`;
             }
-            if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
+            if (this.view === "results" && this.runTitle) return this.runTitle;
             return "lmao";
         },
 
