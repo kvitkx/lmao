@@ -75,11 +75,11 @@ Three panels: setup (left), work area (centre), archive (right). Panels animate 
 | running | closed (closes when a run starts) | open |
 | results | open | open |
 
-**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line) and the label beside it. The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
+**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line), icon only (the label is the tooltip and the accessible name). While a run is in progress, a 2px `bg-fg` hairline along the bottom edge of the topbar shows the share of steps done. The step count is not in the topbar: it is only in the tab title (`lmao | 38:05 10 / 26`). The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
 
 | State | Status |
 |---|---|
-| run in progress | activity dot, `running · 38:05 · 181 / 217` (`tabular-nums`); `back to run` on another screen |
+| run in progress | activity dot, `running · 38:05` (`tabular-nums`; the step count is the hairline); `back to run` on another screen |
 | stop requested | `stopping · …` |
 | stopped | `stopped · …` (muted), plus `back to run` on another screen |
 | failed or connection lost | `failed · …` (warn); the notice offers `reconnect` (the run may still go on) |
@@ -107,7 +107,7 @@ One Jinja macro per component in `templates/_components.html`. Arguments named `
 | `eval_block` | see section 5.3 |
 | `section_nav` | anchor buttons that scroll to `sec-<id>` of the open tab |
 
-**Buttons.** Primary `bg-fg text-bg px-22 py-13` (disabled `bg-line text-fg-muted`); secondary `border border-fg-muted text-fg px-22 py-13` (hover `border-fg`); text buttons (`collapse`, `remove`, `import`, `edit`, `show`) are muted, hover `text-fg`; warn button inside a notice `border border-warn px-15 py-9`. A select is the field box with a native `<select class="appearance-none">` and a 12px chevron.
+**Buttons.** Primary `bg-fg text-bg px-22 py-13` (disabled `bg-line text-fg-muted`); secondary `border border-fg-muted text-fg px-22 py-13` (hover `border-fg`); small secondary `px-12 py-4` (`stop`, `import dataset`, `export dataset`); text buttons (`collapse`, `remove`, `edit`, `show`) are muted, hover `text-fg`; warn button inside a notice `border border-warn px-15 py-9`. A select is the field box with a native `<select class="appearance-none">` and a 12px chevron.
 
 **Rank badge.** A 20px square with the model's two-digit rank by mean score (`01`), `border border-fg`. It never changes when a table is re-sorted and ties rows, chart points and bars together across the page. Thin border = ordinary, filled (`bg-fg text-bg`) = recommended, thick border = best on the metric shown (best score or fastest).
 
@@ -138,12 +138,12 @@ The inner square is about 55% of the mark. A cell has a tooltip (`ministral-3:3b
 
 ### 5.1 Start
 
-**Setup panel**, top to bottom, with `run evaluation` pinned to the bottom. Any input clears `formError`.
+**Setup panel**, top to bottom, with `run evaluation` pinned to the bottom. Any input clears `formError`. Each heading has a `–` / `+` button that folds its section. Only the user folds: the sections start open, a folded section keeps its fields (`x-show`, not `x-if`), and a form error unfolds the section it is in.
 
 1. **01 judge**: a full-width tab `local` / `ollama cloud` / `openai api`. Local: a select of installed non-cloud models. Ollama cloud: a select of models named `…-cloud` or `…:cloud`, with a hint that grading runs in parallel and data leaves the machine. OpenAI api: the saved connection is the judge (below).
 2. **02 candidates**: a scrolling list of checkbox rows (max 240px); empty state is a warn notice with `reload`.
 3. **03 judge criteria (optional)**: a textarea applied to every question.
-4. **04 test cases**: an expanded case (`case 01 · collapse · remove`) has tag, question, reference answer and specific criteria; a collapsed one is `case 02 · tag · edit`. `+ add test case`, then `import` and `export`.
+4. **04 test cases**: an expanded case (`case 01 · collapse · remove`) has tag, question, reference answer and specific criteria; a collapsed one is `case 02 · tag · edit`. `+ add test case`, then a row of two equal small secondary buttons, `import dataset` and `export dataset` (gap 8; export is disabled until a case has a question).
 
 Test case file, with the field names of the `/api/evaluate` payload:
 
@@ -161,7 +161,7 @@ Export writes every case that has a question, trimmed, without empty optional fi
 
 `test` saves a form being edited first, then tests the saved connection: the key never comes from the request.
 
-**Centre: the first screen.** A `max-w-560` block, `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
+**Centre: the first screen.** A `max-w-560` block, the muted full name `local model assessment operator`, `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
 1. **checklist**: `01 judge`, `02 candidates`, `03 test cases`, `04 run evaluation` as status rows.
 2. **route** (remote judge): three boxes joined by labelled arrows (`candidates · N · local ollama` → *answers* → `lmao · blind grading` → *prompt* → `judge · api.openai.com`, *grade* back), with `this machine` on the left and `internet · tls` on the right (`network · no tls` in warn for an http base url).
 3. **preflight** (openai): status rows for model list, structured output, seed and temperature, token usage and rate limit (`not measured`); a failed model list skips the rest.
@@ -174,7 +174,7 @@ Export writes every case that has a question, trimmed, without empty optional fi
 
 The setup panel closes. Elapsed time and step count are in the topbar.
 
-**Progress.** Four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each is a button-like block with the label (and an activity dot while running), `finished / total` and the phase duration on the right, and an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates answer. Errors show as `· N err` in warn. Summary is one call: half width, no counter. An `sr-only` `progressbar` carries the overall value.
+**Progress.** Four segments (`1fr 4fr 3fr 3fr`, gap 33, the ratio of the favicon bars): `01 ref`, `02 answers`, `03 grading`, `04 summary`. Each has the label (blue while the phase runs, no marker) and `finished / total` on the right, the phase duration in its tooltip, and an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates answer. Errors show as `· N err` in warn. Summary is one call: half width, no counter. An `sr-only` `progressbar` carries the overall value.
 
 **Matrix.** One row for the reference (the judge's name muted beside it) and one per candidate; the row of the model in memory is `link`, waiting rows are muted. Columns: model (270px), one 52px column per question, time (80px, the model's total answering time). Cell states are in section 4. A local judge is `link` for the references and again for grading and the summary; a cloud judge from its first call until the summary.
 

@@ -7,7 +7,9 @@ and a block ends up in the wrong place.
 """
 
 import re
+from functools import reduce
 from html.parser import HTMLParser
+from math import gcd
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -160,3 +162,98 @@ def test_index_html_loads_the_app_as_one_module(client):
 
     assert '<script type="module" src="/static/js/lmao.js"></script>' in html
     assert "js/lib.js" not in html
+
+
+# --- progress and the blue squares -------------------------------------------
+
+
+def _ratio(numbers):
+    divisor = reduce(gcd, numbers)
+    return [number // divisor for number in numbers]
+
+
+def test_progress_segments_follow_the_bars_of_the_favicon():
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    favicon = (ROOT / "frontend" / "favicon.ts").read_text(encoding="utf-8")
+
+    grid = re.search(r"grid-cols-\[(\d+)fr_(\d+)fr_(\d+)fr_(\d+)fr\] gap-33", html)
+    widths = [int(width) for width in re.findall(r"\bw: (\d+)", favicon)]
+
+    assert grid
+    assert _ratio([int(part) for part in grid.groups()]) == [1, 4, 3, 3]
+    assert _ratio(widths) == [1, 4, 3, 3]
+
+
+def test_progress_segments_have_no_activity_dot():
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+
+    segment = html.split('x-for="p in phaseProgress"')[1].split("</template>")[0]
+
+    assert "activity_dot" not in segment
+    assert "bg-link" not in segment
+
+
+def test_status_rows_have_no_activity_dot():
+    components = (ROOT / "templates" / "_components.html").read_text(encoding="utf-8")
+
+    macro = components.split("{% macro status_row(")[1].split("{%- endmacro %}")[0]
+
+    assert "activity_dot" not in macro
+
+
+def test_topbar_is_icon_only_with_a_progress_hairline(client):
+    html = client.get("/").get_data(as_text=True)
+
+    header = html.split("<header")[1].split("</header>")[0]
+
+    assert 'aria-label="setup"' in header
+    assert 'aria-label="archive"' in header
+    assert "<span>setup</span>" not in header
+    assert "<span>archive</span>" not in header
+    assert "local model assessment operator" not in header
+    assert "'width:' + pct + '%'" in header
+    assert "local model assessment operator" in html
+
+
+def test_topbar_status_has_no_step_count_but_the_tab_title_keeps_it():
+    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+
+    status = source.split("get topStatus()")[1].split("get phaseProgress()")[0]
+    title = source.split("get pageTitle()")[1].split("get faviconBars()")[0]
+
+    assert "run.total" not in status
+    assert "run.done" not in status
+    assert "this.run.done} / ${this.run.total}" in title
+
+
+def test_dataset_buttons_are_two_equal_secondary_buttons(client):
+    html = client.get("/").get_data(as_text=True)
+
+    buttons = re.findall(
+        r'<button[^>]*class="([^"]*)"[^>]*>(import|export) dataset</button>', html
+    )
+
+    assert [label for _, label in buttons] == ["import", "export"]
+    for classes, _ in buttons:
+        assert "flex-1" in classes
+        assert "border border-fg-muted" in classes
+        assert "px-12 py-4" in classes
+    assert ">import</button>" not in html
+    assert ">export</button>" not in html
+
+
+def test_setup_sections_have_a_fold_button_and_stay_in_the_page(client):
+    html = client.get("/").get_data(as_text=True)
+
+    for key in ("judge", "candidates", "criteria", "cases"):
+        assert f"toggleSetup('{key}')" in html
+        assert f'aria-controls="setup-{key}"' in html
+        assert f'id="setup-{key}" x-show="!setupFolds.{key}"' in html
+
+
+def test_a_form_error_unfolds_its_section():
+    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+
+    validate = source.split("validate(): string {")[1].split("},")[0]
+
+    assert "this.setupFolds[found.section] = false" in validate

@@ -9,7 +9,8 @@
 
         {# 01 judge: where it runs, then what it is #}
         <div class="flex flex-col gap-8">
-            {{ ui.section_label("01 judge") }}
+            {{ ui.setup_label("01 judge", "judge") }}
+            <div id="setup-judge" x-show="!setupFolds.judge" class="flex flex-col gap-8">
             {{ ui.tabs("judgeProvider", [("ollama", "local"), ("ollama_cloud", "ollama cloud"), ("openai", "openai api")], "judge provider", fill=True) }}
 
             <div id="panel-judgeProvider" role="tabpanel" :aria-labelledby="'tab-judgeProvider-' + judgeProvider"
@@ -101,11 +102,13 @@
                     {{ ui.warn_notice("connectionError", "connectionError") }}
                 </div>
             </div>
+            </div>
         </div>
 
         {# 02 candidates #}
         <div class="flex flex-col" role="group" aria-labelledby="candidates-label">
-            {{ ui.section_label("02 candidates", id="candidates-label") }}
+            {{ ui.setup_label("02 candidates", "candidates", id="candidates-label") }}
+            <div id="setup-candidates" x-show="!setupFolds.candidates">
 
             {{ ui.warn_notice("modelsLoaded && models.length === 0",
                               "'no models found. is ollama running?'",
@@ -116,15 +119,22 @@
                     {{ ui.checkbox_row("selected", value="m", text_expr="label(m)", title_expr="m") }}
                 </template>
             </div>
+            </div>
         </div>
 
         {# 03 judge criteria #}
-        {{ ui.field("03 judge criteria (optional)", "baseRationale", rows=3,
-                    placeholder="applied to every question") }}
+        <div class="flex flex-col gap-8">
+            {{ ui.setup_label("03 judge criteria (optional)", "criteria") }}
+            <div id="setup-criteria" x-show="!setupFolds.criteria">
+                {{ ui.field("03 judge criteria (optional)", "baseRationale", rows=3,
+                            placeholder="applied to every question", hide_label=True) }}
+            </div>
+        </div>
 
         {# 04 test cases #}
         <div class="flex flex-col gap-12">
-            {{ ui.section_label("04 test cases") }}
+            {{ ui.setup_label("04 test cases", "cases") }}
+            <div id="setup-cases" x-show="!setupFolds.cases" class="flex flex-col gap-12">
 
             <template x-for="(c, i) in cases" :key="c.id">
                 <div>
@@ -160,17 +170,19 @@
             <button type="button" @click="addCase()"
                     class="w-full text-left border border-fg-muted text-fg px-22 py-13 hover:border-fg">+ add test case</button>
 
-            <div class="flex items-center gap-15 text-fg-muted">
+            {# dataset actions: two equal small secondary buttons, as in Figma #}
+            <div class="flex gap-8">
                 <button type="button" @click="$refs.casesFile.click()"
                         title="add test cases from a .json file"
-                        class="hover:text-fg">import</button>
+                        class="flex-1 min-w-0 text-center border border-fg-muted text-fg px-12 py-4 hover:border-fg">import dataset</button>
                 <button type="button" @click="exportCases()" :disabled="!canExport"
                         title="save the test cases as a .json file"
-                        class="enabled:hover:text-fg disabled:cursor-not-allowed">export</button>
+                        class="flex-1 min-w-0 text-center border border-fg-muted text-fg px-12 py-4 enabled:hover:border-fg disabled:border-line disabled:text-fg-muted disabled:cursor-not-allowed">export dataset</button>
                 <input type="file" accept=".json,application/json" x-ref="casesFile"
                        @change="importCases($event)" class="hidden" tabindex="-1">
             </div>
             {{ ui.warn_notice("casesError", "casesError") }}
+            </div>
         </div>
     </div>
 
@@ -188,6 +200,7 @@
 <div x-show="view === 'idle'" x-cloak class="min-h-full flex items-center justify-center">
     <div class="w-full max-w-560 flex flex-col gap-22">
         <div class="flex flex-col gap-8">
+            <div class="text-fg-muted">local model assessment operator</div>
             <div class="text-heading">new evaluation</div>
             <div class="text-fg-muted">the judge writes reference answers, grades every candidate and compares them in one matrix.</div>
         </div>
@@ -273,15 +286,13 @@
     <div role="progressbar" aria-label="evaluation progress" :aria-valuenow="pct" aria-valuemin="0" aria-valuemax="100"
          :aria-valuetext="run.done + ' of ' + run.total + ' steps'" class="sr-only"></div>
 
-    {# One segment per phase. Summary is a single call: half the width, no counter. #}
-    <div class="grid grid-cols-[2fr_2fr_2fr_1fr] gap-33">
+    {# One segment per phase, 1 : 4 : 3 : 3 like the bars of the favicon. Only the
+       label turns blue while a phase runs; the duration is the tooltip. #}
+    <div class="grid grid-cols-[1fr_4fr_3fr_3fr] gap-33">
         <template x-for="p in phaseProgress" :key="p.phase">
-            <div class="min-w-0 flex flex-col gap-8">
+            <div class="min-w-0 flex flex-col gap-8" :title="p.span">
                 <span class="flex items-center justify-between gap-8">
-                    <span class="min-w-0 flex items-center gap-8" :class="stateClass(p.state)">
-                        {{ ui.activity_dot("p.state === 'running'") }}
-                        <span class="truncate" x-text="p.short"></span>
-                    </span>
+                    <span class="min-w-0 truncate" :class="stateClass(p.state)" x-text="p.short"></span>
                     <span class="shrink-0 text-fg-muted tabular-nums">
                         <span x-text="p.side"></span><span
                               x-show="p.errors" class="text-warn" x-text="(p.side ? ' · ' : '') + p.errors + ' err'"></span>

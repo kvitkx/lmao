@@ -176,3 +176,16 @@ test("a remote judge shows the budget and the request preview", async ({ page })
         test_cases: [{ question: "What is 2+2?" }],
     });
 });
+
+test("a setup section folds by its button and keeps what was typed", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/");
+    await expect(page.getByText("ollama · 3 models")).toBeVisible();
+    await fillForm(page, "cand-a:1b", "Keep me");
+
+    await page.getByRole("button", { name: "hide 04 test cases" }).click();
+    await expect(page.getByLabel("question", { exact: true })).toBeHidden();
+
+    await page.getByRole("button", { name: "show 04 test cases" }).click();
+    await expect(page.getByLabel("question", { exact: true })).toHaveValue("Keep me");
+});

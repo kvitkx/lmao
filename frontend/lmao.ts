@@ -188,6 +188,8 @@ interface ChecklistRow {
     meta: string;
 }
 
+type SetupSection = "judge" | "candidates" | "criteria" | "cases";
+
 interface Magics {
     $nextTick(callback?: () => void): Promise<void>;
     $refs: Record<string, HTMLElement>;
@@ -256,7 +258,7 @@ document.addEventListener("alpine:init", () => {
 
     // `short` is the label of the progress segment (a quarter of the width).
     const PHASE_GROUPS: (PhaseGroup & { short: string })[] = [
-        { phase: "reference", title: "01 reference answers", short: "01 reference" },
+        { phase: "reference", title: "01 reference answers", short: "01 ref" },
         { phase: "answer", title: "02 candidate answers", short: "02 answers" },
         { phase: "grading", title: "03 grading", short: "03 grading" },
         { phase: "summary", title: "04 summary", short: "04 summary" },
@@ -335,6 +337,11 @@ document.addEventListener("alpine:init", () => {
         cases: [newCase()] as TestCase[],
         formError: "",
         casesError: "", // import / export of test cases
+        // true: folded by the user. Never folded by the page itself.
+        setupFolds: { judge: false, candidates: false, criteria: false, cases: false } as Record<
+            SetupSection,
+            boolean
+        >,
         submitting: false,
 
         history: [] as HistoryRun[],
@@ -408,12 +415,12 @@ document.addEventListener("alpine:init", () => {
         get pageTitle(): string {
             if (this.busy) {
                 const lead = this.run.status === "stopping" ? "stopping" : fmtClock(this.elapsed);
-                return `lmao | ${lead} ${this.run.done} / ${this.run.total}`;
+                return `${lead} ${this.run.done} / ${this.run.total}`;
             }
             if (this.run.status === "stopped" && this.view === "running") {
-                return `lmao | stopped ${this.run.done} / ${this.run.total}`;
+                return `stopped ${this.run.done} / ${this.run.total}`;
             }
-            if (this.view === "results" && this.runTitle) return `lmao | ${this.runTitle}`;
+            if (this.view === "results" && this.runTitle) return this.runTitle;
             return "lmao";
         },
 
@@ -448,7 +455,7 @@ document.addEventListener("alpine:init", () => {
         // finished while another screen was open.
         get topStatus(): TopStatus {
             const run = this.run;
-            const figures = `${fmtClock(this.elapsed)} · ${run.done} / ${run.total}`;
+            const figures = fmtClock(this.elapsed);
             const base = { dot: false, go: false, open: false };
             if (this.busy) {
                 const stopping = run.status === "stopping";
@@ -457,7 +464,7 @@ document.addEventListener("alpine:init", () => {
                     dot: true,
                     go: this.view !== "running",
                     open: false,
-                    text: `${stopping ? "stopping" : "running"} · ${figures}${run.reconnecting ? " · reconnecting…" : ""}`,
+                    text: `${stopping ? "stopping" : "running"} · ${fmtClock(this.elapsed)}${run.reconnecting ? " · reconnecting…" : ""}`,
                 };
             }
             if (this.view === "running" && run.status === "stopped") {
@@ -1084,23 +1091,37 @@ document.addEventListener("alpine:init", () => {
 
         // --- start ----------------------------------------------------------
 
-        validate(): string {
+        toggleSetup(section: SetupSection): void {
+            this.setupFolds[section] = !this.setupFolds[section];
+        },
+
+        // The first problem of the form and the section it is in.
+        problem(): { section: SetupSection; text: string } | null {
+            const judge = (text: string) => ({ section: "judge" as const, text });
             if (this.judgeProvider === "openai") {
-                if (!this.connection) return "connect the openai api first.";
-                if (this.connectionEditing) return "save the connection first.";
-                if (!this.judgeName) return "set the judge model in the connection.";
+                if (!this.connection) return judge("connect the openai api first.");
+                if (this.connectionEditing) return judge("save the connection first.");
+                if (!this.judgeName) return judge("set the judge model in the connection.");
             } else if (!this.judgeName) {
-                return "choose a judge model.";
+                return judge("choose a judge model.");
             }
             if (this.selected.length === 0) {
-                return "select at least one candidate.";
+                return { section: "candidates", text: "select at least one candidate." };
             }
             const index = this.cases.findIndex((c) => !c.question.trim());
             if (index !== -1) {
                 this.cases[index].open = true;
-                return `case ${pad2(index)}: the question is empty.`;
+                return { section: "cases", text: `case ${pad2(index)}: the question is empty.` };
             }
-            return "";
+            return null;
+        },
+
+        // An error is never left inside a section the user folded.
+        validate(): string {
+            const found = this.problem();
+            if (!found) return "";
+            this.setupFolds[found.section] = false;
+            return found.text;
         },
 
         // `estimate`: only the cases that have a question, the way the budget and

@@ -19,6 +19,21 @@
 <div{% if id %} id="{{ id }}"{% endif %} class="pb-8 border-b border-line text-fg-muted"{% if text_expr %} x-text="{{ text_expr }}"{% endif %}>{{ text }}</div>
 {%- endmacro %}
 
+{# Setup section heading: the caption and a fold button (`–` open, `+` folded).
+   The body is a sibling with the id `setup-<key>` and `x-show`, so a folded
+   section keeps its fields. Folding is only ever done by the user. #}
+{% macro setup_label(text, key, id="") -%}
+<div{% if id %} id="{{ id }}"{% endif %} class="flex justify-between items-center gap-15 pb-8 border-b border-line text-fg-muted">
+    <span>{{ text }}</span>
+    <button type="button" @click="toggleSetup('{{ key }}')"
+            :aria-expanded="!setupFolds.{{ key }}" aria-controls="setup-{{ key }}"
+            :aria-label="(setupFolds.{{ key }} ? 'show ' : 'hide ') + '{{ text }}'"
+            :title="setupFolds.{{ key }} ? 'show' : 'hide'"
+            class="w-20 text-center hover:text-fg"
+            x-text="setupFolds.{{ key }} ? '+' : '–'"></button>
+</div>
+{%- endmacro %}
+
 {# Markdown blocks from parseMarkdown(), built as DOM by the `x-md` directive
    (lmao.ts, tree from markdownTree() in lib.ts). Only createElement and text
    nodes: HTML in a model answer is shown as text, never executed. Bold is fg
@@ -61,9 +76,9 @@
 {%- endmacro %}
 
 {# field/input (4:6), textarea variant when rows > 0. #}
-{% macro field(label, model, rows=0, placeholder="", type="text", enter="", placeholder_expr="") -%}
+{% macro field(label, model, rows=0, placeholder="", type="text", enter="", placeholder_expr="", hide_label=False) -%}
 <label class="flex flex-col gap-8">
-    <span class="text-fg-muted">{{ label }}</span>
+    <span class="{{ 'sr-only' if hide_label else 'text-fg-muted' }}">{{ label }}</span>
     {%- if rows %}
     <textarea x-model="{{ model }}" rows="{{ rows }}"{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}
               class="w-full resize-y bg-bg border border-line px-12 py-10 text-fg placeholder:text-fg-muted focus:border-fg outline-none"></textarea>
@@ -98,8 +113,7 @@
 {# status-row (4:68): state | label | meta (state_text: the word shown instead of the state) #}
 {% macro status_row(state, label, meta, title_expr="", state_text="", mono=False) -%}
 <div class="flex items-start gap-15 py-10 border-b border-line">
-    <div class="w-72 shrink-0 flex items-center gap-8" :class="stateClass({{ state }})">
-        {{ activity_dot(state ~ " === 'running'") }}
+    <div class="w-72 shrink-0" :class="stateClass({{ state }})">
         <span x-text="{{ state_text or state }}"></span>
     </div>
     <div class="flex-1 min-w-0 break-words{% if mono %} font-mono{% endif %}" :class="isMuted({{ state }}) && 'text-fg-muted'"
@@ -198,24 +212,18 @@
 </div>
 {%- endmacro %}
 
-{# nav-toggle (4:51). Label beside the icon, mirrored on the right side,
-   so both toggles have the same height and centre line. #}
+{# nav-toggle (4:51). Icon only, mirrored on the right side. The label is the
+   tooltip and the accessible name. #}
 {% macro nav_toggle(flag, controls, label, side="left", key="") -%}
 <button type="button" @click="{{ flag }} = !{{ flag }}"
-        :aria-expanded="{{ flag }}" aria-controls="{{ controls }}"
-        {%- if key %} aria-keyshortcuts="{{ key }}" title="{{ label }} ({{ key }})"{% endif %}
-        class="flex items-center gap-8 hover:text-fg"
+        :aria-expanded="{{ flag }}" aria-controls="{{ controls }}" aria-label="{{ label }}"
+        {%- if key %} aria-keyshortcuts="{{ key }}" title="{{ label }} ({{ key }})"{% else %} title="{{ label }}"{% endif %}
+        class="flex items-center hover:text-fg"
         :class="{{ flag }} ? 'text-fg' : 'text-fg-muted'">
-    {%- if side == "right" %}
-    <span>{{ label }}</span>
-    {%- endif %}
     <span class="relative block size-20 shrink-0 border border-fg" aria-hidden="true">
         <span class="absolute -top-px -bottom-px bg-fg transition-all duration-200 ease-out motion-reduce:transition-none"
               :class="{{ flag }} ? '-{{ side }}-px w-7' : '{{ side }}-6 w-px'"></span>
     </span>
-    {%- if side == "left" %}
-    <span>{{ label }}</span>
-    {%- endif %}
 </button>
 {%- endmacro %}
 
