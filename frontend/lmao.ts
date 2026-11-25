@@ -448,7 +448,7 @@ document.addEventListener("alpine:init", () => {
         // finished while another screen was open.
         get topStatus(): TopStatus {
             const run = this.run;
-            const figures = `${fmtClock(this.elapsed)} · ${run.done} / ${run.total}`;
+            const figures = fmtClock(this.elapsed);
             const base = { dot: false, go: false, open: false };
             if (this.busy) {
                 const stopping = run.status === "stopping";

@@ -213,3 +213,30 @@ def test_topbar_is_icon_only_with_a_progress_hairline(client):
     assert "local model assessment operator" not in header
     assert "'width:' + pct + '%'" in header
     assert "local model assessment operator" in html
+
+
+def test_topbar_status_has_no_step_count_but_the_tab_title_keeps_it():
+    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+
+    status = source.split("get topStatus()")[1].split("get phaseProgress()")[0]
+    title = source.split("get pageTitle()")[1].split("get faviconBars()")[0]
+
+    assert "run.total" not in status
+    assert "run.done" not in status
+    assert "this.run.done} / ${this.run.total}" in title
+
+
+def test_dataset_buttons_are_two_equal_secondary_buttons(client):
+    html = client.get("/").get_data(as_text=True)
+
+    buttons = re.findall(
+        r'<button[^>]*class="([^"]*)"[^>]*>(import|export) dataset</button>', html
+    )
+
+    assert [label for _, label in buttons] == ["import", "export"]
+    for classes, _ in buttons:
+        assert "flex-1" in classes
+        assert "border border-fg-muted" in classes
+        assert "px-12 py-4" in classes
+    assert ">import</button>" not in html
+    assert ">export</button>" not in html

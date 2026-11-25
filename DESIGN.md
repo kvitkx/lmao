@@ -75,7 +75,7 @@ Three panels: setup (left), work area (centre), archive (right). Panels animate 
 | running | closed (closes when a run starts) | open |
 | results | open | open |
 
-**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line), icon only (the label is the tooltip and the accessible name). While a run is in progress, a 2px `bg-fg` hairline along the bottom edge of the topbar shows the share of steps done. The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
+**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line), icon only (the label is the tooltip and the accessible name). While a run is in progress, a 2px `bg-fg` hairline along the bottom edge of the topbar shows the share of steps done. The step count is not in the topbar: it is only in the tab title (`lmao | 38:05 10 / 26`). The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
 
 | State | Status |
 |---|---|
@@ -107,7 +107,7 @@ One Jinja macro per component in `templates/_components.html`. Arguments named `
 | `eval_block` | see section 5.3 |
 | `section_nav` | anchor buttons that scroll to `sec-<id>` of the open tab |
 
-**Buttons.** Primary `bg-fg text-bg px-22 py-13` (disabled `bg-line text-fg-muted`); secondary `border border-fg-muted text-fg px-22 py-13` (hover `border-fg`); text buttons (`collapse`, `remove`, `import`, `edit`, `show`) are muted, hover `text-fg`; warn button inside a notice `border border-warn px-15 py-9`. A select is the field box with a native `<select class="appearance-none">` and a 12px chevron.
+**Buttons.** Primary `bg-fg text-bg px-22 py-13` (disabled `bg-line text-fg-muted`); secondary `border border-fg-muted text-fg px-22 py-13` (hover `border-fg`); small secondary `px-12 py-4` (`stop`, `import dataset`, `export dataset`); text buttons (`collapse`, `remove`, `edit`, `show`) are muted, hover `text-fg`; warn button inside a notice `border border-warn px-15 py-9`. A select is the field box with a native `<select class="appearance-none">` and a 12px chevron.
 
 **Rank badge.** A 20px square with the model's two-digit rank by mean score (`01`), `border border-fg`. It never changes when a table is re-sorted and ties rows, chart points and bars together across the page. Thin border = ordinary, filled (`bg-fg text-bg`) = recommended, thick border = best on the metric shown (best score or fastest).
 
@@ -143,7 +143,7 @@ The inner square is about 55% of the mark. A cell has a tooltip (`ministral-3:3b
 1. **01 judge**: a full-width tab `local` / `ollama cloud` / `openai api`. Local: a select of installed non-cloud models. Ollama cloud: a select of models named `…-cloud` or `…:cloud`, with a hint that grading runs in parallel and data leaves the machine. OpenAI api: the saved connection is the judge (below).
 2. **02 candidates**: a scrolling list of checkbox rows (max 240px); empty state is a warn notice with `reload`.
 3. **03 judge criteria (optional)**: a textarea applied to every question.
-4. **04 test cases**: an expanded case (`case 01 · collapse · remove`) has tag, question, reference answer and specific criteria; a collapsed one is `case 02 · tag · edit`. `+ add test case`, then `import` and `export`.
+4. **04 test cases**: an expanded case (`case 01 · collapse · remove`) has tag, question, reference answer and specific criteria; a collapsed one is `case 02 · tag · edit`. `+ add test case`, then a row of two equal small secondary buttons, `import dataset` and `export dataset` (gap 8; export is disabled until a case has a question).
 
 Test case file, with the field names of the `/api/evaluate` payload:
 
