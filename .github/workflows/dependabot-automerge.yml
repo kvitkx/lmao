@@ -1,18 +1,24 @@
 name: Dependabot auto-merge
 
-# Dependabot pull requests merge automatically once CI is green:
-# everything of the pull request is patch or minor, or the pull request
-# fixes a vulnerability (the `security` label, then majors merge too).
-# Majors without that label get a comment and stay manual.
+# Dependabot pull requests merge automatically once CI is green: every
+# update of the pull request is patch or minor, or it fixes a
+# vulnerability (the `security` label, then majors merge too). A
+# digest-only docker bump (the upstream rebuild of the pinned tag) counts
+# as patch. Majors without that label get a comment and stay manual.
 #
 # The grouped pull requests of dependabot.yml keep the Playwright and
-# docker bumps in one PR, which `check-playwright` needs.
+# docker bumps in one PR, which `check-playwright` needs. A 0.x minor can
+# break semver; CI gates the merge either way.
 #
-# Repo setting (outside git): allow auto-merge; without it
-# `gh pr merge --auto` does nothing.
+# Tokens: arming the merge with the workflow GITHUB_TOKEN swallows the
+# push event, so release.yml never sees the merge. Prefer a fine-grained
+# PAT (repository secret MAINTENANCE_TOKEN, contents write); without it
+# the fallback GITHUB_TOKEN still gates every merge, but the release is
+# triggered by hand (make bump, see MAINTENANCE.md).
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -27,12 +33,14 @@ env:
 jobs:
   auto-merge:
     name: Classify Dependabot PR
-    if: ${{ github.actor == 'app/dependabot' && github.event.pull_request.base.ref == 'main' }}
+    # The PR author, not github.actor: the actor changes on re-runs and
+    # pushes by others.
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
     steps:
@@ -43,5 +51,5 @@ jobs:
 
       - name: Classify and enable auto-merge
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAINTENANCE_TOKEN || github.token }}
         run: scripts/ci/dependabot-automerge.sh

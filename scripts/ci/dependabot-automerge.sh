@@ -6,7 +6,10 @@
 # carries the `security` label (Dependabot sets it on vulnerability fixes).
 #
 # Needs from the workflow environment:
-#   GH_TOKEN        the GITHUB_TOKEN, needs `pull_requests: write`
+#   GH_TOKEN        the token from the workflow step: the PAT stored as the
+#                   MAINTENANCE_TOKEN secret, else the GITHUB_TOKEN. Arming
+#                   needs contents and pull_requests write; with only the
+#                   GITHUB_TOKEN the merge does not trigger release.yml.
 #   GITHUB_REPOSITORY      set by GitHub Actions
 #   PR_NUMBER       the pull request number
 set -Eeuo pipefail
@@ -37,7 +40,9 @@ version_of() {
 
 # bump_level FROM TO: patch, minor or major; fails when either token is
 # not a version. A bump without a version change is a digest or rebuild
-# bump, and counts as patch.
+# bump, and counts as patch. Same for a digest-only bump: the upstream
+# rebuild of the pinned tag is exactly the security update this repo waits
+# for, and CI gates the merge either way
 bump_level() {
     local from to i a b
     local -a first second
@@ -61,9 +66,14 @@ bump_level() {
     printf 'patch\n'
 }
 
+# is_digest TOKEN: a shortened or full commit SHA (a digest-only bump).
+is_digest() {
+    [[ "$1" =~ ^[0-9a-fA-F]{7,64}$ ]]
+}
+
 # worst_level UPDATES: the highest bump level in the Dependabot text,
 # where UPDATES is the commit messages of the pull request. A commit
-# without a compareable version pair counts as manual. No such line at
+# without a comparable version pair counts as manual. No such line at
 # all (a rebuild or digest bump) stays at patch.
 worst_level() {
     local rank=0 line pair level from to
@@ -76,8 +86,14 @@ worst_level() {
         # Dependabot sentences end in a period: 'from 0.14.0 to 0.15.0.'
         from="${from%[.,;:]}"
         to="${to%[.,;:]}"
-        if [[ -z "$pair" ]] || ! level="$(bump_level "$from" "$to")"; then
+        if [[ -z "$pair" ]]; then
             level=manual
+        elif ! level="$(bump_level "$from" "$to")"; then
+            if is_digest "$from" && is_digest "$to"; then
+                level="patch"
+            else
+                level="manual"
+            fi
         fi
         case "$level" in
             patch) i=0 ;;
@@ -110,10 +126,21 @@ else
 fi
 
 if [[ "$decision" == merge ]]; then
-    log "Enable auto-merge for #$PR_NUMBER: $level update."
-    if ! gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash; then
-        warn "Auto-merge is already enabled for #$PR_NUMBER."
+    armed="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+        --json autoMergeRequest --jq '.autoMergeRequest.isEnabled // false')"
+    if [[ "$armed" == true ]]; then
+        log "Auto-merge is already enabled for #$PR_NUMBER."
+    else
+        log "Enable auto-merge for #$PR_NUMBER: $level update."
+        gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
     fi
+    exit 0
+fi
+
+comments="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+    --json comments --jq '[.comments[].body] | join("\n")')"
+if [[ "$comments" == *"stays manual by design"* ]]; then
+    log "Leave #$PR_NUMBER manual: a $level update (already commented)."
     exit 0
 fi
 
