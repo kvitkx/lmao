@@ -188,6 +188,8 @@ interface ChecklistRow {
     meta: string;
 }
 
+type SetupSection = "judge" | "candidates" | "criteria" | "cases";
+
 interface Magics {
     $nextTick(callback?: () => void): Promise<void>;
     $refs: Record<string, HTMLElement>;
@@ -335,6 +337,11 @@ document.addEventListener("alpine:init", () => {
         cases: [newCase()] as TestCase[],
         formError: "",
         casesError: "", // import / export of test cases
+        // true: folded by the user. Never folded by the page itself.
+        setupFolds: { judge: false, candidates: false, criteria: false, cases: false } as Record<
+            SetupSection,
+            boolean
+        >,
         submitting: false,
 
         history: [] as HistoryRun[],
@@ -1084,23 +1091,37 @@ document.addEventListener("alpine:init", () => {
 
         // --- start ----------------------------------------------------------
 
-        validate(): string {
+        toggleSetup(section: SetupSection): void {
+            this.setupFolds[section] = !this.setupFolds[section];
+        },
+
+        // The first problem of the form and the section it is in.
+        problem(): { section: SetupSection; text: string } | null {
+            const judge = (text: string) => ({ section: "judge" as const, text });
             if (this.judgeProvider === "openai") {
-                if (!this.connection) return "connect the openai api first.";
-                if (this.connectionEditing) return "save the connection first.";
-                if (!this.judgeName) return "set the judge model in the connection.";
+                if (!this.connection) return judge("connect the openai api first.");
+                if (this.connectionEditing) return judge("save the connection first.");
+                if (!this.judgeName) return judge("set the judge model in the connection.");
             } else if (!this.judgeName) {
-                return "choose a judge model.";
+                return judge("choose a judge model.");
             }
             if (this.selected.length === 0) {
-                return "select at least one candidate.";
+                return { section: "candidates", text: "select at least one candidate." };
             }
             const index = this.cases.findIndex((c) => !c.question.trim());
             if (index !== -1) {
                 this.cases[index].open = true;
-                return `case ${pad2(index)}: the question is empty.`;
+                return { section: "cases", text: `case ${pad2(index)}: the question is empty.` };
             }
-            return "";
+            return null;
+        },
+
+        // An error is never left inside a section the user folded.
+        validate(): string {
+            const found = this.problem();
+            if (!found) return "";
+            this.setupFolds[found.section] = false;
+            return found.text;
         },
 
         // `estimate`: only the cases that have a question, the way the budget and

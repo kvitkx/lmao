@@ -138,7 +138,7 @@ The inner square is about 55% of the mark. A cell has a tooltip (`ministral-3:3b
 
 ### 5.1 Start
 
-**Setup panel**, top to bottom, with `run evaluation` pinned to the bottom. Any input clears `formError`.
+**Setup panel**, top to bottom, with `run evaluation` pinned to the bottom. Any input clears `formError`. Each heading has a `–` / `+` button that folds its section. Only the user folds: the sections start open, a folded section keeps its fields (`x-show`, not `x-if`), and a form error unfolds the section it is in.
 
 1. **01 judge**: a full-width tab `local` / `ollama cloud` / `openai api`. Local: a select of installed non-cloud models. Ollama cloud: a select of models named `…-cloud` or `…:cloud`, with a hint that grading runs in parallel and data leaves the machine. OpenAI api: the saved connection is the judge (below).
 2. **02 candidates**: a scrolling list of checkbox rows (max 240px); empty state is a warn notice with `reload`.

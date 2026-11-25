@@ -9,7 +9,8 @@
 
         {# 01 judge: where it runs, then what it is #}
         <div class="flex flex-col gap-8">
-            {{ ui.section_label("01 judge") }}
+            {{ ui.setup_label("01 judge", "judge") }}
+            <div id="setup-judge" x-show="!setupFolds.judge" class="flex flex-col gap-8">
             {{ ui.tabs("judgeProvider", [("ollama", "local"), ("ollama_cloud", "ollama cloud"), ("openai", "openai api")], "judge provider", fill=True) }}
 
             <div id="panel-judgeProvider" role="tabpanel" :aria-labelledby="'tab-judgeProvider-' + judgeProvider"
@@ -101,11 +102,13 @@
                     {{ ui.warn_notice("connectionError", "connectionError") }}
                 </div>
             </div>
+            </div>
         </div>
 
         {# 02 candidates #}
         <div class="flex flex-col" role="group" aria-labelledby="candidates-label">
-            {{ ui.section_label("02 candidates", id="candidates-label") }}
+            {{ ui.setup_label("02 candidates", "candidates", id="candidates-label") }}
+            <div id="setup-candidates" x-show="!setupFolds.candidates">
 
             {{ ui.warn_notice("modelsLoaded && models.length === 0",
                               "'no models found. is ollama running?'",
@@ -116,15 +119,22 @@
                     {{ ui.checkbox_row("selected", value="m", text_expr="label(m)", title_expr="m") }}
                 </template>
             </div>
+            </div>
         </div>
 
         {# 03 judge criteria #}
-        {{ ui.field("03 judge criteria (optional)", "baseRationale", rows=3,
-                    placeholder="applied to every question") }}
+        <div class="flex flex-col gap-8">
+            {{ ui.setup_label("03 judge criteria (optional)", "criteria") }}
+            <div id="setup-criteria" x-show="!setupFolds.criteria">
+                {{ ui.field("03 judge criteria (optional)", "baseRationale", rows=3,
+                            placeholder="applied to every question", hide_label=True) }}
+            </div>
+        </div>
 
         {# 04 test cases #}
         <div class="flex flex-col gap-12">
-            {{ ui.section_label("04 test cases") }}
+            {{ ui.setup_label("04 test cases", "cases") }}
+            <div id="setup-cases" x-show="!setupFolds.cases" class="flex flex-col gap-12">
 
             <template x-for="(c, i) in cases" :key="c.id">
                 <div>
@@ -172,6 +182,7 @@
                        @change="importCases($event)" class="hidden" tabindex="-1">
             </div>
             {{ ui.warn_notice("casesError", "casesError") }}
+            </div>
         </div>
     </div>
 

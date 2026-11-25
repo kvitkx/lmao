@@ -240,3 +240,20 @@ def test_dataset_buttons_are_two_equal_secondary_buttons(client):
         assert "px-12 py-4" in classes
     assert ">import</button>" not in html
     assert ">export</button>" not in html
+
+
+def test_setup_sections_have_a_fold_button_and_stay_in_the_page(client):
+    html = client.get("/").get_data(as_text=True)
+
+    for key in ("judge", "candidates", "criteria", "cases"):
+        assert f"toggleSetup('{key}')" in html
+        assert f'aria-controls="setup-{key}"' in html
+        assert f'id="setup-{key}" x-show="!setupFolds.{key}"' in html
+
+
+def test_a_form_error_unfolds_its_section():
+    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+
+    validate = source.split("validate(): string {")[1].split("},")[0]
+
+    assert "this.setupFolds[found.section] = false" in validate
