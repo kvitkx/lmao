@@ -14,7 +14,7 @@ name: Dependabot auto-merge
 # push event, so release.yml never sees the merge. Prefer a fine-grained
 # PAT (repository secret MAINTENANCE_TOKEN, contents write); without it
 # the fallback GITHUB_TOKEN still gates every merge, but the release is
-# triggered by hand (make bump, see MAINTENANCE.md).
+# triggered by hand (make bump, see docs/MAINTENANCE.md).
 
 on:
   pull_request:

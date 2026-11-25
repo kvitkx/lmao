@@ -150,6 +150,6 @@ This pull request holds a major update: it stays manual by design
 (all-patch/minor Dependabot pull requests auto-merge once CI is green).
 
 Revert from Dependabot, merge with review, or fix forward.
-Runbook: MAINTENANCE.md.
+Runbook: [docs/MAINTENANCE.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/MAINTENANCE.md).
 __BODY__
 gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$comment_file"

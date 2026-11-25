@@ -75,7 +75,7 @@ A remote judge grades in parallel. Before a run the start screen shows where the
 ## More
 
 - [CONTRIBUTING](CONTRIBUTING.md): development, checks, commits and releases
-- [DESIGN](DESIGN.md): the interface
+- [DESIGN](docs/DESIGN.md): the interface
 - [SECURITY](SECURITY.md): security model and reporting a vulnerability. lmao is a local tool for one trusted user with no authentication: do not expose its port to a network.
 - [Docker Hub](https://hub.docker.com/r/kvitkx/lmao) · [Releases](https://github.com/kvitkx/lmao/releases)
 

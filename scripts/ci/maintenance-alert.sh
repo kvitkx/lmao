@@ -80,7 +80,7 @@ Run: $RUN_URL
 
 The issue closes itself on the first green run; every further failure
 appends a comment here. The runbook maps each signal to its action:
-MAINTENANCE.md.
+[docs/MAINTENANCE.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/MAINTENANCE.md).
 __BODY__
 
 issue="$(open_issue)"

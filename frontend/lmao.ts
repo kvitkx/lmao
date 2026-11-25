@@ -107,7 +107,7 @@ import {
 } from "./answers.ts";
 import { barStates, faviconHref, type BarState } from "./favicon.ts";
 
-// One event of /api/stream/<task_id>, see DESIGN.md (data contract).
+// One event of /api/stream/<task_id>, see docs/DESIGN.md (data contract).
 interface SseEvent {
     type?: string;
     phase?: string;
