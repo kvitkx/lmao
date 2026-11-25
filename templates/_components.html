@@ -197,24 +197,18 @@
 </div>
 {%- endmacro %}
 
-{# nav-toggle (4:51). Label beside the icon, mirrored on the right side,
-   so both toggles have the same height and centre line. #}
+{# nav-toggle (4:51). Icon only, mirrored on the right side. The label is the
+   tooltip and the accessible name. #}
 {% macro nav_toggle(flag, controls, label, side="left", key="") -%}
 <button type="button" @click="{{ flag }} = !{{ flag }}"
-        :aria-expanded="{{ flag }}" aria-controls="{{ controls }}"
-        {%- if key %} aria-keyshortcuts="{{ key }}" title="{{ label }} ({{ key }})"{% endif %}
-        class="flex items-center gap-8 hover:text-fg"
+        :aria-expanded="{{ flag }}" aria-controls="{{ controls }}" aria-label="{{ label }}"
+        {%- if key %} aria-keyshortcuts="{{ key }}" title="{{ label }} ({{ key }})"{% else %} title="{{ label }}"{% endif %}
+        class="flex items-center hover:text-fg"
         :class="{{ flag }} ? 'text-fg' : 'text-fg-muted'">
-    {%- if side == "right" %}
-    <span>{{ label }}</span>
-    {%- endif %}
     <span class="relative block size-20 shrink-0 border border-fg" aria-hidden="true">
         <span class="absolute -top-px -bottom-px bg-fg transition-all duration-200 ease-out motion-reduce:transition-none"
               :class="{{ flag }} ? '-{{ side }}-px w-7' : '{{ side }}-6 w-px'"></span>
     </span>
-    {%- if side == "left" %}
-    <span>{{ label }}</span>
-    {%- endif %}
 </button>
 {%- endmacro %}
 

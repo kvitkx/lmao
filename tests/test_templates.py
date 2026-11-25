@@ -199,3 +199,17 @@ def test_status_rows_have_no_activity_dot():
     macro = components.split("{% macro status_row(")[1].split("{%- endmacro %}")[0]
 
     assert "activity_dot" not in macro
+
+
+def test_topbar_is_icon_only_with_a_progress_hairline(client):
+    html = client.get("/").get_data(as_text=True)
+
+    header = html.split("<header")[1].split("</header>")[0]
+
+    assert 'aria-label="setup"' in header
+    assert 'aria-label="archive"' in header
+    assert "<span>setup</span>" not in header
+    assert "<span>archive</span>" not in header
+    assert "local model assessment operator" not in header
+    assert "'width:' + pct + '%'" in header
+    assert "local model assessment operator" in html

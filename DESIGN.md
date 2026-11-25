@@ -75,11 +75,11 @@ Three panels: setup (left), work area (centre), archive (right). Panels animate 
 | running | closed (closes when a run starts) | open |
 | results | open | open |
 
-**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line) and the label beside it. The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
+**Topbar.** Left: setup toggle and the wordmark, a button that returns to the first screen (a running evaluation keeps going). Centre: status. Right: archive toggle. Toggles are a 20px square with a strip (open: 7px filled strip on the panel side, closed: 1px line), icon only (the label is the tooltip and the accessible name). While a run is in progress, a 2px `bg-fg` hairline along the bottom edge of the topbar shows the share of steps done. The form stays locked on every screen while a run is in progress; the archive does not, so past results can be opened and `back to run` leads back.
 
 | State | Status |
 |---|---|
-| run in progress | activity dot, `running · 38:05 · 181 / 217` (`tabular-nums`); `back to run` on another screen |
+| run in progress | activity dot, `running · 38:05` (`tabular-nums`; the step count is the hairline); `back to run` on another screen |
 | stop requested | `stopping · …` |
 | stopped | `stopped · …` (muted), plus `back to run` on another screen |
 | failed or connection lost | `failed · …` (warn); the notice offers `reconnect` (the run may still go on) |
@@ -161,7 +161,7 @@ Export writes every case that has a question, trimmed, without empty optional fi
 
 `test` saves a form being edited first, then tests the saved connection: the key never comes from the request.
 
-**Centre: the first screen.** A `max-w-560` block, `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
+**Centre: the first screen.** A `max-w-560` block, the muted full name `local model assessment operator`, `new evaluation` (`text-heading`), one muted line, then sections separated by `section_label`:
 1. **checklist**: `01 judge`, `02 candidates`, `03 test cases`, `04 run evaluation` as status rows.
 2. **route** (remote judge): three boxes joined by labelled arrows (`candidates · N · local ollama` → *answers* → `lmao · blind grading` → *prompt* → `judge · api.openai.com`, *grade* back), with `this machine` on the left and `internet · tls` on the right (`network · no tls` in warn for an http base url).
 3. **preflight** (openai): status rows for model list, structured output, seed and temperature, token usage and rate limit (`not measured`); a failed model list skips the rest.

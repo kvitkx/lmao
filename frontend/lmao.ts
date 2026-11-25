@@ -457,7 +457,7 @@ document.addEventListener("alpine:init", () => {
                     dot: true,
                     go: this.view !== "running",
                     open: false,
-                    text: `${stopping ? "stopping" : "running"} · ${figures}${run.reconnecting ? " · reconnecting…" : ""}`,
+                    text: `${stopping ? "stopping" : "running"} · ${fmtClock(this.elapsed)}${run.reconnecting ? " · reconnecting…" : ""}`,
                 };
             }
             if (this.view === "running" && run.status === "stopped") {
