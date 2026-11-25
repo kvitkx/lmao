@@ -87,7 +87,7 @@ issue="$(open_issue)"
 if [[ -z "$issue" ]]; then
     # The issue must exist before the label is used; --force also tolerates
     # an existing label with another description.
-    gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 \
+    gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color BFD42B \
         --description "Maintenance alerts from scheduled and release workflows" \
         --force >/dev/null
     log "Opening alert issue: $ALERT_TITLE"
