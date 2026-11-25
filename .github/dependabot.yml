@@ -39,6 +39,11 @@ updates:
     multi-ecosystem-group: "runtime"
     cooldown:
       default-days: 7
+      # An upstream rebuild of the pinned base image tag is how OS security
+      # fixes arrive here: the python digest moves, scan-published goes red,
+      # and the bump must not wait out the cooldown.
+      exclude:
+        - "python"
     # Python minor/major upgrades are done by hand (see below).
     ignore:
       - dependency-name: "python"

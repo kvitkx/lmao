@@ -222,3 +222,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.publish.outputs.tag }}
         run: scripts/release/create-github-release.sh
+  alert:
+    name: Maintenance alert
+    # One issue for the whole workflow: any failed job opens or updates it,
+    # the first green run closes it (scripts/ci/maintenance-alert.sh).
+    # Main only: a branch test run must not touch the production alert.
+    needs: [ci, publish, github-release]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open, update or close the alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALERT_TITLE: Release workflow failed
+          ALERT_JOBS: >-
+            ci=${{ needs.ci.result }},
+            publish=${{ needs.publish.result }},
+            github-release=${{ needs.github-release.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: scripts/ci/maintenance-alert.sh

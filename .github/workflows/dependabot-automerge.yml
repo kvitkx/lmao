@@ -1,0 +1,55 @@
+name: Dependabot auto-merge
+
+# Dependabot pull requests merge automatically once CI is green: every
+# update of the pull request is patch or minor, or it fixes a
+# vulnerability (the `security` label, then majors merge too). A
+# digest-only docker bump (the upstream rebuild of the pinned tag) counts
+# as patch. Majors without that label get a comment and stay manual.
+#
+# The grouped pull requests of dependabot.yml keep the Playwright and
+# docker bumps in one PR, which `check-playwright` needs. A 0.x minor can
+# break semver; CI gates the merge either way.
+#
+# Tokens: arming the merge with the workflow GITHUB_TOKEN swallows the
+# push event, so release.yml never sees the merge. Prefer a fine-grained
+# PAT (repository secret MAINTENANCE_TOKEN, contents write); without it
+# the fallback GITHUB_TOKEN still gates every merge, but the release is
+# triggered by hand (make bump, see docs/MAINTENANCE.md).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+
+jobs:
+  auto-merge:
+    name: Classify Dependabot PR
+    # The PR author, not github.actor: the actor changes on re-runs and
+    # pushes by others.
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Classify and enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.MAINTENANCE_TOKEN || github.token }}
+        run: scripts/ci/dependabot-automerge.sh

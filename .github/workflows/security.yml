@@ -125,3 +125,34 @@ jobs:
         with:
           sarif_file: reports/zizmor.sarif
           category: zizmor
+  alert:
+    name: Maintenance alert
+    # One issue for the whole workflow: any failed job opens or updates it,
+    # the first green run closes it (scripts/ci/maintenance-alert.sh).
+    # Main only: a branch test run must not touch the production alert.
+    needs: [audit, audit-npm, scan-published, zizmor]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open, update or close the alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALERT_TITLE: Security workflow failed
+          ALERT_JOBS: >-
+            audit=${{ needs.audit.result }},
+            audit-npm=${{ needs.audit-npm.result }},
+            scan-published=${{ needs.scan-published.result }},
+            zizmor=${{ needs.zizmor.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: scripts/ci/maintenance-alert.sh
