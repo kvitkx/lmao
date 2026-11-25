@@ -1,0 +1,47 @@
+name: Dependabot auto-merge
+
+# Dependabot pull requests merge automatically once CI is green:
+# everything of the pull request is patch or minor, or the pull request
+# fixes a vulnerability (the `security` label, then majors merge too).
+# Majors without that label get a comment and stay manual.
+#
+# The grouped pull requests of dependabot.yml keep the Playwright and
+# docker bumps in one PR, which `check-playwright` needs.
+#
+# Repo setting (outside git): allow auto-merge; without it
+# `gh pr merge --auto` does nothing.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+
+jobs:
+  auto-merge:
+    name: Classify Dependabot PR
+    if: ${{ github.actor == 'app/dependabot' && github.event.pull_request.base.ref == 'main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Classify and enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/dependabot-automerge.sh
