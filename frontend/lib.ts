@@ -168,7 +168,8 @@ export type PhaseFigures = PhaseGroup & {
     finished: number;
     errors: number;
     state: GroupState;
-    side: string;
+    side: string; // the counter, '3 / 8'; empty for a single call
+    span: string; // the phase duration, '41.2 s', once the phase is done
     pct: number;
 };
 
@@ -223,7 +224,8 @@ export function phaseStats(steps: Step[], groups: PhaseGroup[]): Record<string, 
             finished,
             errors,
             state,
-            side: [count, span].filter(Boolean).join(" · "),
+            side: count,
+            span,
             pct: total ? Math.round((100 * finished) / total) : 0,
         };
     }

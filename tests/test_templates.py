@@ -7,7 +7,9 @@ and a block ends up in the wrong place.
 """
 
 import re
+from functools import reduce
 from html.parser import HTMLParser
+from math import gcd
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -160,3 +162,40 @@ def test_index_html_loads_the_app_as_one_module(client):
 
     assert '<script type="module" src="/static/js/lmao.js"></script>' in html
     assert "js/lib.js" not in html
+
+
+# --- progress and the blue squares -------------------------------------------
+
+
+def _ratio(numbers):
+    divisor = reduce(gcd, numbers)
+    return [number // divisor for number in numbers]
+
+
+def test_progress_segments_follow_the_bars_of_the_favicon():
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    favicon = (ROOT / "frontend" / "favicon.ts").read_text(encoding="utf-8")
+
+    grid = re.search(r"grid-cols-\[(\d+)fr_(\d+)fr_(\d+)fr_(\d+)fr\] gap-33", html)
+    widths = [int(width) for width in re.findall(r"\bw: (\d+)", favicon)]
+
+    assert grid
+    assert _ratio([int(part) for part in grid.groups()]) == [1, 4, 3, 3]
+    assert _ratio(widths) == [1, 4, 3, 3]
+
+
+def test_progress_segments_have_no_activity_dot():
+    html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+
+    segment = html.split('x-for="p in phaseProgress"')[1].split("</template>")[0]
+
+    assert "activity_dot" not in segment
+    assert "bg-link" not in segment
+
+
+def test_status_rows_have_no_activity_dot():
+    components = (ROOT / "templates" / "_components.html").read_text(encoding="utf-8")
+
+    macro = components.split("{% macro status_row(")[1].split("{%- endmacro %}")[0]
+
+    assert "activity_dot" not in macro

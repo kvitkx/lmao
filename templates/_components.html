@@ -98,8 +98,7 @@
 {# status-row (4:68): state | label | meta (state_text: the word shown instead of the state) #}
 {% macro status_row(state, label, meta, title_expr="", state_text="", mono=False) -%}
 <div class="flex items-start gap-15 py-10 border-b border-line">
-    <div class="w-72 shrink-0 flex items-center gap-8" :class="stateClass({{ state }})">
-        {{ activity_dot(state ~ " === 'running'") }}
+    <div class="w-72 shrink-0" :class="stateClass({{ state }})">
         <span x-text="{{ state_text or state }}"></span>
     </div>
     <div class="flex-1 min-w-0 break-words{% if mono %} font-mono{% endif %}" :class="isMuted({{ state }}) && 'text-fg-muted'"

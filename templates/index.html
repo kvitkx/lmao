@@ -273,15 +273,13 @@
     <div role="progressbar" aria-label="evaluation progress" :aria-valuenow="pct" aria-valuemin="0" aria-valuemax="100"
          :aria-valuetext="run.done + ' of ' + run.total + ' steps'" class="sr-only"></div>
 
-    {# One segment per phase. Summary is a single call: half the width, no counter. #}
-    <div class="grid grid-cols-[2fr_2fr_2fr_1fr] gap-33">
+    {# One segment per phase, 1 : 4 : 3 : 3 like the bars of the favicon. Only the
+       label turns blue while a phase runs; the duration is the tooltip. #}
+    <div class="grid grid-cols-[1fr_4fr_3fr_3fr] gap-33">
         <template x-for="p in phaseProgress" :key="p.phase">
-            <div class="min-w-0 flex flex-col gap-8">
+            <div class="min-w-0 flex flex-col gap-8" :title="p.span">
                 <span class="flex items-center justify-between gap-8">
-                    <span class="min-w-0 flex items-center gap-8" :class="stateClass(p.state)">
-                        {{ ui.activity_dot("p.state === 'running'") }}
-                        <span class="truncate" x-text="p.short"></span>
-                    </span>
+                    <span class="min-w-0 truncate" :class="stateClass(p.state)" x-text="p.short"></span>
                     <span class="shrink-0 text-fg-muted tabular-nums">
                         <span x-text="p.side"></span><span
                               x-show="p.errors" class="text-warn" x-text="(p.side ? ' · ' : '') + p.errors + ' err'"></span>

@@ -256,7 +256,7 @@ document.addEventListener("alpine:init", () => {
 
     // `short` is the label of the progress segment (a quarter of the width).
     const PHASE_GROUPS: (PhaseGroup & { short: string })[] = [
-        { phase: "reference", title: "01 reference answers", short: "01 reference" },
+        { phase: "reference", title: "01 reference answers", short: "01 ref" },
         { phase: "answer", title: "02 candidate answers", short: "02 answers" },
         { phase: "grading", title: "03 grading", short: "03 grading" },
         { phase: "summary", title: "04 summary", short: "04 summary" },

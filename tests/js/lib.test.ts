@@ -155,12 +155,14 @@ test("phaseStats counts every phase in one pass", () => {
     const stats = lib.phaseStats(steps, PHASES);
 
     assert.equal(stats.reference.state, "done");
-    assert.equal(stats.reference.side, "2 / 2 · 4.0 s");
+    assert.equal(stats.reference.side, "2 / 2");
+    assert.equal(stats.reference.span, "4.0 s");
     assert.equal(stats.reference.pct, 100);
     assert.equal(stats.reference.title, "01 reference answers");
     assert.equal(stats.answer.state, "running");
     assert.equal(stats.answer.errors, 1);
     assert.equal(stats.answer.side, "1 / 2");
+    assert.equal(stats.answer.span, "");
     assert.equal(stats.answer.pct, 50);
     assert.equal(stats.grading.state, "queued");
     assert.equal(stats.grading.finished, 1);

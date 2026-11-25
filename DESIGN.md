@@ -174,7 +174,7 @@ Export writes every case that has a question, trimmed, without empty optional fi
 
 The setup panel closes. Elapsed time and step count are in the topbar.
 
-**Progress.** Four segments (`2fr 2fr 2fr 1fr`, gap 33): `01 reference`, `02 answers`, `03 grading`, `04 summary`. Each is a button-like block with the label (and an activity dot while running), `finished / total` and the phase duration on the right, and an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates answer. Errors show as `· N err` in warn. Summary is one call: half width, no counter. An `sr-only` `progressbar` carries the overall value.
+**Progress.** Four segments (`1fr 4fr 3fr 3fr`, gap 33, the ratio of the favicon bars): `01 ref`, `02 answers`, `03 grading`, `04 summary`. Each has the label (blue while the phase runs, no marker) and `finished / total` on the right, the phase duration in its tooltip, and an `h-4 bg-line` track with an `h-4 bg-fg` fill. Segments fill independently, because a cloud judge grades while local candidates answer. Errors show as `· N err` in warn. Summary is one call: half width, no counter. An `sr-only` `progressbar` carries the overall value.
 
 **Matrix.** One row for the reference (the judge's name muted beside it) and one per candidate; the row of the model in memory is `link`, waiting rows are muted. Columns: model (270px), one 52px column per question, time (80px, the model's total answering time). Cell states are in section 4. A local judge is `link` for the references and again for grading and the summary; a cloud judge from its first call until the summary.
 
