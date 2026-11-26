@@ -115,6 +115,7 @@ RUN groupadd -r appuser && useradd -r -m -g appuser appuser
 COPY --from=deps /opt/venv /opt/venv
 
 COPY core/ /app/core/
+COPY api/ /app/api/
 COPY static/ /app/static/
 COPY --from=assets-out / /app/static/
 COPY templates/ /app/templates/

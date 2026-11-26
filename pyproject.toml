@@ -46,7 +46,7 @@ pythonpath = [
 ]
 
 [tool.coverage.run]
-source_pkgs = ["core", "app"]
+source_pkgs = ["core", "api", "app"]
 branch = true
 omit = [
     "tests/*",
