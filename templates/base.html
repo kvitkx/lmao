@@ -21,9 +21,30 @@
     <header class="relative h-66 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-22 px-22 border-b border-line">
         <div class="min-w-0 flex items-center gap-33">
             {{ ui.nav_toggle("setupOpen", "setup", "setup", "left", key="[") }}
-            <button type="button" @click="goHome()" title="back to the first screen"
+            <button type="button" @click="goHome()" title="back to the first screen" aria-label="lmao"
                     class="group min-w-0 flex items-center gap-15 text-left">
-                <span class="text-heading-sm">lmao</span>
+                {# The mark, exported from the Figma component (base/logo):
+                   the blocks by default, the letters on hover and on focus.
+                   No background, no stroke: the accessible name of the button
+                   is the aria-label. #}
+                <svg viewBox="0 0 50 20" width="50" height="20" aria-hidden="true" class="h-[20px] w-[50px] shrink-0 fill-current">
+                    <g class="transition-opacity duration-200 ease-out motion-reduce:transition-none group-hover:opacity-0 group-focus-visible:opacity-0">
+                        <rect width="4" height="20"/>
+                        <rect x="6" width="16" height="20"/>
+                        <rect x="24" width="12" height="20"/>
+                        <rect x="38" width="12" height="20"/>
+                    </g>
+                    <g class="opacity-0 transition-opacity duration-200 ease-out motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100">
+                        {# l #}
+                        <path d="M2 18H4V20H0V0H2V18Z"/>
+                        {# m #}
+                        <path d="M22 0V20H20V2H15V20H13V2H8V20H6V0H22Z"/>
+                        {# a #}
+                        <path d="M36 20H34V11H26V20H24V0H36V20ZM26 9H34V2H26V9Z"/>
+                        {# o #}
+                        <path d="M50 20H38V0H50V20ZM40 18H48V2H40V18Z"/>
+                    </g>
+                </svg>
             </button>
         </div>
 

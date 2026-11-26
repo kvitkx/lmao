@@ -177,6 +177,30 @@ test("a remote judge shows the budget and the request preview", async ({ page })
     });
 });
 
+test("the wordmark shows the letters on hover and still goes home", async ({ page }) => {
+    await mockApi(page, {
+        history: [historyEntry(RUN_ID, 1)],
+        results: { [RUN_ID]: runResults(RUN_ID, ["cand-a:1b"]) },
+    });
+    await page.goto("/");
+
+    // from a results view the wordmark leads back to the first screen
+    await page.locator("#archive").getByRole("button", { name: /Smoke run/ }).click();
+    await expect(page.getByRole("tab", { name: "overview" })).toBeVisible();
+
+    const wordmark = page.getByRole("button", { name: "lmao" });
+    const groups = wordmark.locator("svg g");
+
+    // blocks by default, the letters on hover (and the blocks away)
+    await expect(groups.nth(1)).toHaveCSS("opacity", "0");
+    await wordmark.hover();
+    await expect(groups.nth(1)).toHaveCSS("opacity", "1");
+    await expect(groups.nth(0)).toHaveCSS("opacity", "0");
+
+    await wordmark.click();
+    await expect(page.getByText("new evaluation")).toBeVisible();
+});
+
 test("a setup section folds by its button and keeps what was typed", async ({ page }) => {
     await mockApi(page);
     await page.goto("/");
