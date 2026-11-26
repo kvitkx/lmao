@@ -1,9 +1,9 @@
 """
 Unit tests for the Flask API endpoints.
 
-The Ollama client and the evaluation thread are mocked, and every test runs in
-an empty temporary working directory (see ``conftest.py``), so nothing here
-touches a real Ollama or the real ``history/`` folder.
+The Ollama client and the worker thread are replaced, and every test runs on a
+fresh app in an empty temporary working directory (see ``conftest.py``), so
+nothing here touches a real Ollama or the real ``data/`` folder.
 """
 
 import json
@@ -12,11 +12,13 @@ import re
 import threading
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import app as app_module
+from api import evaluation
+from api.validation import sanitize_tag
+from core.evaluator import SCHEMA_VERSION
 from core.openai_client import OpenAIClient
 from core.prompts import GRADE_SCHEMA
 
@@ -36,9 +38,9 @@ def _parse_sse(response):
 
 
 def _run(judge="judge-model", models=("m1", "m2"), questions=2):
-    """The parts of a schema v3 evaluation_results.json the API reads."""
+    """The parts of a current-schema evaluation_results.json the API reads."""
     return {
-        "schema_version": 4,
+        "schema_version": SCHEMA_VERSION,
         "judge_model": judge,
         "questions_results": [
             {"id": f"q{number}", "results": []} for number in range(1, questions + 1)
@@ -62,9 +64,16 @@ def _payload(**overrides):
 
 
 @pytest.fixture
-def installed_models():
-    with patch.object(app_module.ollama_client, "get_models", return_value=["j", "m"]):
+def installed_models(services):
+    with patch.object(services.ollama, "get_models", return_value=["j", "m"]):
         yield
+
+
+@pytest.fixture
+def spawn(services):
+    """Records the worker the API would start instead of starting it."""
+    services.spawn = MagicMock()
+    return services.spawn
 
 
 # --- health and index -------------------------------------------------------
@@ -110,78 +119,76 @@ def test_index_page_loads(client):
     ],
 )
 def test_sanitize_tag(tag, expected):
-    assert app_module._sanitize_tag(tag) == expected
+    assert sanitize_tag(tag) == expected
 
 
-def test_update_task_status_appends_event_with_timestamp():
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_publish_appends_event_with_timestamp(registry):
+    registry.add("t")
 
-    app_module.update_task_status("t", {"type": "info", "message": "hi"})
+    registry.publish("t", {"type": "info", "message": "hi"})
 
-    [event] = app_module.TASKS["t"]["events"]
+    [event] = registry.get("t").events
     assert event["message"] == "hi"
     assert "timestamp" in event
-    assert app_module.TASKS["t"]["status"] == "started"
+    assert registry.get("t").status == "started"
 
 
 @pytest.mark.parametrize("final_type", ["completed", "error"])
-def test_update_task_status_marks_task_finished(final_type):
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_publish_marks_task_finished(registry, final_type):
+    registry.add("t")
 
-    app_module.update_task_status("t", {"type": final_type, "message": "x"})
+    registry.publish("t", {"type": final_type, "message": "x"})
 
-    assert app_module.TASKS["t"]["status"] == final_type
-
-
-def test_update_task_status_ignores_unknown_task():
-    app_module.update_task_status("missing", {"type": "info"})
-
-    assert app_module.TASKS == {}
+    assert registry.get("t").status == final_type
 
 
-def test_run_task_runs_the_pipeline():
-    with patch.object(app_module.pipeline, "run_evaluation") as run_evaluation:
-        app_module._run_task("t", {"judge": "j"}, "provider")
+def test_publish_ignores_unknown_task(registry):
+    registry.publish("missing", {"type": "info"})
+
+    assert registry.ids() == []
+
+
+def test_run_task_runs_the_pipeline(services):
+    with patch.object(services.pipeline, "run_evaluation") as run_evaluation:
+        evaluation.run_task(services, "t", {"judge": "j"}, "provider")
 
     run_evaluation.assert_called_once_with(
         "t",
         {"judge": "j"},
-        app_module.update_task_status,
+        services.registry.publish,
         "provider",
         saved=None,
         cancel=None,
     )
 
 
-def test_run_task_reports_a_crash_to_the_stream():
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_run_task_reports_a_crash_to_the_stream(services, registry):
+    registry.add("t")
 
     with patch.object(
-        app_module.pipeline, "run_evaluation", side_effect=RuntimeError("boom")
+        services.pipeline, "run_evaluation", side_effect=RuntimeError("boom")
     ):
-        app_module._run_task("t", {})
+        evaluation.run_task(services, "t", {})
 
-    [event] = app_module.TASKS["t"]["events"]
+    [event] = registry.get("t").events
     assert event["type"] == "error"
     assert "boom" in event["message"]
-    assert app_module.TASKS["t"]["status"] == "error"
+    assert registry.get("t").status == "error"
 
 
 # --- /api/models ------------------------------------------------------------
 
 
-def test_models_endpoint_returns_installed_models(client):
-    with patch.object(
-        app_module.ollama_client, "get_models", return_value=["a:1b", "b:2b"]
-    ):
+def test_models_endpoint_returns_installed_models(client, services):
+    with patch.object(services.ollama, "get_models", return_value=["a:1b", "b:2b"]):
         response = client.get("/api/models")
 
     assert response.status_code == 200
     assert response.get_json() == {"models": ["a:1b", "b:2b"]}
 
 
-def test_models_endpoint_returns_empty_list_when_ollama_is_down(client):
-    with patch.object(app_module.ollama_client, "get_models", return_value=[]):
+def test_models_endpoint_returns_empty_list_when_ollama_is_down(client, services):
+    with patch.object(services.ollama, "get_models", return_value=[]):
         response = client.get("/api/models")
 
     assert response.status_code == 200
@@ -231,77 +238,69 @@ def test_evaluate_rejects_non_json_request(client):
         {"judge_provider": 5},
     ],
 )
-def test_evaluate_rejects_invalid_payload(client, overrides):
+def test_evaluate_rejects_invalid_payload(client, registry, overrides):
     response = client.post("/api/evaluate", json=_payload(**overrides))
 
     assert response.status_code == 400
     assert response.get_json()["error"]
-    assert app_module.TASKS == {}
+    assert registry.ids() == []
 
 
-def test_evaluate_rejects_models_that_are_not_installed(client):
-    with patch.object(app_module.ollama_client, "get_models", return_value=["j"]):
+def test_evaluate_rejects_models_that_are_not_installed(client, services, registry):
+    with patch.object(services.ollama, "get_models", return_value=["j"]):
         response = client.post("/api/evaluate", json=_payload())
 
     assert response.status_code == 400
     assert response.get_json() == {"error": "Models are not installed: m."}
-    assert app_module.TASKS == {}
+    assert registry.ids() == []
 
 
-def test_evaluate_starts_background_task(client, installed_models):
+def test_evaluate_starts_background_task(
+    client, services, registry, installed_models, spawn
+):
     payload = _payload()
 
-    with patch.object(app_module.threading, "Thread") as thread_cls:
-        response = client.post("/api/evaluate", json=payload)
+    response = client.post("/api/evaluate", json=payload)
 
     assert response.status_code == 202
     body = response.get_json()
     assert body["status"] == "started"
     task_id = body["task_id"]
     assert re.fullmatch(r"run_My_Tag__\d{8}_\d{6}", task_id)
-    assert app_module.TASKS[task_id]["status"] == "started"
-    assert app_module.TASKS[task_id]["events"][0]["type"] == "info"
-
-    thread_cls.assert_called_once()
-    kwargs = thread_cls.call_args.kwargs
-    assert kwargs["target"] == app_module._run_task
-    assert kwargs["args"] == (task_id, payload, None)
-    assert thread_cls.return_value.daemon is True
-    thread_cls.return_value.start.assert_called_once_with()
+    task = registry.get(task_id)
+    assert task.status == "started"
+    assert task.events[0]["type"] == "info"
+    spawn.assert_called_once_with(evaluation.run_task, services, task_id, payload, None)
 
 
-def test_evaluate_accepts_the_ollama_cloud_judge(client, installed_models):
-    with patch.object(app_module.threading, "Thread") as thread_cls:
-        response = client.post(
-            "/api/evaluate", json=_payload(judge_provider="ollama_cloud")
-        )
+def test_evaluate_accepts_the_ollama_cloud_judge(client, installed_models, spawn):
+    response = client.post(
+        "/api/evaluate", json=_payload(judge_provider="ollama_cloud")
+    )
 
     assert response.status_code == 202
-    assert thread_cls.call_args.kwargs["args"][2] is None
+    assert spawn.call_args.args[4] is None
 
 
-def _save_connection(**overrides):
+def _save_connection(services, **overrides):
     fields = {
         "base_url": "https://api.example.com/v1",
         "api_key": "sk-secret-1234",
         "model": "gpt-4.1-mini",
     }
     fields.update(overrides)
-    return app_module.connection_store.save(**fields)
+    return services.connection_store.save(**fields)
 
 
-def test_evaluate_gives_an_openai_judge_its_saved_connection(client):
-    _save_connection()
+def test_evaluate_gives_an_openai_judge_its_saved_connection(client, services, spawn):
+    _save_connection(services)
     payload = _payload(judge="gpt-4.1-mini", judge_provider="openai")
 
-    with (
-        patch.object(app_module.ollama_client, "get_models", return_value=["m"]),
-        patch.object(app_module.threading, "Thread") as thread_cls,
-    ):
+    with patch.object(services.ollama, "get_models", return_value=["m"]):
         response = client.post("/api/evaluate", json=payload)
 
     assert response.status_code == 202
-    task_id, sent, judge_provider = thread_cls.call_args.kwargs["args"]
+    task_id, sent, judge_provider = spawn.call_args.args[2:]
     assert (task_id, sent) == (response.get_json()["task_id"], payload)
     assert isinstance(judge_provider, OpenAIClient)
     assert judge_provider.base_url == "https://api.example.com/v1"
@@ -309,7 +308,7 @@ def test_evaluate_gives_an_openai_judge_its_saved_connection(client):
 
 
 def test_evaluate_rejects_an_openai_judge_without_a_connection(
-    client, installed_models
+    client, registry, installed_models
 ):
     response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
 
@@ -317,13 +316,13 @@ def test_evaluate_rejects_an_openai_judge_without_a_connection(
     assert response.get_json() == {
         "error": "The OpenAI judge needs a saved connection."
     }
-    assert app_module.TASKS == {}
+    assert registry.ids() == []
 
 
-def test_evaluate_still_checks_the_candidates_of_an_openai_judge(client):
-    _save_connection()
+def test_evaluate_still_checks_the_candidates_of_an_openai_judge(client, services):
+    _save_connection(services)
 
-    with patch.object(app_module.ollama_client, "get_models", return_value=[]):
+    with patch.object(services.ollama, "get_models", return_value=[]):
         response = client.post("/api/evaluate", json=_payload(judge_provider="openai"))
 
     assert response.status_code == 400
@@ -335,10 +334,9 @@ def test_evaluate_still_checks_the_candidates_of_an_openai_judge(client):
     [[{"question": "Q"}], [{"question": "Q", "tag": "  "}]],
 )
 def test_evaluate_uses_default_tag_when_none_is_usable(
-    client, installed_models, test_cases
+    client, installed_models, spawn, test_cases
 ):
-    with patch.object(app_module.threading, "Thread"):
-        response = client.post("/api/evaluate", json=_payload(test_cases=test_cases))
+    response = client.post("/api/evaluate", json=_payload(test_cases=test_cases))
 
     assert response.status_code == 202
     assert re.fullmatch(r"run_run_\d{8}_\d{6}", response.get_json()["task_id"])
@@ -354,7 +352,7 @@ def test_connection_is_empty_by_default(client):
     assert response.get_json() == {"connection": None}
 
 
-def test_put_connection_saves_it_and_never_returns_the_key(client):
+def test_put_connection_saves_it_and_never_returns_the_key(client, services):
     body = {
         "base_url": "https://api.example.com/v1/",
         "api_key": "sk-secret-1234",
@@ -378,11 +376,11 @@ def test_put_connection_saves_it_and_never_returns_the_key(client):
     assert get.get_json() == expected
     assert b"sk-secret" not in put.data
     assert b"sk-secret" not in get.data
-    assert app_module.connection_store.load()["api_key"] == "sk-secret-1234"
+    assert services.connection_store.load()["api_key"] == "sk-secret-1234"
 
 
-def test_put_connection_without_a_key_keeps_the_saved_one(client):
-    _save_connection()
+def test_put_connection_without_a_key_keeps_the_saved_one(client, services):
+    _save_connection(services)
 
     response = client.put(
         "/api/connection",
@@ -390,12 +388,12 @@ def test_put_connection_without_a_key_keeps_the_saved_one(client):
     )
 
     assert response.status_code == 200
-    saved = app_module.connection_store.load()
+    saved = services.connection_store.load()
     assert (saved["api_key"], saved["model"]) == ("sk-secret-1234", "other")
 
 
-def test_put_connection_with_a_new_url_needs_the_key_again(client):
-    _save_connection()
+def test_put_connection_with_a_new_url_needs_the_key_again(client, services):
+    _save_connection(services)
 
     response = client.put(
         "/api/connection", json={"base_url": "https://evil.example.com/v1"}
@@ -403,7 +401,7 @@ def test_put_connection_with_a_new_url_needs_the_key_again(client):
 
     assert response.status_code == 400
     assert "again" in response.get_json()["error"]
-    saved = app_module.connection_store.load()
+    saved = services.connection_store.load()
     assert saved["base_url"] == "https://api.example.com/v1"
 
 
@@ -416,12 +414,12 @@ def test_put_connection_with_a_new_url_needs_the_key_again(client):
         {"base_url": "https://api.example.com/v1", "api_key": 5},
     ],
 )
-def test_put_connection_rejects_invalid_fields(client, body):
+def test_put_connection_rejects_invalid_fields(client, services, body):
     response = client.put("/api/connection", json=body)
 
     assert response.status_code == 400
     assert response.get_json()["error"]
-    assert app_module.connection_store.load() is None
+    assert services.connection_store.load() is None
 
 
 def test_put_connection_rejects_a_non_object_and_non_json(client):
@@ -433,21 +431,21 @@ def test_put_connection_rejects_a_non_object_and_non_json(client):
     assert text.status_code == 415
 
 
-def test_delete_connection_removes_it(client):
-    _save_connection()
+def test_delete_connection_removes_it(client, services):
+    _save_connection(services)
 
     first = client.delete("/api/connection")
     second = client.delete("/api/connection")
 
     assert first.status_code == second.status_code == 200
     assert first.get_json() == {"connection": None}
-    assert app_module.connection_store.load() is None
+    assert services.connection_store.load() is None
 
 
-def test_the_connection_and_the_history_share_one_directory():
-    connection_dir = Path(app_module.connection_store.path).parent
+def test_the_connection_and_the_history_share_one_directory(services):
+    connection_dir = Path(services.connection_store.path).parent
 
-    assert connection_dir == Path(app_module.pipeline.history_dir).parent
+    assert connection_dir == Path(services.pipeline.history_dir).parent
 
 
 def test_put_connection_returns_the_text_of_the_error(client):
@@ -486,7 +484,7 @@ def test_put_connection_saves_the_prices(client):
         {"price_in": "1", "price_out": 1},
     ],
 )
-def test_put_connection_rejects_bad_prices(client, prices):
+def test_put_connection_rejects_bad_prices(client, services, prices):
     body = {
         "base_url": "https://api.example.com/v1",
         "api_key": "sk-secret-1234",
@@ -497,7 +495,7 @@ def test_put_connection_rejects_bad_prices(client, prices):
 
     assert response.status_code == 400
     assert response.get_json()["error"]
-    assert app_module.connection_store.load() is None
+    assert services.connection_store.load() is None
 
 
 # --- /api/connection/test ---------------------------------------------------
@@ -512,8 +510,8 @@ def test_connection_test_needs_a_saved_connection(client):
     assert response.get_json() == {"error": "There is no saved connection to test."}
 
 
-def test_connection_test_needs_a_model(client):
-    _save_connection(model="")
+def test_connection_test_needs_a_model(client, services):
+    _save_connection(services, model="")
 
     response = client.post("/api/connection/test")
 
@@ -521,11 +519,11 @@ def test_connection_test_needs_a_model(client):
     assert response.get_json() == {"error": "Choose a model to test."}
 
 
-def test_connection_test_runs_the_preflight_on_the_saved_connection(client):
-    _save_connection()
+def test_connection_test_runs_the_preflight_on_the_saved_connection(client, services):
+    _save_connection(services)
 
-    with patch.object(
-        app_module, "run_preflight", return_value=PREFLIGHT_REPORT
+    with patch(
+        "api.connection.run_preflight", return_value=PREFLIGHT_REPORT
     ) as preflight:
         response = client.post("/api/connection/test")
 
@@ -538,11 +536,11 @@ def test_connection_test_runs_the_preflight_on_the_saved_connection(client):
     assert model == "gpt-4.1-mini"
 
 
-def test_connection_test_takes_the_model_from_the_request(client):
-    _save_connection()
+def test_connection_test_takes_the_model_from_the_request(client, services):
+    _save_connection(services)
 
-    with patch.object(
-        app_module, "run_preflight", return_value=PREFLIGHT_REPORT
+    with patch(
+        "api.connection.run_preflight", return_value=PREFLIGHT_REPORT
     ) as preflight:
         client.post("/api/connection/test", json={"model": " other "})
 
@@ -550,8 +548,8 @@ def test_connection_test_takes_the_model_from_the_request(client):
 
 
 @pytest.mark.parametrize("body", [[1], {"model": 5}])
-def test_connection_test_rejects_a_bad_body(client, body):
-    _save_connection()
+def test_connection_test_rejects_a_bad_body(client, services, body):
+    _save_connection(services)
 
     response = client.post("/api/connection/test", json=body)
 
@@ -600,8 +598,8 @@ def test_budget_counts_calls_and_tokens_for_a_local_judge(client):
     assert body["cost"] is None
 
 
-def test_budget_prices_an_openai_judge_from_the_saved_connection(client):
-    _save_connection(price_in=2.0, price_out=8.0)
+def test_budget_prices_an_openai_judge_from_the_saved_connection(client, services):
+    _save_connection(services, price_in=2.0, price_out=8.0)
 
     body = client.post("/api/budget", json=_payload(judge_provider="openai")).get_json()
 
@@ -609,8 +607,8 @@ def test_budget_prices_an_openai_judge_from_the_saved_connection(client):
     assert 0 < body["cost"]["low"] <= body["cost"]["high"]
 
 
-def test_budget_has_no_cost_without_saved_prices(client):
-    _save_connection()
+def test_budget_has_no_cost_without_saved_prices(client, services):
+    _save_connection(services)
 
     body = client.post("/api/budget", json=_payload(judge_provider="openai")).get_json()
 
@@ -637,15 +635,16 @@ def test_stream_reports_unknown_task(client):
     assert _parse_sse(response) == [{"type": "error", "message": "Task not found"}]
 
 
-def test_stream_replays_events_until_completion(client):
-    app_module.TASKS["t1"] = {
-        "status": "completed",
-        "events": [
+def test_stream_replays_events_until_completion(client, registry):
+    registry.add(
+        "t1",
+        status="completed",
+        events=[
             {"type": "info", "message": "start"},
             {"type": "completed", "message": "done"},
             {"type": "info", "message": "never sent"},
         ],
-    }
+    )
 
     response = client.get("/api/stream/t1")
 
@@ -653,24 +652,21 @@ def test_stream_replays_events_until_completion(client):
     assert [event["type"] for event in _parse_sse(response)] == ["info", "completed"]
 
 
-def test_stream_stops_on_error_event(client):
-    app_module.TASKS["t2"] = {
-        "status": "error",
-        "events": [{"type": "error", "message": "boom"}],
-    }
+def test_stream_stops_on_error_event(client, registry):
+    registry.add("t2", status="error", events=[{"type": "error", "message": "boom"}])
 
     response = client.get("/api/stream/t2")
 
     assert _parse_sse(response) == [{"type": "error", "message": "boom"}]
 
 
-def test_stream_sends_heartbeats_while_waiting(client, monkeypatch):
-    monkeypatch.setattr(app_module, "HEARTBEAT_SEC", 0)
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_stream_sends_heartbeats_while_waiting(client, app, registry):
+    app.config["HEARTBEAT_SEC"] = 0
+    registry.add("t")
 
     def finish():
         time.sleep(0.2)
-        app_module.update_task_status("t", {"type": "completed", "message": "done"})
+        registry.publish("t", {"type": "completed", "message": "done"})
 
     worker = threading.Thread(target=finish)
     worker.start()
@@ -938,18 +934,9 @@ def test_export_returns_404_for_missing_and_legacy_runs(client):
 RESUME_ID = "run_x_20260101_000000"
 
 
-def _live_task(task_id="live"):
-    app_module.TASKS[task_id] = {
-        "status": "started",
-        "events": [],
-        "cancel": threading.Event(),
-    }
-    return app_module.TASKS[task_id]
-
-
 def _partial_run(status="stopped"):
     return {
-        "schema_version": 4,
+        "schema_version": SCHEMA_VERSION,
         "task_id": RESUME_ID,
         "judge_model": "j",
         "judge_provider": "ollama",
@@ -982,16 +969,16 @@ def _save_partial(status="stopped"):
     return data
 
 
-def test_cancel_sets_the_flag_and_announces_it(client):
-    task = _live_task("t")
+def test_cancel_sets_the_flag_and_announces_it(client, registry):
+    task = registry.add("t")
 
     response = client.post("/api/evaluate/t/cancel")
 
     assert response.status_code == 202
     assert response.get_json() == {"task_id": "t", "status": "stopping"}
-    assert task["cancel"].is_set()
-    assert [event["type"] for event in task["events"]] == ["cancelling"]
-    assert task["status"] == "started"
+    assert task.cancel.is_set()
+    assert [event["type"] for event in task.events] == ["cancelling"]
+    assert task.status == "started"
 
 
 def test_cancel_unknown_task_is_404(client):
@@ -999,12 +986,8 @@ def test_cancel_unknown_task_is_404(client):
 
 
 @pytest.mark.parametrize("status", ["completed", "error", "cancelled"])
-def test_cancel_a_finished_task_is_409(client, status):
-    app_module.TASKS["t"] = {
-        "status": status,
-        "events": [],
-        "cancel": threading.Event(),
-    }
+def test_cancel_a_finished_task_is_409(client, registry, status):
+    registry.add("t", status=status)
 
     response = client.post("/api/evaluate/t/cancel")
 
@@ -1012,61 +995,67 @@ def test_cancel_a_finished_task_is_409(client, status):
     assert response.get_json() == {"error": "The run is not in progress."}
 
 
-def test_the_cancelled_event_finishes_the_task():
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_the_cancelled_event_finishes_the_task(registry):
+    registry.add("t")
 
-    app_module.update_task_status("t", {"type": "cancelled"})
+    registry.publish("t", {"type": "cancelled"})
 
-    assert app_module.TASKS["t"]["status"] == "cancelled"
+    assert registry.get("t").status == "cancelled"
 
 
-def test_stream_stops_on_the_cancelled_event(client):
-    app_module.TASKS["t"] = {
-        "status": "cancelled",
-        "events": [
+def test_stream_stops_on_the_cancelled_event(client, registry):
+    registry.add(
+        "t",
+        status="cancelled",
+        events=[
             {"type": "info", "message": "start"},
             {"type": "cancelled", "message": "Run stopped."},
             {"type": "info", "message": "never sent"},
         ],
-    }
+    )
 
     events = _parse_sse(client.get("/api/stream/t"))
 
     assert [event["type"] for event in events] == ["info", "cancelled"]
 
 
-def test_evaluate_is_refused_while_another_run_is_in_progress(client, installed_models):
-    _live_task()
+def test_evaluate_is_refused_while_another_run_is_in_progress(
+    client, registry, installed_models
+):
+    registry.add("live")
 
     response = client.post("/api/evaluate", json=_payload())
 
     assert response.status_code == 409
     assert response.get_json() == {"error": "A run is already in progress."}
-    assert len(app_module.TASKS) == 1
+    assert registry.ids() == ["live"]
 
 
-def test_resume_starts_a_thread_with_the_saved_run(client, installed_models):
+def test_resume_starts_a_thread_with_the_saved_run(
+    client, services, registry, installed_models, spawn
+):
     saved = _save_partial()
 
-    with patch.object(app_module.threading, "Thread") as thread_cls:
-        response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+    response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
 
     assert response.status_code == 202
     assert response.get_json() == {"task_id": RESUME_ID, "status": "started"}
-    task = app_module.TASKS[RESUME_ID]
-    assert task["status"] == "started"
-    assert [event["type"] for event in task["events"]] == ["info", "reference_done"]
-    assert not task["cancel"].is_set()
-    assert thread_cls.call_args.kwargs["args"] == (RESUME_ID, None, None, saved)
-    thread_cls.return_value.start.assert_called_once_with()
+    task = registry.get(RESUME_ID)
+    assert task.status == "started"
+    assert [event["type"] for event in task.events] == ["info", "reference_done"]
+    assert not task.cancel.is_set()
+    spawn.assert_called_once_with(
+        evaluation.run_task, services, RESUME_ID, None, None, saved
+    )
 
 
 @pytest.mark.parametrize("status", ["stopped", "error", "running"])
-def test_resume_accepts_every_unfinished_status(client, installed_models, status):
+def test_resume_accepts_every_unfinished_status(
+    client, installed_models, spawn, status
+):
     _save_partial(status)
 
-    with patch.object(app_module.threading, "Thread"):
-        response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
+    response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
 
     assert response.status_code == 202
 
@@ -1080,9 +1069,11 @@ def test_resume_a_complete_run_is_409(client, installed_models):
     assert response.get_json() == {"error": "The run is already complete."}
 
 
-def test_resume_is_refused_while_another_run_is_in_progress(client, installed_models):
+def test_resume_is_refused_while_another_run_is_in_progress(
+    client, registry, installed_models
+):
     _save_partial()
-    _live_task()
+    registry.add("live")
 
     response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
 
@@ -1090,21 +1081,26 @@ def test_resume_is_refused_while_another_run_is_in_progress(client, installed_mo
 
 
 def test_resume_rejects_unknown_and_unsafe_ids(client):
-    assert client.post("/api/evaluate/nope/resume").status_code == 404
+    missing = client.post("/api/evaluate/run_y_20260101_000000/resume")
+    not_a_run = client.post("/api/evaluate/nope/resume")
     unsafe = client.post("/api/evaluate/.hidden/resume")
+
+    assert missing.status_code == 404
+    assert missing.get_json() == {"error": "Results not found or not ready"}
+    assert not_a_run.status_code == 400
     assert unsafe.status_code == 400
     assert unsafe.get_json() == {"error": "Invalid task_id"}
 
 
-def test_resume_checks_that_the_models_are_still_installed(client):
+def test_resume_checks_that_the_models_are_still_installed(client, services, registry):
     _save_partial()
 
-    with patch.object(app_module.ollama_client, "get_models", return_value=["j"]):
+    with patch.object(services.ollama, "get_models", return_value=["j"]):
         response = client.post(f"/api/evaluate/{RESUME_ID}/resume")
 
     assert response.status_code == 400
     assert response.get_json() == {"error": "Models are not installed: m."}
-    assert RESUME_ID not in app_module.TASKS
+    assert registry.get(RESUME_ID) is None
 
 
 def test_resume_of_an_openai_judge_needs_the_saved_connection(client):
@@ -1120,7 +1116,7 @@ def test_resume_of_an_openai_judge_needs_the_saved_connection(client):
     }
 
 
-def test_history_marks_a_dead_run_as_stopped_and_hides_a_live_one(client):
+def test_history_marks_a_dead_run_as_stopped_and_hides_a_live_one(client, registry):
     dead = {**_run(), "status": "running", "progress": {"done": 2, "total": 9}}
     live = {**_run(), "status": "running"}
     _write_json(
@@ -1129,7 +1125,7 @@ def test_history_marks_a_dead_run_as_stopped_and_hides_a_live_one(client):
     _write_json(
         Path("data/history/run_b_20260102_000000/evaluation_results.json"), live
     )
-    _live_task("run_b_20260102_000000")
+    registry.add("run_b_20260102_000000")
 
     runs = client.get("/api/history").get_json()
 
@@ -1158,8 +1154,8 @@ def test_preview_shows_a_local_grading_call_with_placeholders(client):
     assert body["curl"].startswith("curl -X POST ")
 
 
-def test_preview_of_an_openai_judge_hides_the_key(client):
-    _save_connection()
+def test_preview_of_an_openai_judge_hides_the_key(client, services):
+    _save_connection(services)
     payload = _payload(judge="gpt-4.1-mini", judge_provider="openai")
 
     response = client.post("/api/preview", json=payload)
@@ -1194,14 +1190,14 @@ def test_preview_rejects_an_invalid_payload(client, body):
 @pytest.mark.parametrize(
     "task_id", ["weird", "run_", "run_a/../../x", "run_a\n", "../run_a_1_2"]
 )
-def test_run_dir_rejects_ids_that_are_not_run_ids(task_id):
-    assert app_module._run_dir(task_id) is None
+def test_run_path_rejects_ids_that_are_not_run_ids(services, task_id):
+    assert services.runs.path(task_id) is None
 
 
-def test_run_dir_stays_inside_the_history_directory():
-    folder = app_module._run_dir("run_a_20260101_000000")
+def test_run_path_stays_inside_the_history_directory(services):
+    folder = services.runs.path("run_a_20260101_000000")
 
-    assert folder.startswith(os.path.realpath(app_module.pipeline.history_dir) + os.sep)
+    assert folder.startswith(os.path.realpath(services.pipeline.history_dir) + os.sep)
 
 
 # --- delete and rename ------------------------------------------------------
@@ -1218,9 +1214,9 @@ def test_delete_removes_the_run_folder(client):
     assert client.get("/api/history").get_json() == []
 
 
-def test_delete_refuses_a_run_in_progress(client):
+def test_delete_refuses_a_run_in_progress(client, registry):
     task_id = _save_run()
-    app_module.TASKS[task_id] = {"status": "started", "events": []}
+    registry.add(task_id)
 
     response = client.delete(f"/api/results/{task_id}")
 
@@ -1289,46 +1285,50 @@ def test_rename_unknown_and_unsafe_ids(client):
 # --- task memory and stream wake-ups ----------------------------------------
 
 
-def _finished_task(finished_at, status="completed"):
-    return {"status": status, "events": [{"type": status}], "finished_at": finished_at}
+def _finished_task(registry, task_id, finished_at, status="completed"):
+    registry.add(
+        task_id, status=status, events=[{"type": status}], finished_at=finished_at
+    )
 
 
-def test_only_the_newest_finished_tasks_are_kept(monkeypatch):
-    monkeypatch.setattr(app_module, "MAX_FINISHED_TASKS", 2)
+def test_only_the_newest_finished_tasks_are_kept(registry, monkeypatch):
+    monkeypatch.setattr(registry, "max_finished", 2)
     for number in range(3):
-        app_module.TASKS[f"old{number}"] = _finished_task(number)
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+        _finished_task(registry, f"old{number}", number)
+    registry.add("t")
 
-    app_module.update_task_status("t", {"type": "completed", "message": "done"})
+    registry.publish("t", {"type": "completed", "message": "done"})
 
-    assert sorted(app_module.TASKS) == ["old2", "t"]
+    assert sorted(registry.ids()) == ["old2", "t"]
 
 
-def test_a_task_in_progress_is_never_evicted(client, monkeypatch):
-    monkeypatch.setattr(app_module, "MAX_FINISHED_TASKS", 0)
-    app_module.TASKS["live"] = {"status": "started", "events": []}
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_a_task_in_progress_is_never_evicted(client, registry, monkeypatch):
+    monkeypatch.setattr(registry, "max_finished", 0)
+    registry.add("live")
+    registry.add("t")
 
-    app_module.update_task_status("t", {"type": "error", "message": "boom"})
+    registry.publish("t", {"type": "error", "message": "boom"})
 
-    assert list(app_module.TASKS) == ["live"]
+    assert registry.ids() == ["live"]
     assert _parse_sse(client.get("/api/stream/t")) == [
         {"type": "error", "message": "Task not found"}
     ]
 
 
-def test_stream_waits_on_the_condition_and_does_not_poll(client, monkeypatch):
-    monkeypatch.setattr(app_module, "HEARTBEAT_SEC", 30)
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_stream_waits_on_the_condition_and_does_not_poll(
+    client, app, registry, monkeypatch
+):
+    app.config["HEARTBEAT_SEC"] = 30
+    registry.add("t")
 
     def no_polling(_seconds):
         raise AssertionError("the stream must not sleep")
 
-    monkeypatch.setattr(app_module.time, "sleep", no_polling)
+    monkeypatch.setattr(time, "sleep", no_polling)
 
     def finish():
         threading.Event().wait(0.2)
-        app_module.update_task_status("t", {"type": "completed", "message": "done"})
+        registry.publish("t", {"type": "completed", "message": "done"})
 
     worker = threading.Thread(target=finish)
     worker.start()
@@ -1361,8 +1361,10 @@ def _finished_events():
     ]
 
 
-def test_stream_events_have_ids_and_a_reconnect_continues_after_the_last_one(client):
-    app_module.TASKS["t"] = {"status": "completed", "events": _finished_events()}
+def test_stream_events_have_ids_and_a_reconnect_continues_after_the_last_one(
+    client, registry
+):
+    registry.add("t", status="completed", events=_finished_events())
 
     body = client.get("/api/stream/t").get_data(as_text=True)
     resumed = client.get("/api/stream/t", headers={"Last-Event-ID": "0"})
@@ -1372,26 +1374,28 @@ def test_stream_events_have_ids_and_a_reconnect_continues_after_the_last_one(cli
 
 
 @pytest.mark.parametrize("last", ["", "x", "-1", "99"])
-def test_stream_replays_everything_for_an_unusable_last_event_id(client, last):
-    app_module.TASKS["t"] = {"status": "completed", "events": _finished_events()}
+def test_stream_replays_everything_for_an_unusable_last_event_id(
+    client, registry, last
+):
+    registry.add("t", status="completed", events=_finished_events())
 
     response = client.get("/api/stream/t", headers={"Last-Event-ID": last})
 
     assert [event["message"] for event in _parse_sse(response)] == ["a", "b", "c"]
 
 
-def test_stream_skips_dropped_events_and_keeps_the_ids(client):
+def test_stream_skips_dropped_events_and_keeps_the_ids(client, registry):
     events = _finished_events()
     events[1] = None
-    app_module.TASKS["t"] = {"status": "completed", "events": events}
+    registry.add("t", status="completed", events=events)
 
     body = client.get("/api/stream/t").get_data(as_text=True)
 
     assert _ids(body) == ["id: 0", "id: 2"]
 
 
-def test_the_tokens_of_a_finished_answer_are_dropped_but_the_slots_stay():
-    app_module.TASKS["t"] = {"status": "started", "events": []}
+def test_the_tokens_of_a_finished_answer_are_dropped_but_the_slots_stay(registry):
+    registry.add("t")
 
     for event in (
         _answer_event("answer_start"),
@@ -1401,9 +1405,9 @@ def test_the_tokens_of_a_finished_answer_are_dropped_but_the_slots_stay():
         _answer_event("answer_token", "c", model="n"),
         _answer_event("answer_done"),
     ):
-        app_module.update_task_status("t", event)
+        registry.publish("t", event)
 
-    events = app_module.TASKS["t"]["events"]
+    events = registry.get("t").events
     assert [e and e["type"] for e in events] == [
         "answer_start",
         None,

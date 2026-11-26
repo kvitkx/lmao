@@ -70,6 +70,7 @@ Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as `v1.2.3-rc.1
     npm install --package-lock-only --ignore-scripts --no-audit --no-fund
   ```
 
+- Back end: `app.py` is only the entry point. The HTTP API is the `api/` package: `create_app()` builds the shared `Services` (`api/services.py`) and registers one blueprint per feature. Judge providers are classes in `api/providers.py`: a new one is a class and an entry in `JUDGE_KINDS`, not a new `if` in an endpoint. `core/` never imports `api/` (a test checks it).
 - Front end: TypeScript in `frontend/`, compiled to `static/js/`. `frontend/lib.ts` holds the pure helpers (no DOM, no Alpine); cover new ones in `tests/js/*.test.ts`. No `enum` or `namespace`: Node runs the tests by stripping types. `make typecheck-js` runs `tsc`.
 - Styles live in `static/css/input.css`. `static/css/app.css`, `static/vendor/`, `static/fonts/` and `static/js/` are generated and never committed.
 - The CSS build finds class names by scanning `templates/` and `frontend/`. A class composed from a variable (as `nav_toggle` does) is invisible to the scan: list it in the `@source inline(...)` line of `input.css`.
