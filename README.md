@@ -54,7 +54,7 @@ make prod GPU=1      # NVIDIA GPU
 make pull MODEL=MODEL_NAME
 ```
 
-Open **http://localhost:5001**. Stop with `make down ENV=prod`; `make help` lists every command.
+Open **http://localhost:2866**. Stop with `make down ENV=prod`; `make help` lists every command.
 
 Other ways to run:
 
