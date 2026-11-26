@@ -39,10 +39,10 @@ dev: models-volume ##> Start DEV with hot reload and css rebuild on port 5000.
 	$(CMD_DEV) up --build -d
 	@echo "App is running at http://localhost:5000"
 
-prod: models-volume ##> Start PROD locally on port 5001.
+prod: models-volume ##> Start PROD locally on port 2866.
 	@test -z "$$($(CMD_DEV) ps -q)" || { echo "dev is running: run 'make down' first (dev and prod share the models volume and the GPU)." >&2; exit 1; }
 	$(CMD_PROD) up --build -d
-	@echo "App is running at http://localhost:5001"
+	@echo "App is running at http://localhost:2866"
 
 run: static/css/app.css ##> Run on the host with uv (builds the css in Docker if needed).
 	uv run --locked flask --app app run

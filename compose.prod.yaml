@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
       target: production
     ports:
-      - "127.0.0.1:5001:5000"
+      - "127.0.0.1:2866:5000"
     environment:
       - FLASK_DEBUG=0
     volumes:
