@@ -44,8 +44,17 @@ Runs on branches other than `main` never touch these issues.
 
 Every push to `main` builds and verifies the image, but publishes only when
 `pyproject.toml` has an untagged version. Dependabot merges therefore do not
-publish. To ship a fix, run `make bump PART=patch` from a clean `main` and
-merge the bump pull request. The next daily scan closes the alert.
+publish.
+
+`auto-bump.yml` runs Mondays 12:00 UTC (and by hand from the Actions tab) and
+opens the patch release PR (`make bump PART=patch`) when every commit since
+the newest tag is `fix`, `ci`, `docs` or `chore(deps)` — nothing else. `feat`,
+a `!` suffix, `refactor`, `test`, `perf` and plain `chore` keep the release a
+human call. It skips with a logged reason (green run, no PR) when the last
+release run is red, a `maintenance` issue is open, a bump PR is already open,
+or nothing is unreleased. Merging the bump PR releases the version; the next
+daily scan closes the alert. Without `MAINTENANCE_TOKEN` the run goes red: a
+PR created with `GITHUB_TOKEN` would hang on its required checks.
 
 ## Settings outside git
 
@@ -54,14 +63,15 @@ merge the bump pull request. The next daily scan closes the alert.
 | Ruleset `Protect main` | squash only, linear history, dismiss stale reviews, resolve threads, 0 approvals; required checks: Check workflows, Check code, Check image |
 | Ruleset `Protect v* tags` | no deletion, update or force push |
 | Repository | `allow_auto_merge`, `delete_branch_on_merge` (`gh api -X PATCH repos/kvitkx/lmao -F allow_auto_merge=true -F delete_branch_on_merge=true`) |
-| Secret `MAINTENANCE_TOKEN` | fine-grained PAT, this repository: Contents and Pull requests read/write |
+| Secret `MAINTENANCE_TOKEN` | fine-grained PAT, this repository: Contents, Issues and Pull requests read/write |
 | Secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Docker Hub push account |
 | Variable `DOCKERHUB_REPOSITORY` | `namespace/name` of the Docker Hub image |
 | Label `maintenance` | created by the alert script if missing |
 
-- `MAINTENANCE_TOKEN` lets an auto-merge trigger `release.yml`. Merges made
-  with `GITHUB_TOKEN` start no workflows; without the secret, run the release
-  by hand after maintenance merges.
+- `MAINTENANCE_TOKEN` lets an auto-merge trigger `release.yml` and lets
+  `auto-bump.yml` open release PRs. Merges and pull requests made with
+  `GITHUB_TOKEN` start no workflows; without the secret, release by hand and
+  expect a red Auto bump run.
 - GitHub disables scheduled workflows after 60 days without repository
   activity (Dependabot merges do not count). Re-enable them in the Actions tab.
 - Forks: `make PUBLISHED_IMAGE=<image> scan-published`.
