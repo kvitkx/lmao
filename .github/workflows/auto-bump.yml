@@ -1,0 +1,54 @@
+name: Auto bump
+
+# Opens the patch release PR when main carries only commits that are safe to
+# release automatically: fix, ci, docs and chore(deps), nothing else. feat, a
+# `!` suffix and every other type keep the release a human decision. The
+# guards and the weekly schedule are documented in docs/MAINTENANCE.md.
+#
+# The PR is created with MAINTENANCE_TOKEN: created with GITHUB_TOKEN, the
+# pull request would never run its required checks (events from GITHUB_TOKEN
+# start no workflows). Without the secret the run goes red. Merging the PR
+# stays manual: it is the release button.
+
+on:
+  schedule:
+    # Mondays 12:00 UTC: after the runtime group PR (09:00) and its CI.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Open the release PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full clone so the commit classification sees all tags.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Docker
+        uses: ./.github/actions/setup-docker # zizmor: ignore[self-repository]
+
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ secrets.MAINTENANCE_TOKEN || github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: scripts/ci/auto-bump.sh
