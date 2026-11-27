@@ -2,7 +2,7 @@
 // question, sortable. The mean, median, pass rate and speed of a model live in
 // the models table of the overview. Pure: no DOM, no Alpine.
 
-import type { QuestionCard, ReportCell, ReportModel } from "./lib.ts";
+import type { QuestionCard, ReportCell, ReportModel } from "./report.ts";
 import type { Rank, SortDirection, TableRow } from "./overview.ts";
 
 export interface ScoreRow {

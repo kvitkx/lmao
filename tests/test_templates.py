@@ -14,6 +14,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 
+
+def _lmao_source():
+    """lmao.ts and every slice: the state of the page is spread over them."""
+    files = [
+        ROOT / "frontend" / "lmao.ts",
+        *sorted((ROOT / "frontend" / "slices").glob("*.ts")),
+    ]
+    return "\n".join(path.read_text(encoding="utf-8") for path in files)
+
+
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img",
     "input", "link", "meta", "source", "track", "wbr",
@@ -87,8 +97,8 @@ def test_index_html_builds_markdown_with_the_directive(client):
 def test_scripts_never_write_html():
     scripts = ROOT / "frontend"
 
-    assert list(scripts.glob("*.ts"))
-    for path in scripts.glob("*.ts"):
+    assert list(scripts.rglob("*.ts"))
+    for path in scripts.rglob("*.ts"):
         text = path.read_text(encoding="utf-8")
         for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML"):
             assert forbidden not in text, f"{path.name} uses {forbidden}"
@@ -216,7 +226,7 @@ def test_topbar_is_icon_only_with_a_progress_hairline(client):
 
 
 def test_topbar_status_has_no_step_count_but_the_tab_title_keeps_it():
-    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+    source = _lmao_source()
 
     status = source.split("get topStatus()")[1].split("get phaseProgress()")[0]
     title = source.split("get pageTitle()")[1].split("get faviconBars()")[0]
@@ -252,7 +262,7 @@ def test_setup_sections_have_a_fold_button_and_stay_in_the_page(client):
 
 
 def test_a_form_error_unfolds_its_section():
-    source = (ROOT / "frontend" / "lmao.ts").read_text(encoding="utf-8")
+    source = _lmao_source()
 
     validate = source.split("validate(): string {")[1].split("},")[0]
 

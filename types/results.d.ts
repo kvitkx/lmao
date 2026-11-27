@@ -1,5 +1,5 @@
 // Shape of evaluation_results.json (schema_version 4) and of /api/results/<id>.
-// Written by core/evaluator.py and core/scoring.py, read by frontend/lib.ts.
+// Written by core/evaluator.py and core/scoring.py, read by frontend/report.ts.
 // Keep it in step with SCHEMA_VERSION in core/evaluator.py.
 
 export type Category =

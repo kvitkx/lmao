@@ -9,18 +9,18 @@ import type {
     Question,
     Thresholds,
 } from "../types/results.js";
+import { domId } from "./names.ts";
 import {
     CATEGORY_LABELS,
     CATEGORY_ORDER,
-    domId,
     median,
     niceStep,
     numeric,
     quantile,
     questionLabel,
     round1,
-    totalSteps,
-} from "./lib.ts";
+} from "./report.ts";
+import { totalSteps } from "./run.ts";
 import type { Rank } from "./overview.ts";
 
 const GB = 1e9;
