@@ -49,7 +49,7 @@ Workflows contain no check logic: they only call `make report-TARGET`, and the t
 
 ## Versions and releases
 
-Only change the version with `make bump PART=patch|minor|major`. Run it from a clean `main` that matches `origin/main`. It commits `pyproject.toml` and `uv.lock` on a `chore/bump-X.Y.Z` branch and opens the release PR (label `release`); merging that PR releases the version, so never mix it with other changes. Dependabot merges do not create releases. `auto-bump.yml` opens that PR automatically, Mondays 12:00 UTC, when every commit since the newest tag is `fix`, `ci`, `docs` or `chore(deps)`; anything else keeps the release manual (see docs/MAINTENANCE.md).
+Only change the version with `make bump PART=patch|minor|major`. Run it from a clean `main` that matches `origin/main`. It commits `pyproject.toml` and `uv.lock` on a `chore/bump-X.Y.Z` branch and opens the release PR (label `release`); merging that PR releases the version, so never mix it with other changes. Dependabot merges do not create releases. `auto-bump.yml` opens that PR automatically, Mondays 12:00 UTC, when every commit since the newest tag is `fix`, `ci`, `docs`, `chore(deps)` or `chore(ci)`; anything else keeps the release manual (see docs/MAINTENANCE.md).
 
 Prereleases: `make bump PART="patch rc"` (`1.2.3rc1` is released as `v1.2.3-rc.1`); `make bump PART=stable` makes the final version. `make release-plan` shows the tag the current version would release.
 

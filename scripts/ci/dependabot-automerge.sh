@@ -80,7 +80,7 @@ worst_level() {
     local i
     while IFS= read -r line; do
         [[ "$line" == *" from "* ]] || continue
-        pair="$(sed -nE 's/.* from ([^ "]+) to ([^ "]+).*/\1 \2/p' <<<"$line")"
+        pair="$(sed -nE 's/`//g; s/.* from ([^ "]+) to ([^ "]+).*/\1 \2/p' <<<"$line")"
         from="${pair%% *}"
         to="${pair##* }"
         # Dependabot sentences end in a period: 'from 0.14.0 to 0.15.0.'
@@ -105,6 +105,11 @@ worst_level() {
     done <<<"$1"
     printf '%s\n' "patch minor major manual" | cut -d' ' -f$((rank + 1))
 }
+
+# Sourced by tests/test_ci_scripts.py: only the functions above are used.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 # The Dependabot markdown lists every update of the group, so the commit
 # messages decide for one grouped pull request as well as for a single one.
