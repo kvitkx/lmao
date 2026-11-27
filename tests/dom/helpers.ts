@@ -4,7 +4,7 @@
 import { expect as baseExpect, test as base } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
-import type { HistoryRun } from "../../frontend/lib.ts";
+import type { HistoryRun } from "../../frontend/report.ts";
 import type {
     ApiResults,
     Entry,

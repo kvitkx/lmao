@@ -2,7 +2,7 @@
 
 The interface of a local engineering tool: strict, utilitarian, pure black. Structure comes from hairlines, not fills. Colour carries state and nothing else. Every screen is a dense, left-aligned column of text, numbers and small square markers.
 
-Stack: Flask templates, Tailwind CSS v4 and Alpine.js, with the front end in TypeScript. Everything is built ahead of time in Docker and nothing loads from another host. This document describes the interface as it is built; the sources of truth are `frontend/lmao.ts` (state, stream, requests), `frontend/lib.ts` and the other pure modules in `frontend/` (tested with `node --test`), and `templates/`.
+Stack: Flask templates, Tailwind CSS v4 and Alpine.js, with the front end in TypeScript. Everything is built ahead of time in Docker and nothing loads from another host. This document describes the interface as it is built; the sources of truth are `frontend/slices/` (the state of the page, one slice per concern, joined by `frontend/lmao.ts`) and the pure modules in `frontend/` (`names`, `run`, `markdown`, `report`, `cases`, `remote` and others, tested with `node --test`), and `templates/`.
 
 ## 1. Principles
 

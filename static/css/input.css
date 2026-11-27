@@ -2,7 +2,7 @@
    and by `make css`; app.css itself is not committed. */
 @import "tailwindcss" source(none);
 
-/* Class names are read from the templates and (frontend/lib.ts). */
+/* Class names are read from the templates and (frontend/). */
 @source "../../templates";
 @source "../../frontend";
 

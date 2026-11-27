@@ -1,5 +1,5 @@
 // What the overview tab shows besides the verdict (that one is built by
-// buildReport in lib.ts): the rank of every model, the sortable models table
+// buildReport in report.ts): the rank of every model, the sortable models table
 // and the speed against quality chart. Pure: no DOM, no Alpine.
 
 import type { ApiResults, ModelStats } from "../types/results.js";
@@ -10,16 +10,8 @@ import {
     type Details,
     type HardRow,
 } from "./details.ts";
-import {
-    buildChart,
-    domId,
-    numeric,
-    pad2,
-    shortName,
-    shortNames,
-    type Chart,
-    type ChartPoint,
-} from "./lib.ts";
+import { domId, pad2, shortName, shortNames } from "./names.ts";
+import { buildChart, numeric, type Chart, type ChartPoint } from "./report.ts";
 
 // recommended: filled badge; best: thick border (best score or fastest); plain: thin.
 export type BadgeKind = "recommended" | "best" | "plain";

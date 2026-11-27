@@ -2,7 +2,7 @@
 // can be stopped and resumed, the estimate of a remote judge shows. The API is
 // mocked (helpers.ts); the logic itself is tested in tests/js and tests/*.py.
 
-import type { Budget, Connection, Preview } from "../../frontend/lib.ts";
+import type { Budget, Connection, Preview } from "../../frontend/remote.ts";
 import {
     JUDGE,
     RUN_ID,

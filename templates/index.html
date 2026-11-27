@@ -394,7 +394,7 @@
                     <template x-for="(c, ci) in visibleCells(row)" :key="ci">
                         <div class="flex items-center justify-center h-40" role="img"
                              :title="c.title" :aria-label="c.title">
-                            {# every mark is a class, never x-show: see cellClass in lmao.ts #}
+                            {# every mark is a class, never x-show: see cellClass in slices/run.ts #}
                             <span class="relative block size-18" :class="cellClass(c.state)">
                                 <span class="absolute" :class="cellMark(c.state)"></span>
                             </span>
